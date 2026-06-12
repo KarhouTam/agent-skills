@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-06-11T00:00:00.000Z" agent="Claude Code" version="24.0.0">
+  <diagram name="Overview - 3 Strategies" id="overview">
+    <mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="PyTorch 测试重构工作流 — 总体概览" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=22;fontStyle=1;fontColor=#1a1a2e;" vertex="1" parent="1">
+          <mxGeometry x="350" y="20" width="700" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Original file -->
+        <mxCell id="original-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="480" y="80" width="440" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="original-text" value="原始测试文件 (e.g., test_ops.py)&lt;br&gt;&lt;font style=&quot;font-size:11px;color:#666;&quot;&gt;混杂了 CPU 逻辑测试、通用加速器测试、CUDA 专属测试&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="490" y="90" width="420" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow down -->
+        <mxCell id="arrow-down-1" value="" style="endArrow=classic;html=1;strokeWidth=3;strokeColor=#333;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="700" y="160" as="sourcePoint" />
+            <mxPoint x="700" y="210" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-label-1" value="RefactorFlow&lt;br&gt;状态机驱动" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#555;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="710" y="170" width="90" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- 3 result boxes -->
+        <mxCell id="s1-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="230" width="360" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="s1-title" value="🧪 TestFoo（策略1）&lt;br&gt;Accelerator-Unrelated" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=15;fontStyle=1;fontColor=#2e7d32;" vertex="1" parent="1">
+          <mxGeometry x="90" y="240" width="340" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="s1-desc" value="CPU only · 纯逻辑验证&lt;br&gt;&lt;font style=&quot;font-size:11px;&quot;&gt;@instantiate_parametrized_tests&lt;br&gt;或 plain TestCase&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#555;" vertex="1" parent="1">
+          <mxGeometry x="90" y="270" width="340" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s2-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="520" y="230" width="360" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="s2-title" value="⚡ TestFooDevice（策略2）&lt;br&gt;Accelerator-Agnostic" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=15;fontStyle=1;fontColor=#1a3a6e;" vertex="1" parent="1">
+          <mxGeometry x="530" y="240" width="340" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="s2-desc" value="跨加速器通用 · device 参数&lt;br&gt;&lt;font style=&quot;font-size:11px;&quot;&gt;instantiate_device_type_tests()&lt;br&gt;生成 CPU/CUDA/MPS/XPU 变体&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#555;" vertex="1" parent="1">
+          <mxGeometry x="530" y="270" width="340" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="960" y="230" width="360" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="s3-title" value="🔧 TestFooCUDA（策略3）&lt;br&gt;Accelerator-Specific" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=15;fontStyle=1;fontColor=#8b0000;" vertex="1" parent="1">
+          <mxGeometry x="970" y="240" width="340" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="s3-desc" value="特定加速器专属 · Cat C API&lt;br&gt;&lt;font style=&quot;font-size:11px;&quot;&gt;@instantiate_parametrized_tests&lt;br&gt;或 plain TestCase + setUp guard&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#555;" vertex="1" parent="1">
+          <mxGeometry x="970" y="270" width="340" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows from center to 3 boxes -->
+        <mxCell id="arr-s1" value="" style="endArrow=classic;html=1;strokeWidth=2;strokeColor=#82b366;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="560" y="210" as="sourcePoint" />
+            <mxPoint x="260" y="230" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="arr-s2" value="" style="endArrow=classic;html=1;strokeWidth=2;strokeColor=#6c8ebf;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="700" y="210" as="sourcePoint" />
+            <mxPoint x="700" y="230" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="arr-s3" value="" style="endArrow=classic;html=1;strokeWidth=2;strokeColor=#b85450;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="840" y="210" as="sourcePoint" />
+            <mxPoint x="1140" y="230" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Bottom: benefits -->
+        <mxCell id="benefit-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="200" y="420" width="1000" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="benefit-text" value="🎯 目标：所有加速器后端（CUDA / MPS / XPU / ROCm）都能重用完整的测试套件，每个测试只跑在它真正需要的设备上" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=14;fontStyle=1;fontColor=#4a3073;" vertex="1" parent="1">
+          <mxGeometry x="210" y="430" width="980" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Legend -->
+        <mxCell id="legend-box" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#ccc;" vertex="1" parent="1">
+          <mxGeometry x="80" y="540" width="600" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-title" value="图例" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="545" width="100" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-s1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="100" y="580" width="40" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-s1-t" value="策略1: 加速器无关 (CPU only)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="150" y="578" width="220" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-s2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="400" y="580" width="40" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-s2-t" value="策略2: 加速器通用" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="450" y="578" width="200" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-s3" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="100" y="615" width="40" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-s3-t" value="策略3: 加速器专属" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="150" y="613" width="220" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-orig" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="400" y="615" width="40" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="legend-orig-t" value="原始文件" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="450" y="613" width="200" height="25" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

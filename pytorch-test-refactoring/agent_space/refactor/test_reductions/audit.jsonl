@@ -1,0 +1,41 @@
+{"event": "run_start", "file_path": "test/test_reductions.py", "file_name": "test_reductions", "timestamp": "2026-06-12T04:13:55.831596+00:00", "run_id": "20260612-041355-e0dfe3"}
+{"event": "phase_start", "phase": "assess", "phase_number": 1, "timestamp": "2026-06-12T04:13:55.831879+00:00", "run_id": "20260612-041355-e0dfe3"}
+{"event": "error", "phase": "assess", "error_type": "FileNotFoundError", "error_message": "[Errno 2] No such file or directory: 'test/test_reductions.py'", "timestamp": "2026-06-12T04:13:55.832673+00:00", "run_id": "20260612-041355-e0dfe3"}
+{"event": "run_end", "final_phase": "assess", "total_duration_ms": 1, "timestamp": "2026-06-12T04:13:55.833244+00:00", "run_id": "20260612-041355-e0dfe3"}
+{"event": "run_start", "file_path": "/root/pytorch/test/test_reductions.py", "file_name": "test_reductions", "timestamp": "2026-06-12T07:39:07.560983+00:00", "run_id": "20260612-073907-15a96b"}
+{"event": "phase_start", "phase": "assess", "phase_number": 1, "timestamp": "2026-06-12T07:39:07.562108+00:00", "run_id": "20260612-073907-15a96b"}
+{"event": "phase_end", "phase": "assess", "status": "ok", "duration_ms": 9, "file_size": 3962, "coder_count": 2, "class_count": 2, "total_test_count": 157, "git_dirty": true, "timestamp": "2026-06-12T07:39:07.571630+00:00", "run_id": "20260612-073907-15a96b"}
+{"event": "phase_start", "phase": "analyze", "phase_number": 2, "timestamp": "2026-06-12T07:39:07.572393+00:00", "run_id": "20260612-073907-15a96b"}
+{"event": "signal", "phase": "analyze", "signal": "spawn_single", "pending_task_count": 1, "agents": ["analyst"], "timestamp": "2026-06-12T07:39:07.573307+00:00", "run_id": "20260612-073907-15a96b"}
+{"event": "agent_completed", "phase": "analyze", "agent_name": "analyst", "success": true, "summary": "3 findings, 2 classes classified", "timestamp": "2026-06-12T07:39:07.573835+00:00", "run_id": "20260612-073907-15a96b"}
+{"event": "phase_start", "phase": "distribute", "phase_number": 3, "timestamp": "2026-06-12T07:39:07.574186+00:00", "run_id": null}
+{"event": "phase_end", "phase": "distribute", "status": "ok", "duration_ms": 0, "coder_count": 1, "tasks_distributed": 1, "timestamp": "2026-06-12T07:39:07.574833+00:00", "run_id": null}
+{"event": "phase_start", "phase": "code", "phase_number": 4, "timestamp": "2026-06-12T07:39:07.575070+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["coder-1"], "timestamp": "2026-06-12T07:39:07.575692+00:00", "run_id": null}
+{"event": "agent_completed", "phase": "code", "agent_name": "coder-1", "success": true, "summary": "3 tests moved", "timestamp": "2026-06-12T07:39:07.576033+00:00", "run_id": null}
+{"event": "phase_start", "phase": "verify", "phase_number": 5, "timestamp": "2026-06-12T07:39:07.576482+00:00", "run_id": null}
+{"event": "phase_end", "phase": "verify", "status": "ok", "duration_ms": 142, "all_passed": true, "test_count_match": true, "checks": {"syntax": true, "test_count": true, "class_structure": true, "decorateinfo_alignment": true, "external_refs": true, "stale_patterns": true, "import_audit": true}, "timestamp": "2026-06-12T07:39:07.719093+00:00", "run_id": null}
+{"event": "phase_start", "phase": "review", "phase_number": 6, "timestamp": "2026-06-12T07:39:07.719397+00:00", "run_id": null}
+{"event": "signal", "phase": "review", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-06-12T07:39:07.720089+00:00", "run_id": null}
+{"event": "run_start", "file_path": "/root/pytorch/test/test_reductions.py", "file_name": "test_reductions", "timestamp": "2026-06-12T08:04:05.259169+00:00", "run_id": "20260612-080405-fee3a8"}
+{"event": "phase_start", "phase": "assess", "phase_number": 1, "timestamp": "2026-06-12T08:04:05.261022+00:00", "run_id": "20260612-080405-fee3a8"}
+{"event": "phase_end", "phase": "assess", "status": "ok", "duration_ms": 7, "file_size": 3962, "coder_count": 2, "class_count": 2, "total_test_count": 157, "git_dirty": true, "timestamp": "2026-06-12T08:04:05.268618+00:00", "run_id": "20260612-080405-fee3a8"}
+{"event": "phase_start", "phase": "analyze", "phase_number": 2, "timestamp": "2026-06-12T08:04:05.268973+00:00", "run_id": "20260612-080405-fee3a8"}
+{"event": "signal", "phase": "analyze", "signal": "spawn_single", "pending_task_count": 1, "agents": ["analyst"], "timestamp": "2026-06-12T08:04:05.269663+00:00", "run_id": "20260612-080405-fee3a8"}
+{"event": "agent_completed", "phase": "analyze", "agent_name": "analyst", "success": true, "summary": "3 findings, 2 classes classified", "timestamp": "2026-06-12T08:04:05.270183+00:00", "run_id": "20260612-080405-fee3a8"}
+{"event": "phase_start", "phase": "distribute", "phase_number": 3, "timestamp": "2026-06-12T08:04:05.270521+00:00", "run_id": null}
+{"event": "phase_end", "phase": "distribute", "status": "ok", "duration_ms": 1, "coder_count": 3, "tasks_distributed": 3, "timestamp": "2026-06-12T08:04:05.271675+00:00", "run_id": null}
+{"event": "phase_start", "phase": "code", "phase_number": 4, "timestamp": "2026-06-12T08:04:05.271904+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["coder-1"], "timestamp": "2026-06-12T08:04:05.272530+00:00", "run_id": null}
+{"event": "agent_completed", "phase": "code", "agent_name": "coder-1", "success": true, "summary": "1 tests moved", "timestamp": "2026-06-12T08:04:05.272870+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-06-12T08:04:05.273486+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["coder-2"], "timestamp": "2026-06-12T08:04:05.274128+00:00", "run_id": null}
+{"event": "agent_completed", "phase": "code", "agent_name": "coder-2", "success": true, "summary": "1 tests moved", "timestamp": "2026-06-12T08:04:05.274423+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-06-12T08:04:05.275065+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["coder-3"], "timestamp": "2026-06-12T08:04:05.275652+00:00", "run_id": null}
+{"event": "agent_completed", "phase": "code", "agent_name": "coder-3", "success": true, "summary": "1 tests moved", "timestamp": "2026-06-12T08:04:05.275936+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-06-12T08:04:05.276569+00:00", "run_id": null}
+{"event": "phase_start", "phase": "verify", "phase_number": 5, "timestamp": "2026-06-12T08:04:05.277032+00:00", "run_id": null}
+{"event": "phase_end", "phase": "verify", "status": "ok", "duration_ms": 136, "all_passed": true, "test_count_match": true, "checks": {"syntax": true, "test_count": true, "class_structure": true, "decorateinfo_alignment": true, "external_refs": true, "stale_patterns": true, "import_audit": true}, "timestamp": "2026-06-12T08:04:05.413779+00:00", "run_id": null}
+{"event": "phase_start", "phase": "review", "phase_number": 6, "timestamp": "2026-06-12T08:04:05.414048+00:00", "run_id": null}
+{"event": "signal", "phase": "review", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-06-12T08:04:05.414670+00:00", "run_id": null}

@@ -1,0 +1,50 @@
+{
+  "all_passed": true,
+  "checks": [
+    {
+      "name": "syntax",
+      "passed": true,
+      "details": "",
+      "command": "python -c \"import py_compile; py_compile.compile('/root/pytorch/test/test_reductions.py', doraise=True)\""
+    },
+    {
+      "name": "test_count",
+      "passed": true,
+      "details": "157 tests",
+      "command": "grep -c 'def test_' /root/pytorch/test/test_reductions.py"
+    },
+    {
+      "name": "class_structure",
+      "passed": true,
+      "details": "Classes: ['TestReductionsDevice', 'TestReductions']",
+      "command": "grep '^class ' /root/pytorch/test/test_reductions.py"
+    },
+    {
+      "name": "decorateinfo_alignment",
+      "passed": true,
+      "details": "common_methods_invocations.py not found, skipping",
+      "command": "grep -n '' torch/testing/_internal/common_methods_invocations.py | grep -i decorate || true"
+    },
+    {
+      "name": "external_refs",
+      "passed": true,
+      "details": "No class renames detected",
+      "command": ""
+    },
+    {
+      "name": "stale_patterns",
+      "passed": true,
+      "details": "Clean",
+      "command": "grep -nE 'onlyOn\\(|(?<!torch)\\.cuda\\(\\)|device\\s*=\\s*\"cuda\"' /root/pytorch/test/test_reductions.py"
+    },
+    {
+      "name": "import_audit",
+      "passed": true,
+      "details": "Clean",
+      "command": "grep -n 'TEST_CUDA\\|TEST_MPS\\|TEST_XPU\\|onlyOn\\|onlyCUDA' /root/pytorch/test/test_reductions.py"
+    }
+  ],
+  "original_test_count": 157,
+  "current_test_count": 157,
+  "test_count_match": true
+}

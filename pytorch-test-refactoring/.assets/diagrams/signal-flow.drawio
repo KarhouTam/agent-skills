@@ -1,0 +1,163 @@
+<mxfile host="65bd71144e">
+    <diagram name="Signal Flow" id="signal-flow">
+        <mxGraphModel dx="1528" dy="1112" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="900" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title" value="RefactorFlow — 状态机与信号机制" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=22;fontStyle=1;fontColor=#1a1a2e;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="10" width="600" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="sm-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#0d0d17;arcSize=8;" parent="1" vertex="1">
+                    <mxGeometry x="60" y="70" width="220" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="sm-text" value="⚙️ RefactorFlow 状态机" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=16;fontStyle=1;fontColor=#fff;" parent="1" vertex="1">
+                    <mxGeometry x="70" y="78" width="200" height="44" as="geometry"/>
+                </mxCell>
+                <mxCell id="cc-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#0d0d17;arcSize=8;" parent="1" vertex="1">
+                    <mxGeometry x="920" y="70" width="220" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="cc-text" value="🤖 Claude Code AI 运行时" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=16;fontStyle=1;fontColor=#fff;" parent="1" vertex="1">
+                    <mxGeometry x="930" y="78" width="200" height="44" as="geometry"/>
+                </mxCell>
+                <mxCell id="bidi-1" value="FlowSignal →" style="endArrow=classic;startArrow=classic;html=1;strokeWidth=3;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" parent="1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="280" y="90" as="sourcePoint"/>
+                        <mxPoint x="920" y="90" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="bidi-2" value="← feed_*_result()" style="endArrow=classic;startArrow=classic;html=1;strokeWidth=3;strokeColor=#82b366;fontSize=11;fontStyle=1;" parent="1" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="280" y="120" as="sourcePoint"/>
+                        <mxPoint x="920" y="120" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="signal-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999;arcSize=8;" parent="1" vertex="1">
+                    <mxGeometry x="60" y="180" width="1080" height="170" as="geometry"/>
+                </mxCell>
+                <mxCell id="signal-title" value="FlowSignal 信号类型" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#1a1a2e;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="188" width="250" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-done" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;arcSize=8;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="225" width="190" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-done-t" value="✅ DONE" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#2e7d32;" parent="1" vertex="1">
+                    <mxGeometry x="90" y="235" width="170" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-done-d" value="阶段完成 无需AI介入&lt;br&gt;Flow继续下一阶段" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontColor=#555;" parent="1" vertex="1">
+                    <mxGeometry x="90" y="265" width="170" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-single" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;arcSize=8;" parent="1" vertex="1">
+                    <mxGeometry x="290" y="225" width="190" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-single-t" value="👤 SPAWN_SINGLE" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#1a3a6e;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="235" width="170" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-single-d" value="生成1个Agent&lt;br&gt;Phase2:Analyst · Phase4:Coder(首规则)&lt;br&gt;Phase6:Checker · 调用 feed_*_result()" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontColor=#555;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="265" width="170" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-parallel" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;arcSize=8;" parent="1" vertex="1">
+                    <mxGeometry x="500" y="225" width="190" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-parallel-t" value="📨 SEND_MESSAGE" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#1a3a6e;" parent="1" vertex="1">
+                    <mxGeometry x="510" y="235" width="170" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-parallel-d" value="向现有Agent发送后续指令&lt;br&gt;Phase4: 后续规则/修复&lt;br&gt;调用 SendMessage()" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontColor=#555;" parent="1" vertex="1">
+                    <mxGeometry x="510" y="265" width="170" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-relay" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;arcSize=8;" parent="1" vertex="1">
+                    <mxGeometry x="710" y="225" width="190" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-relay-t" value="🔄 RELAY_FINDINGS" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#8b0000;" parent="1" vertex="1">
+                    <mxGeometry x="720" y="235" width="170" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-relay-d" value="发现需修复的问题&lt;br&gt;通知Coders修复&lt;br&gt;最多重试3次" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontColor=#555;" parent="1" vertex="1">
+                    <mxGeometry x="720" y="265" width="170" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-wait" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;arcSize=8;" parent="1" vertex="1">
+                    <mxGeometry x="920" y="225" width="190" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-wait-t" value="⏳ WAITING" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#7a6200;" parent="1" vertex="1">
+                    <mxGeometry x="930" y="235" width="170" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="sig-wait-d" value="等待外部输入&lt;br&gt;等待用户/Agent完成后继续" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontColor=#555;" parent="1" vertex="1">
+                    <mxGeometry x="930" y="265" width="170" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="code-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#0d0d17;arcSize=8;" parent="1" vertex="1">
+                    <mxGeometry x="60" y="390" width="1080" height="260" as="geometry"/>
+                </mxCell>
+                <mxCell id="code-title2" value="Python — 信号循环模式" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#fff;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="398" width="300" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="code-content2" value="&lt;font face=&quot;monospace&quot; style=&quot;font-size:12px&quot; color=&quot;#a5d6ff&quot;&gt;flow = RefactorFlow()&lt;br&gt;state = flow.run(&quot;test/test_ops.py&quot;)&lt;br&gt;&lt;br&gt;&lt;font color=&quot;#ff9&quot;&gt;while&lt;/font&gt; state.signal.value != &lt;font color=&quot;#9f9&quot;&gt;&quot;done&quot;&lt;/font&gt;:&lt;br&gt;    &lt;font color=&quot;#ff9&quot;&gt;if&lt;/font&gt; state.signal == SPAWN_SINGLE:&lt;br&gt;        result = spawn_agent(...)&lt;br&gt;        flow.feed_analyst_result(result)&lt;br&gt;    &lt;font color=&quot;#ff9&quot;&gt;elif&lt;/font&gt; state.signal == SEND_MESSAGE:&lt;br&gt;        SendMessage(to=&quot;coder&quot;, msg=... )&lt;br&gt;        flow.feed_coder_result(&quot;coder&quot;, result)&lt;br&gt;    &lt;font color=&quot;#ff9&quot;&gt;elif&lt;/font&gt; state.signal == RELAY_FINDINGS:&lt;br&gt;        send_findings_to_coders(...)&lt;br&gt;        flow.feed_fix_complete()&lt;br&gt;    state = flow.run(state.file_path)&lt;br&gt;&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="425" width="1030" height="205" as="geometry"/>
+                </mxCell>
+                <mxCell id="table-box2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#ccc;arcSize=8;" parent="1" vertex="1">
+                    <mxGeometry x="60" y="680" width="1080" height="155" as="geometry"/>
+                </mxCell>
+                <mxCell id="table-title2" value="信号处理速查表" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#1a1a2e;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="688" width="200" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="h1" value="current_phase" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#0d0d17;fontSize=12;fontStyle=1;fontColor=#fff;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="720" width="140" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="h2" value="signal" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#0d0d17;fontSize=12;fontStyle=1;fontColor=#fff;" parent="1" vertex="1">
+                    <mxGeometry x="220" y="720" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="h3" value="生成Agent" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#0d0d17;fontSize=12;fontStyle=1;fontColor=#fff;" parent="1" vertex="1">
+                    <mxGeometry x="390" y="720" width="150" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="h4" value="调用方法" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#0d0d17;fontSize=12;fontStyle=1;fontColor=#fff;" parent="1" vertex="1">
+                    <mxGeometry x="540" y="720" width="270" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="h5" value="说明" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#0d0d17;fontSize=12;fontStyle=1;fontColor=#fff;" parent="1" vertex="1">
+                    <mxGeometry x="810" y="720" width="310" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="d1c1" value="&quot;analyze&quot;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="750" width="140" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d1c2" value="SPAWN_SINGLE" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#ccc;fontSize=11;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="220" y="750" width="170" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d1c3" value="1x Analyst" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="390" y="750" width="150" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d1c4" value="feed_analyst_result()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;fontFamily=monospace;" parent="1" vertex="1">
+                    <mxGeometry x="540" y="750" width="270" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d1c5" value="分类每个测试到三种策略" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="810" y="750" width="310" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d2c1" value="&quot;code&quot; (首规则)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="775" width="140" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d2c2" value="SPAWN_SINGLE" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#ccc;fontSize=11;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="220" y="775" width="170" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d2c3" value="1x Coder" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="390" y="775" width="150" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d2c4" value="feed_coder_result()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;fontFamily=monospace;" parent="1" vertex="1">
+                    <mxGeometry x="540" y="775" width="270" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d2c5" value="首规则:SPAWN 后续规则:SEND_MESSAGE" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="810" y="775" width="310" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d3c1" value="&quot;review&quot;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="800" width="140" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d3c2" value="SPAWN_SINGLE" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#ccc;fontSize=11;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="220" y="800" width="170" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d3c3" value="1x Checker" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="390" y="800" width="150" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d3c4" value="feed_review_findings()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;fontFamily=monospace;" parent="1" vertex="1">
+                    <mxGeometry x="540" y="800" width="270" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="d3c5" value="P4逐规则+P6全文件审查(共享)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff;strokeColor=#ccc;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="810" y="800" width="310" height="25" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
