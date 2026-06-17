@@ -80,6 +80,31 @@ class RefactorFlow:
         self.state = RefactorState()
         self.log: RefactorLogger | None = None
 
+    # ── Phase validation ──────────────────────────────────────────
+    #
+    # Every feed_* method validates that it is called in the correct
+    # phase and sub_phase.  This catches orchestrator bugs and prevents
+    # the LLM from accidentally skipping a step (e.g. calling
+    # feed_coder_result when a checker was expected).
+
+    @staticmethod
+    def _validate_phase(expected: str, actual: str, method: str) -> None:
+        if actual != expected:
+            raise RuntimeError(
+                f"{method} must be called in phase '{expected}', "
+                f"got '{actual}'"
+            )
+
+    @staticmethod
+    def _validate_sub_phase(
+        expected: str, actual: str, method: str
+    ) -> None:
+        if actual != expected:
+            raise RuntimeError(
+                f"{method} must be called in sub_phase '{expected}', "
+                f"got '{actual}'"
+            )
+
     def run(self, file_path: str, resume: bool = False) -> RefactorState:
         """Run the flow. Returns when AI spawning is needed; re-enter after.
 
@@ -116,7 +141,71 @@ class RefactorFlow:
             if self.state.signal == FlowSignal.DONE:
                 self.log.run_end(self.state.current_phase)
 
+        # Persist transient state-machine position for cross-process resume.
+        # Only needed when we're waiting for AI (not when the workflow is done).
+        if self.state.signal != FlowSignal.DONE:
+            self._save_flow_state()
+
         return self.state
+
+    # ── Flow state persistence (transient fields) ──────────────────
+
+    _FLOW_STATE_FILE = "flow_state.json"
+
+    def _save_flow_state(self) -> None:
+        """Persist transient state-machine fields so the orchestrator can
+        resume across process boundaries.
+
+        Saves: current_phase, rule_index, rule_sub_phase, rule_retry,
+        retry_count, and signal.
+        """
+        ws = self.state.workspace
+        if ws is None:
+            return
+        payload = {
+            "current_phase": self.state.current_phase,
+            "rule_index": self.state.rule_index,
+            "rule_sub_phase": self.state.rule_sub_phase,
+            "rule_retry": self.state.rule_retry,
+            "retry_count": self.state.retry_count,
+            "signal": self.state.signal.value,
+        }
+        try:
+            (ws / self._FLOW_STATE_FILE).write_text(
+                json.dumps(payload), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def _load_flow_state(self) -> None:
+        """Restore transient state-machine fields from disk.
+
+        Only restores fields that haven't been set yet (guard pattern —
+        won't overwrite state from the current session).
+        """
+        ws = self.state.workspace
+        if ws is None:
+            return
+        path = ws / self._FLOW_STATE_FILE
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            return
+        # Only restore if the field hasn't been set (guard pattern)
+        if self.state.current_phase == "assess":
+            self.state.current_phase = data.get("current_phase", "assess")
+        if self.state.rule_index == 0:
+            self.state.rule_index = data.get("rule_index", 0)
+        if self.state.rule_sub_phase == "code":
+            self.state.rule_sub_phase = data.get("rule_sub_phase", "code")
+        if self.state.rule_retry == 0:
+            self.state.rule_retry = data.get("rule_retry", 0)
+        if self.state.retry_count == 0:
+            self.state.retry_count = data.get("retry_count", 0)
+
+    # ── End flow state persistence ─────────────────────────────────
 
     def _load_existing_artifacts(self):
         """Load previously saved artifacts from workspace.
@@ -129,6 +218,9 @@ class RefactorFlow:
         ws = self.state.workspace
         if ws is None:
             return
+
+        # Transient state-machine position
+        self._load_flow_state()
 
         # Assessment
         if not self.state.line_ranges:
@@ -299,6 +391,8 @@ class RefactorFlow:
         Accepts None if the agent failed. On failure, attempts to load
         an existing analyst report from the workspace as a fallback.
         """
+        self._validate_phase("analyze", self.state.current_phase,
+                             "feed_analyst_result")
         if report is None:
             self.log.error(
                 "analyze", "AgentFailure", "Analyst agent returned no result"
@@ -347,6 +441,10 @@ class RefactorFlow:
 
     def feed_coder_result(self, coder_id: str, result: "CoderResult | None"):
         """Called after a coder completes one rule. Transitions to check sub-phase."""
+        self._validate_phase("code", self.state.current_phase,
+                             "feed_coder_result")
+        self._validate_sub_phase("code", self.state.rule_sub_phase,
+                                 "feed_coder_result")
         if result is None:
             self.log.error(
                 "code", "AgentFailure",
@@ -380,6 +478,10 @@ class RefactorFlow:
         If passed and done: transition to verify phase, signal DONE.
         If failed: enter fix sub-phase, signal SEND_MESSAGE for fix request.
         """
+        self._validate_phase("code", self.state.current_phase,
+                             "feed_rule_check_result")
+        self._validate_sub_phase("check", self.state.rule_sub_phase,
+                                 "feed_rule_check_result")
         if passed:
             self.state.rule_retry = 0
             self.state.rule_index += 1
@@ -410,6 +512,10 @@ class RefactorFlow:
 
     def feed_rule_fix_result(self, coder_id: str, result: "CoderResult | None"):
         """Called after coder fixes per-rule checker findings. Goes back to check."""
+        self._validate_phase("code", self.state.current_phase,
+                             "feed_rule_fix_result")
+        self._validate_sub_phase("fix", self.state.rule_sub_phase,
+                                 "feed_rule_fix_result")
         if result is None:
             result = CoderResult(coder_id=coder_id, success=False,
                                  errors=["No result returned"])
@@ -421,6 +527,8 @@ class RefactorFlow:
 
     def feed_review_findings(self, findings: ReviewFindings):
         """Called after the checker completes."""
+        self._validate_phase("review", self.state.current_phase,
+                             "feed_review_findings")
         self.state.review_findings = findings
         if self.log:
             self.log.agent_completed(
@@ -453,6 +561,8 @@ class RefactorFlow:
 
     def feed_fix_complete(self):
         """Called after coders finish fixing review issues."""
+        self._validate_phase("fix", self.state.current_phase,
+                             "feed_fix_complete")
         self.state.retry_count += 1
         self._phase_verify()
         v = self.state.verification

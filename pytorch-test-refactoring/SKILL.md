@@ -5,90 +5,117 @@ description: Orchestrate PyTorch test file refactoring to decouple tests from sp
 
 # PyTorch Test Refactoring
 
-7-phase workflow driven by `RefactorFlow`. Claude Code is the AI runtime — the Flow returns `FlowSignal` values that tell you when to spawn agents.
+7-phase workflow driven by `flow.py` state machine + `orchestrator.py` deterministic wrapper.
 
-## Setup
+## Usage (one command)
 
-```python
-import sys
-from pathlib import Path
-skill_dir = str(Path(__file__).parent)
-if skill_dir not in sys.path:
-    sys.path.insert(0, skill_dir)
-from flow import RefactorFlow
+```bash
+python orchestrator.py <test_file_path>
 ```
 
-## Workflow
+The orchestrator outputs a JSON task spec to stdout. Follow this loop:
 
-1. **Assess** — deterministic: file size, class layout, coder count, line ranges
-2. **Analyze** — `SPAWN_SINGLE`: spawn analyst agent to classify every test
-3. **Distribute** — deterministic: create one task per applicable refactoring rule (strategy_1, strategy_2, strategy_3, cleanup); a single coder applies them sequentially
-4. **Code** — per-rule loop with single coder: first rule spawns coder (`SPAWN_SINGLE`), subsequent rules sent via `SEND_MESSAGE`. After each rule: checker verifies → pass? next rule : fix → re-check.
-5. **Verify** — deterministic: 7 checks (syntax, test count, class structure, DecorateInfo, external refs, stale patterns, imports)
-6. **Review** — `SPAWN_SINGLE`: spawn checker agent (ALWAYS runs, mandatory quality gate)
-7. **Finalize** — deterministic: generate summary report
-
-## Usage Pattern
-
-```python
-flow = RefactorFlow()
-state = flow.run("test/test_ops.py")
-
-while state.signal.value != "done":
-    tasks = flow.get_pending_tasks()
-    if state.signal.value == "spawn_single":
-        # Spawn 1 agent, wait for result
-        result = ...  # agent output
-        if state.current_phase == "analyze":
-            flow.feed_analyst_result(result)
-        elif state.current_phase == "code":
-            if state.rule_sub_phase == "check":
-                # Checker completed per-rule verification — parse pass/fail
-                passed = _checker_passed(result)
-                flow.feed_rule_check_result(passed)
-            else:
-                # Coder completed applying a rule
-                flow.feed_coder_result("coder", result)
-        elif state.current_phase == "review":
-            flow.feed_review_findings(result)
-    elif state.signal.value == "send_message":
-        # Send follow-up to existing coder, wait for response
-        tasks = flow.get_pending_tasks()
-        for t in tasks:
-            SendMessage(to=t.context["send_message_to"], message=t.prompt)
-        # ... when coder responds ...
-        if state.rule_sub_phase == "fix":
-            flow.feed_rule_fix_result("coder", result)
-        else:
-            flow.feed_coder_result("coder", result)
-    elif state.signal.value == "relay_findings":
-        # Send review findings to coders for fixing
-        tasks = flow.get_pending_tasks()
-        for t in tasks:
-            SendMessage(to=t.context["send_message_to"], message=t.prompt)
-        # ... when coder responds with fixes ...
-        flow.feed_fix_complete()
-    state = flow.run(state.file_path)
+```
+┌─────────────────────────────────────────┐
+│ python orchestrator.py test/test_ops.py │
+└────────────┬────────────────────────────┘
+             │ JSON on stdout
+             ▼
+     ┌───────────────┐
+     │ Read JSON     │
+     │ status=?      │
+     └───┬───────┬───┘
+         │       │
+   "need_agent"  "done" → workflow complete ✓
+         │
+         ▼
+     ┌────────────────────────────────┐
+     │ For each task in tasks[]:      │
+     │  method=spawn → Agent tool     │
+     │  method=send_message →         │
+     │    SendMessage; if agent dead  │
+     │    → use fallback.spawn        │
+     └────────────┬───────────────────┘
+                  │ agent completes
+                  ▼
+     ┌────────────────────────────────┐
+     │ Read agent output              │
+     │ Extract result → JSON (below)  │
+     │ Pipe to on_complete.command    │
+     └────────────┬───────────────────┘
+                  │
+                  ▼
+          (loop back to top)
 ```
 
-`_checker_passed(result)` parses the checker agent's output: returns `True` if the checker reports no errors for the scoped rule, `False` otherwise.
+## Result JSON Formats
 
-## Flow Signals
+After each agent completes, extract the key result and pipe JSON to the `on_complete.command`.
 
-| Signal | Action |
-|--------|--------|
-| `SPAWN_SINGLE` | Spawn 1 agent; dispatch on `current_phase` AND `rule_sub_phase`: analyze → `feed_analyst_result()`; code+code → `feed_coder_result()`; code+check → `feed_rule_check_result(passed)`; review → `feed_review_findings()` |
-| `SEND_MESSAGE` | Send follow-up to existing coder agent via `SendMessage`; on response dispatch on `rule_sub_phase`: code → `feed_coder_result()`; fix → `feed_rule_fix_result()` |
-| `RELAY_FINDINGS` | Send findings to coders via `SendMessage` (fix tasks from `get_pending_tasks()`), wait for fixes, then `feed_fix_complete()` |
-| `DONE` | Continue to next phase |
+### Coder (`--feed coder`)
 
-## Key Rules (from agent/skills/refactor-test-decoupling)
+```json
+{
+  "success": true,
+  "tests_moved": ["test_foo:TestOld -> TestNewDevice"],
+  "errors": [],
+  "warnings": []
+}
+```
 
-- **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd`
-- **ENLARGE whitelist**: `@onlyCUDA` -> `@onlyAccelerator`, `@onlyOn` -> `@onlyAccelerator`
-- **Class naming**: `TestFoo` (S1), `TestFooDevice` (S2), `TestFooCUDA` (S3)
-- **Phase 6 is mandatory** — checker always reviews, even if verification passes
-- **External refs after rename**: When classes are renamed, check `common_methods_invocations.py`, `test/dynamo_skips/`, and `test/dynamo_expected_failures/` for stale references to old class names
+- `success`: did the coder apply the rule without errors?
+- `tests_moved`: list of "test_name: OldClass -> NewClass"
+- `errors`: any error messages (empty if success)
+- Parse the coder's output: look for "error"/"success" indicators, test movement summary
+
+### Checker — per-rule (`--feed checker` when phase=code)
+
+```json
+{
+  "passed": true
+}
+```
+
+- `passed`: did the checker report no issues for this specific rule?
+- Look for "PASS" / "no issues" vs "FAIL" / "issues found" in the checker output
+
+### Checker — full review (`--feed checker` when phase=review)
+
+```json
+{
+  "all_clear": false,
+  "findings": [
+    {
+      "severity": "major",
+      "category": "classification",
+      "description": "TestFoo still has @onlyCUDA",
+      "line_number": 42,
+      "coder_responsible": "coder"
+    }
+  ],
+  "summary": "Found 2 issues"
+}
+```
+
+- `all_clear`: true if no issues found
+- `findings`: list of issues (empty if all_clear)
+- Parse the structured report from the checker's output
+
+### Analyst (`--feed analyst`)
+
+The analyst writes `analyst_report.json` to the workspace automatically. The orchestrator loads it from disk. If the analyst fails, pass an empty object `{}` and the orchestrator will attempt fallback.
+
+## What You NEVER Need to Do
+
+The orchestrator handles all of this automatically:
+- ❌ Decide which phase comes next
+- ❌ Check `rule_sub_phase` to pick the right `feed_*` method
+- ❌ Know whether to spawn or send_message
+- ❌ Build agent prompts (they're in the task spec)
+- ❌ Decide whether a checker is per-rule or full-file
+- ❌ Loop through rules manually
+
+Your ONLY job: run the command → follow the JSON → extract result → pipe JSON back.
 
 ## Workspace
 
@@ -99,10 +126,48 @@ agent_space/refactor/{file_name}/
 ├── coder_tasks.json
 ├── verification.json
 ├── review_findings.json
-└── final_summary.md
+├── final_summary.md
+├── audit.jsonl
+└── status.json
 ```
+
+## Resuming After Interruption
+
+```bash
+python orchestrator.py test/test_ops.py --resume
+```
+
+The orchestrator loads all artifacts from the workspace and continues from where it left off.
+
+## Workflow Phases (reference)
+
+1. **Assess** — deterministic: file size, class layout, coder count, line ranges
+2. **Analyze** — AI agent (analyst): classify every test, identify stale imports, review skip decorators
+3. **Distribute** — deterministic: convert strategy assignments into per-rule coder tasks
+4. **Code + Check** — AI loop: coder applies one rule → checker verifies → next rule (single coder, per-rule iteration, max 3 fix retries)
+5. **Verify** — deterministic: 7 automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, import audit)
+6. **Final Review** — AI agent (checker): **mandatory** full-file quality review; findings → coder fix → re-verify (max 3 retries)
+7. **Finalize** — deterministic: generate `final_summary.md`
+
+## Key Rules (non-negotiable, from agent/skills/refactor-test-decoupling)
+
+- **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd`
+- **ENLARGE whitelist**: `@onlyCUDA` → `@onlyAccelerator`, `@onlyOn` → `@onlyAccelerator`
+- **Class naming**: `TestFoo` (S1), `TestFooDevice` (S2), `TestFooCUDA` (S3)
+- **Phase 6 is mandatory** — checker always reviews, even if verification passes
+- **External refs after rename**: When classes are renamed, check `common_methods_invocations.py`, `test/dynamo_skips/`, and `test/dynamo_expected_failures/` for stale references to old class names
+
+### Three strategies
+
+| Strategy | Class naming | Mechanism | When |
+|----------|-------------|-----------|------|
+| S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | No device dependency, pure CPU logic |
+| S2 | `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter with generic accelerator APIs |
+| S3 | `TestFooCUDA` | `@instantiate_parametrized_tests` or `TestCase` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
 
 ## Related
 
 - Methodology: `agent/skills/refactor-test-decoupling`
 - Review: `agent/skills/review-test-refactoring`
+- State machine: `flow.py`
+- Data models: `state.py`
