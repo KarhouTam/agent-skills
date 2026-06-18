@@ -91,18 +91,14 @@ class RefactorFlow:
     def _validate_phase(expected: str, actual: str, method: str) -> None:
         if actual != expected:
             raise RuntimeError(
-                f"{method} must be called in phase '{expected}', "
-                f"got '{actual}'"
+                f"{method} must be called in phase '{expected}', got '{actual}'"
             )
 
     @staticmethod
-    def _validate_sub_phase(
-        expected: str, actual: str, method: str
-    ) -> None:
+    def _validate_sub_phase(expected: str, actual: str, method: str) -> None:
         if actual != expected:
             raise RuntimeError(
-                f"{method} must be called in sub_phase '{expected}', "
-                f"got '{actual}'"
+                f"{method} must be called in sub_phase '{expected}', got '{actual}'"
             )
 
     def run(self, file_path: str, resume: bool = False) -> RefactorState:
@@ -169,6 +165,7 @@ class RefactorFlow:
             "rule_retry": self.state.rule_retry,
             "retry_count": self.state.retry_count,
             "signal": self.state.signal.value,
+            "agent_ids": self.state.agent_ids,
         }
         try:
             (ws / self._FLOW_STATE_FILE).write_text(
@@ -204,6 +201,8 @@ class RefactorFlow:
             self.state.rule_retry = data.get("rule_retry", 0)
         if self.state.retry_count == 0:
             self.state.retry_count = data.get("retry_count", 0)
+        if not self.state.agent_ids:
+            self.state.agent_ids = data.get("agent_ids", {})
 
     # ── End flow state persistence ─────────────────────────────────
 
@@ -391,8 +390,7 @@ class RefactorFlow:
         Accepts None if the agent failed. On failure, attempts to load
         an existing analyst report from the workspace as a fallback.
         """
-        self._validate_phase("analyze", self.state.current_phase,
-                             "feed_analyst_result")
+        self._validate_phase("analyze", self.state.current_phase, "feed_analyst_result")
         if report is None:
             self.log.error(
                 "analyze", "AgentFailure", "Analyst agent returned no result"
@@ -441,17 +439,17 @@ class RefactorFlow:
 
     def feed_coder_result(self, coder_id: str, result: "CoderResult | None"):
         """Called after a coder completes one rule. Transitions to check sub-phase."""
-        self._validate_phase("code", self.state.current_phase,
-                             "feed_coder_result")
-        self._validate_sub_phase("code", self.state.rule_sub_phase,
-                                 "feed_coder_result")
+        self._validate_phase("code", self.state.current_phase, "feed_coder_result")
+        self._validate_sub_phase("code", self.state.rule_sub_phase, "feed_coder_result")
         if result is None:
             self.log.error(
-                "code", "AgentFailure",
+                "code",
+                "AgentFailure",
                 f"Coder {coder_id} returned no result",
             )
-            result = CoderResult(coder_id=coder_id, success=False,
-                                 errors=["No result returned"])
+            result = CoderResult(
+                coder_id=coder_id, success=False, errors=["No result returned"]
+            )
 
         if self.state.coder_results is None:
             self.state.coder_results = {}
@@ -478,10 +476,10 @@ class RefactorFlow:
         If passed and done: transition to verify phase, signal DONE.
         If failed: enter fix sub-phase, signal SEND_MESSAGE for fix request.
         """
-        self._validate_phase("code", self.state.current_phase,
-                             "feed_rule_check_result")
-        self._validate_sub_phase("check", self.state.rule_sub_phase,
-                                 "feed_rule_check_result")
+        self._validate_phase("code", self.state.current_phase, "feed_rule_check_result")
+        self._validate_sub_phase(
+            "check", self.state.rule_sub_phase, "feed_rule_check_result"
+        )
         if passed:
             self.state.rule_retry = 0
             self.state.rule_index += 1
@@ -496,7 +494,8 @@ class RefactorFlow:
             self.state.rule_retry += 1
             if self.state.rule_retry > self.MAX_RETRIES:
                 self.log.error(
-                    "code", "MaxRetries",
+                    "code",
+                    "MaxRetries",
                     f"Rule {self.state.rule_index} failed after "
                     f"{self.MAX_RETRIES} fix attempts; continuing",
                 )
@@ -512,13 +511,14 @@ class RefactorFlow:
 
     def feed_rule_fix_result(self, coder_id: str, result: "CoderResult | None"):
         """Called after coder fixes per-rule checker findings. Goes back to check."""
-        self._validate_phase("code", self.state.current_phase,
-                             "feed_rule_fix_result")
-        self._validate_sub_phase("fix", self.state.rule_sub_phase,
-                                 "feed_rule_fix_result")
+        self._validate_phase("code", self.state.current_phase, "feed_rule_fix_result")
+        self._validate_sub_phase(
+            "fix", self.state.rule_sub_phase, "feed_rule_fix_result"
+        )
         if result is None:
-            result = CoderResult(coder_id=coder_id, success=False,
-                                 errors=["No result returned"])
+            result = CoderResult(
+                coder_id=coder_id, success=False, errors=["No result returned"]
+            )
         if self.state.coder_results is None:
             self.state.coder_results = {}
         self.state.coder_results[coder_id] = result
@@ -527,8 +527,7 @@ class RefactorFlow:
 
     def feed_review_findings(self, findings: ReviewFindings):
         """Called after the checker completes."""
-        self._validate_phase("review", self.state.current_phase,
-                             "feed_review_findings")
+        self._validate_phase("review", self.state.current_phase, "feed_review_findings")
         self.state.review_findings = findings
         if self.log:
             self.log.agent_completed(
@@ -559,10 +558,22 @@ class RefactorFlow:
             self.state.current_phase = "fix"
             self.state.signal = FlowSignal.RELAY_FINDINGS
 
+    def feed_agent_spawned(self, agent_name: str, agent_id: str):
+        """Register an agent ID after spawning.
+
+        Must be called BEFORE the corresponding feed_*_result method
+        so that subsequent SEND_MESSAGE signals can use the correct ID.
+
+        Idempotent: if the agent_name already has a registered ID, the
+        new ID overwrites it (handles re-spawn on fallback).
+        """
+        self.state.agent_ids[agent_name] = agent_id
+        # Persist immediately so cross-process resume has the ID
+        self._save_flow_state()
+
     def feed_fix_complete(self):
         """Called after coders finish fixing review issues."""
-        self._validate_phase("fix", self.state.current_phase,
-                             "feed_fix_complete")
+        self._validate_phase("fix", self.state.current_phase, "feed_fix_complete")
         self.state.retry_count += 1
         self._phase_verify()
         v = self.state.verification
@@ -622,8 +633,7 @@ class RefactorFlow:
         for i, rule_id in enumerate(rules):
             rule_desc = REFACTOR_RULES.get(rule_id, rule_id)
             rule_findings = [
-                f for f in report.findings
-                if _finding_matches_rule(f, rule_id)
+                f for f in report.findings if _finding_matches_rule(f, rule_id)
             ]
             if rule_findings:
                 instructions = "\n".join(
@@ -636,13 +646,15 @@ class RefactorFlow:
                     f"No specific findings for rule '{rule_id}'. "
                     f"Apply the rule across the entire file."
                 )
-            coder_tasks.append(CoderTask(
-                coder_id=f"coder-{i + 1}",
-                rule=rule_id,
-                rule_description=rule_desc,
-                action_items=rule_findings,
-                instructions=instructions,
-            ))
+            coder_tasks.append(
+                CoderTask(
+                    coder_id=f"coder-{i + 1}",
+                    rule=rule_id,
+                    rule_description=rule_desc,
+                    action_items=rule_findings,
+                    instructions=instructions,
+                )
+            )
 
         self.state.coder_tasks = coder_tasks
 
@@ -675,13 +687,10 @@ class RefactorFlow:
         self.state.current_phase = "verify"
         # Use assessment's count (deterministic) over analyst's (may undercount).
         # Fall back to analyst report only if assessment didn't run (resume edge case).
-        original_count = (
-            self.state.total_test_count
-            or (
-                self.state.analyst_report.original_test_count
-                if self.state.analyst_report
-                else 0
-            )
+        original_count = self.state.total_test_count or (
+            self.state.analyst_report.original_test_count
+            if self.state.analyst_report
+            else 0
         )
         original_classes = (
             list(self.state.analyst_report.class_mapping.keys())
@@ -695,7 +704,9 @@ class RefactorFlow:
 
     def _phase_review(self):
         self.state.current_phase = "review"
-        self.state.review_findings = None  # clear prior findings so guard re-opens on retry
+        self.state.review_findings = (
+            None  # clear prior findings so guard re-opens on retry
+        )
         self.state.signal = FlowSignal.SPAWN_SINGLE
 
     def _phase_finalize(self):
@@ -746,13 +757,16 @@ class RefactorFlow:
                     )
                 else:
                     # Subsequent rule: message existing coder
-                    return [self.adapter.build_send_message(
-                        to="coder",
-                        message_type="next_rule",
-                        rule=ct.rule,
-                        rule_description=ct.rule_description,
-                        instructions=ct.instructions,
-                    )]
+                    return [
+                        self.adapter.build_send_message(
+                            to="coder",
+                            agent_id=self.state.agent_ids.get("coder", ""),
+                            message_type="next_rule",
+                            rule=ct.rule,
+                            rule_description=ct.rule_description,
+                            instructions=ct.instructions,
+                        )
+                    ]
 
             elif self.state.rule_sub_phase == "check":
                 result = (self.state.coder_results or {}).get(ct.coder_id)
@@ -761,31 +775,36 @@ class RefactorFlow:
                     if result and result.success
                     else ("; ".join(result.errors[:3]) if result else "no result")
                 )
-                return [self.adapter.build_checker_task(
-                    file_path,
-                    workspace,
-                    _REF_DIR,
-                    self.state.analyst_report.original_test_count
-                    if self.state.analyst_report
-                    else 0,
-                    "",
-                    scope="rule",
-                    rule_context={
-                        "rule": ct.rule,
-                        "rule_description": ct.rule_description,
-                        "instructions": ct.instructions,
-                        "result_summary": result_summary,
-                    },
-                )]
+                return [
+                    self.adapter.build_checker_task(
+                        file_path,
+                        workspace,
+                        _REF_DIR,
+                        self.state.analyst_report.original_test_count
+                        if self.state.analyst_report
+                        else 0,
+                        "",
+                        scope="rule",
+                        rule_context={
+                            "rule": ct.rule,
+                            "rule_description": ct.rule_description,
+                            "instructions": ct.instructions,
+                            "result_summary": result_summary,
+                        },
+                    )
+                ]
 
             elif self.state.rule_sub_phase == "fix":
-                return [self.adapter.build_send_message(
-                    to="coder",
-                    message_type="fix",
-                    rule=ct.rule,
-                    rule_description=ct.rule_description,
-                    instructions=ct.instructions,
-                )]
+                return [
+                    self.adapter.build_send_message(
+                        to="coder",
+                        agent_id=self.state.agent_ids.get("coder", ""),
+                        message_type="fix",
+                        rule=ct.rule,
+                        rule_description=ct.rule_description,
+                        instructions=ct.instructions,
+                    )
+                ]
 
         elif self.state.current_phase == "review":
             verification_summary = ""
@@ -815,6 +834,7 @@ class RefactorFlow:
                     file_path,
                     workspace,
                     self.state.review_findings.findings,
+                    agent_ids=self.state.agent_ids,
                 )
             return []
 

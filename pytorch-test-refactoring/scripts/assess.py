@@ -69,9 +69,10 @@ def _extract_class_layout(file_path: Path) -> list[ClassInfo]:
         stripped = line.strip()
         if stripped.startswith("class ") and (
             "TestCase" in stripped
-            or stripped.split("class ")[1].split("(")[0].split(":")[0].startswith(
-                "Test"
-            )
+            or stripped.split("class ")[1]
+            .split("(")[0]
+            .split(":")[0]
+            .startswith("Test")
         ):
             if current_class is not None:
                 class_infos.append(

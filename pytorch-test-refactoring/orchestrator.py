@@ -176,6 +176,15 @@ def _dispatch_feed(
     state = flow.state
 
     try:
+        # ── register agent ID (if provided) ──────────────────
+        # The LLM includes agent_id in the result JSON after spawning.
+        # This must happen BEFORE the feed dispatch so that subsequent
+        # SEND_MESSAGE signals can target the correct agent ID.
+        agent_id = data.get("agent_id", "")
+        agent_name = data.get("agent_name", "")
+        if agent_id and agent_name:
+            flow.feed_agent_spawned(agent_name, agent_id)
+
         # ── analyst ──────────────────────────────────────────
         if feed_type == "analyst":
             report = _load_analyst_from_workspace(state) or _build_analyst_report(data)
@@ -320,10 +329,7 @@ def _emit_next_action(flow: RefactorFlow, state: RefactorState) -> None:
         # Advance again — rare, but can happen if a deterministic
         # phase completed and _run_phases didn't hit an AI phase
         state2 = flow.run(state.file_path)
-        if (
-            state2.current_phase == "finalize"
-            and state2.signal == FlowSignal.DONE
-        ):
+        if state2.current_phase == "finalize" and state2.signal == FlowSignal.DONE:
             _emit_done(state2)
         elif state2.signal in (
             FlowSignal.SPAWN_SINGLE,
@@ -389,7 +395,10 @@ def _emit_tasks(
                 "note": (
                     "1. Read the agent's output. "
                     "2. Extract key result into JSON (see formats below). "
-                    "3. Pipe the JSON to this command:  "
+                    "3. If you spawned a NEW agent (method=spawn), include "
+                    '"agent_id" (from the Agent tool result) and '
+                    '"agent_name" (from the task spec) in the JSON. '
+                    "4. Pipe the JSON to this command:  "
                     f"echo '{{...}}' | {cmd}"
                 ),
             },
@@ -420,7 +429,9 @@ def _write_json(obj: dict[str, Any]) -> None:
 # ── task spec builders ────────────────────────────────────────────
 
 
-def _task_to_spec(task: Any, signal: FlowSignal, state: RefactorState) -> dict[str, Any]:
+def _task_to_spec(
+    task: Any, signal: FlowSignal, state: RefactorState
+) -> dict[str, Any]:
     """Convert an AgentTask into a JSON spec the LLM can execute directly.
 
     The spec tells the LLM:
@@ -441,14 +452,27 @@ def _task_to_spec(task: Any, signal: FlowSignal, state: RefactorState) -> dict[s
     }
 
     if method == "send_message":
-        spec["send_to"] = task.context.get("send_message_to", task.agent_name)
-        # Fallback: if the agent has died, spawn a replacement
+        # Use the registered agent_id (e.g. "a3fa28753cd227df1") as the
+        # primary target for SendMessage.  Falls back to agent_name if no
+        # ID has been registered yet (triggers the fallback spawn below).
+        target_id = getattr(task, "agent_id", "") or task.context.get(
+            "send_message_to", task.agent_name
+        )
+        spec["send_to"] = target_id
+        # Fallback: if the agent has died (or no ID registered yet),
+        # spawn a replacement.  The LLM MUST include agent_id + agent_name
+        # in the result JSON so the orchestrator can register the new ID.
         spec["fallback"] = {
             "method": "spawn",
             "agent_name": task.agent_name,
             "agent_type": getattr(task, "agent_type", "general-purpose"),
             "run_in_background": True,
             "prompt": task.prompt,
+            "note": (
+                "If you use this fallback, include "
+                '"agent_id" and "agent_name" in the result JSON '
+                "so the orchestrator can register the new agent ID."
+            ),
         }
 
     return spec

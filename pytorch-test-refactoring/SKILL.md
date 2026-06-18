@@ -32,15 +32,21 @@ The orchestrator outputs a JSON task spec to stdout. Follow this loop:
      ┌────────────────────────────────┐
      │ For each task in tasks[]:      │
      │  method=spawn → Agent tool     │
+     │    → capture agent_id from     │
+     │      Agent tool result         │
      │  method=send_message →         │
-     │    SendMessage; if agent dead  │
+     │    SendMessage(to=send_to);    │
+     │    if agent dead/unreachable   │
      │    → use fallback.spawn        │
+     │      → capture new agent_id    │
      └────────────┬───────────────────┘
                   │ agent completes
                   ▼
      ┌────────────────────────────────┐
      │ Read agent output              │
      │ Extract result → JSON (below)  │
+     │ Include agent_id + agent_name  │
+     │   if agent was spawned/new     │
      │ Pipe to on_complete.command    │
      └────────────┬───────────────────┘
                   │
@@ -52,10 +58,16 @@ The orchestrator outputs a JSON task spec to stdout. Follow this loop:
 
 After each agent completes, extract the key result and pipe JSON to the `on_complete.command`.
 
+**All result JSON objects may include these optional fields:**
+- `agent_id`: The agent ID returned by the `Agent` tool when spawning. **Required after any spawn** — this is how the orchestrator learns the agent's ID for future `SendMessage` calls.
+- `agent_name`: The `agent_name` from the task spec (e.g. `"coder"`, `"checker"`, `"analyst"`). Include alongside `agent_id`.
+
 ### Coder (`--feed coder`)
 
 ```json
 {
+  "agent_id": "a3fa28753cd227df1",
+  "agent_name": "coder",
   "success": true,
   "tests_moved": ["test_foo:TestOld -> TestNewDevice"],
   "errors": [],
@@ -63,6 +75,7 @@ After each agent completes, extract the key result and pipe JSON to the `on_comp
 }
 ```
 
+- `agent_id` / `agent_name`: **Include after spawn** so the orchestrator can target this agent for future `SendMessage` calls
 - `success`: did the coder apply the rule without errors?
 - `tests_moved`: list of "test_name: OldClass -> NewClass"
 - `errors`: any error messages (empty if success)
@@ -83,6 +96,8 @@ After each agent completes, extract the key result and pipe JSON to the `on_comp
 
 ```json
 {
+  "agent_id": "b7c20184ae3921e0",
+  "agent_name": "checker",
   "all_clear": false,
   "findings": [
     {

@@ -157,3 +157,4 @@ class RefactorState(BaseModel):
     rule_sub_phase: str = "code"  # "code" | "check" | "fix"
     rule_retry: int = 0  # fix attempts for current rule
     signal: FlowSignal = FlowSignal.DONE
+    agent_ids: dict[str, str] = {}  # agent_name → agent_id for SendMessage resume

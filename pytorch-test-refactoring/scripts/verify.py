@@ -173,10 +173,10 @@ def _check_decorateinfo(
             matching_new = [c for c in current_classes if c.startswith(orig)]
             for new_cls in matching_new:
                 # Extract test method names from this class
-                cls_pattern = rf'class {new_cls}\b.*\n((?:.*\n)*?)(?=^class |\Z)'
+                cls_pattern = rf"class {new_cls}\b.*\n((?:.*\n)*?)(?=^class |\Z)"
                 cls_match = re.search(cls_pattern, file_content, re.MULTILINE)
                 if cls_match:
-                    methods = set(re.findall(r'def (test_\w+)', cls_match.group(1)))
+                    methods = set(re.findall(r"def (test_\w+)", cls_match.group(1)))
                     renamed_methods[orig] = methods
 
     cminv_content = cminv_path.read_text()
@@ -317,7 +317,7 @@ def _check_stale_patterns(file_path: str) -> VerificationCheck:
             continue
 
         # .cuda() that is NOT torch.cuda.* (e.g., tensor.cuda())
-        cuda_calls = re.findall(r'(?<!torch)\.cuda\(\)', stripped)
+        cuda_calls = re.findall(r"(?<!torch)\.cuda\(\)", stripped)
         if cuda_calls and not stripped.startswith("#"):
             key = ".cuda() call (should use device parameter)"
             stale_counts[key] = stale_counts.get(key, 0) + len(cuda_calls)
@@ -328,7 +328,10 @@ def _check_stale_patterns(file_path: str) -> VerificationCheck:
             stale_counts[key] = stale_counts.get(key, 0) + 1
 
         # Hardcoded device="cuda" in tensor constructors
-        if re.search(r'(?:randn?|zeros|ones|empty|full|tensor|arange)\([^)]*device\s*=\s*"cuda"', stripped):
+        if re.search(
+            r'(?:randn?|zeros|ones|empty|full|tensor|arange)\([^)]*device\s*=\s*"cuda"',
+            stripped,
+        ):
             key = 'device="cuda" in constructor (should use device variable)'
             stale_counts[key] = stale_counts.get(key, 0) + 1
 
@@ -357,26 +360,22 @@ def _mark_cuda_class_ranges(lines: list[str], cuda_ranges: set[int]) -> None:
         stripped = lines[i].strip()
         if stripped.startswith("class ") and (
             "TestCase" in stripped
-            or stripped.split("class ")[1].split("(")[0].split(":")[0].startswith(
-                "Test"
-            )
+            or stripped.split("class ")[1]
+            .split("(")[0]
+            .split(":")[0]
+            .startswith("Test")
         ):
             class_name = stripped.split("class ")[1].split("(")[0].split(":")[0]
             is_s3 = False
 
             # Check class name for S3 device suffix (TestFooCUDA, TestFooMPS, etc.)
-            if any(
-                class_name.endswith(d) for d in ("CUDA", "MPS", "XPU")
-            ):
+            if any(class_name.endswith(d) for d in ("CUDA", "MPS", "XPU")):
                 is_s3 = True
 
             # Check preceding line(s) for a class-level CUDA guard decorator
             j = i - 1
             while j >= 0 and lines[j].strip().startswith("@"):
-                if (
-                    "cuda.is_available()" in lines[j]
-                    or "torch.cuda" in lines[j]
-                ):
+                if "cuda.is_available()" in lines[j] or "torch.cuda" in lines[j]:
                     is_s3 = True
                     break
                 j -= 1
@@ -433,7 +432,7 @@ def _check_imports(file_path: str) -> VerificationCheck:
     findings = [imp for imp in _STALE_IMPORTS if imp in content]
 
     # Exempt onlyCUDA when actively used as a decorator (S3 classes)
-    if "onlyCUDA" in findings and re.search(r'@onlyCUDA\b', content):
+    if "onlyCUDA" in findings and re.search(r"@onlyCUDA\b", content):
         findings.remove("onlyCUDA")
 
     passed = len(findings) == 0

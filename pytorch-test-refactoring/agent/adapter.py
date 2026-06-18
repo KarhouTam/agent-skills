@@ -6,7 +6,14 @@ from pydantic import BaseModel
 
 
 class AgentTask(BaseModel):
-    """A task to be executed by a spawned agent."""
+    """A task to be executed by a spawned agent.
+
+    For SPAWN_SINGLE tasks, agent_id is empty initially and gets
+    populated after the agent is spawned (via feed_agent_spawned).
+
+    For SEND_MESSAGE tasks, agent_id holds the ID of the previously
+    spawned agent so the orchestrator can resume it via SendMessage.
+    """
 
     phase: str
     agent_name: str
@@ -14,6 +21,7 @@ class AgentTask(BaseModel):
     prompt: str
     run_in_background: bool = False
     context: dict = {}
+    agent_id: str = ""
 
 
 class BaseAdapter(ABC):
@@ -45,6 +53,7 @@ class BaseAdapter(ABC):
         rule: str = "",
         rule_description: str = "",
         instructions: str = "",
+        agent_id: str = "",
     ) -> "AgentTask": ...
 
     @abstractmethod
@@ -60,6 +69,10 @@ class BaseAdapter(ABC):
     ) -> AgentTask: ...
 
     def build_fix_tasks(
-        self, file_path: str, workspace: str, findings: list
+        self,
+        file_path: str,
+        workspace: str,
+        findings: list,
+        agent_ids: dict[str, str] | None = None,
     ) -> list[AgentTask]:
         return []

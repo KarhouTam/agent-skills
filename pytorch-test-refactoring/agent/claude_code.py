@@ -80,6 +80,7 @@ class ClaudeCodeAdapter(BaseAdapter):
         rule: str = "",
         rule_description: str = "",
         instructions: str = "",
+        agent_id: str = "",
     ) -> AgentTask:
         if message_type == "next_rule":
             msg = (
@@ -94,13 +95,16 @@ class ClaudeCodeAdapter(BaseAdapter):
                 f"Fix these issues:\n{instructions}\n\n"
                 f"Report your result when done."
             )
+        # Use agent_id for SendMessage target; fall back to name if not registered yet
+        target = agent_id or to
         return AgentTask(
             phase="code",
             agent_name=to,
             agent_type="general-purpose",
             prompt=msg,
             run_in_background=False,  # SendMessage, not a new spawn
-            context={"send_message_to": to, "message_type": message_type},
+            context={"send_message_to": target, "message_type": message_type},
+            agent_id=agent_id,
         )
 
     def build_checker_task(
@@ -149,16 +153,24 @@ class ClaudeCodeAdapter(BaseAdapter):
         )
 
     def build_fix_tasks(
-        self, file_path: str, workspace: str, findings: list
+        self,
+        file_path: str,
+        workspace: str,
+        findings: list,
+        agent_ids: dict[str, str] | None = None,
     ) -> list[AgentTask]:
         items_text = "\n".join(
             f"- [{f.severity}] {f.category}: {f.description} (line {f.line_number})"
             for f in findings
         )
-        return [self.build_send_message(
-            to="coder",
-            message_type="fix",
-            rule="review-fix",
-            rule_description="Fix final review findings",
-            instructions=items_text,
-        )]
+        coder_id = (agent_ids or {}).get("coder", "")
+        return [
+            self.build_send_message(
+                to="coder",
+                agent_id=coder_id,
+                message_type="fix",
+                rule="review-fix",
+                rule_description="Fix final review findings",
+                instructions=items_text,
+            )
+        ]
