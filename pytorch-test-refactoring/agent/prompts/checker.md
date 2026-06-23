@@ -32,8 +32,12 @@ Use the review checklist at `agent/skills/review-test-refactoring/SKILL.md`
 6. **Device-specific APIs** correctly classified (Category A/B vs C per {ref_dir}/classification_guide.md)
 7. **External reference alignment**: If test classes were renamed, stale references in these locations MUST be updated:
    - `torch/testing/_internal/common_methods_invocations.py` — DecorateInfo entries use exact `cls_name` matching; an old class name silently stops matching
-   - `test/dynamo_skips/` — filenames like `OldClassName.test_method` will not match the renamed class; skipped tests may start running
-   - `test/dynamo_expected_failures/` — filenames like `OldClassName.test_method` will not match the renamed class; expected failures become unguarded
+   - `test/dynamo_skips/` — **sentinel files (often 0 bytes)**. Search by FILENAME, not content. When a class is renamed from `TestFoo` to `TestFooDevice`, `instantiate_device_type_tests` renames device variants too: `TestFooCUDA` → `TestFooDeviceCUDA`. Files named after old variants must be renamed.
+   - `test/dynamo_expected_failures/` — **sentinel files (often 0 bytes)**. Same filename-based search required. Use:
+     ```bash
+     find test/dynamo_skips/ test/dynamo_expected_failures/ -name "OLD_CLASS*"
+     ```
+     **Do NOT use `grep -r`** — these files are empty sentinels with class names encoded in filenames, not in file contents.
 
 ## Verification Results
 

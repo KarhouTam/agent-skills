@@ -11,6 +11,7 @@ This repo is a **Claude Code skill** that orchestrates refactoring PyTorch test 
 ## Architecture
 
 ```
+orchestrator.py (CLI bridge — JSON task spec ↔ Agent/SendMessage tool calls)
 flow.py (RefactorFlow state machine — core orchestrator)
 ├── state.py              Pydantic models for all workflow data (signals, reports, tasks, results)
 ├── utils.py              Path constants, workspace helpers, refactoring rule definitions
@@ -75,9 +76,9 @@ The state machine stops on these signals and expects Claude Code to handle them:
 
 | Signal | When | Claude Code action |
 |--------|------|-------------------|
-| `SPAWN_SINGLE` | Need 1 AI agent | Spawn analyst/coder/checker via Agent tool, call `feed_*_result()` |
-| `SEND_MESSAGE` | Follow-up to existing agent | `SendMessage` to "coder", call `feed_coder_result()` |
-| `RELAY_FINDINGS` | Review found issues | Forward to coder, call `feed_fix_complete()` |
+| `SPAWN_SINGLE` | Need 1 new AI agent | Spawn analyst/coder/checker via Agent tool; **capture agent_id from result**; include `agent_id` + `agent_name` in the JSON piped to `--feed`; call `feed_*_result()` |
+| `SEND_MESSAGE` | Follow-up to existing agent | `SendMessage(to=agent_id)` to resume the stopped agent (uses registered agent ID, not name); if agent unreachable → fallback spawn + register new ID; call `feed_coder_result()` |
+| `RELAY_FINDINGS` | Review found issues | Forward findings to coder via `SendMessage(coder_agent_id)`; call `feed_fix_complete()` |
 | `DONE` | Phase complete | Call `flow.run()` to continue |
 
 ## Key rules (non-negotiable)
@@ -103,6 +104,7 @@ review_findings.json  # Phase 6 findings
 final_summary.md      # Phase 7 report
 audit.jsonl           # Append-only event log
 status.json           # Current state snapshot (for team coordination)
+flow_state.json       # Transient state-machine position (phase, rule_index, agent_ids, etc.)
 ```
 
 ## Usage pattern
@@ -121,14 +123,19 @@ state = flow.run("test/test_ops.py")
 while state.signal.value != "done":
     tasks = flow.get_pending_tasks()
     if state.signal.value == "spawn_single":
-        result = ...  # spawn agent, collect output
+        agent_id, result = ...  # spawn agent via Agent tool, capture agent_id
+        flow.feed_agent_spawned(task.agent_name, agent_id)  # register ID for future SendMessage
         if state.current_phase == "analyze":
             flow.feed_analyst_result(result)
         elif state.current_phase == "code":
             flow.feed_coder_result("coder", result)
         elif state.current_phase == "review":
             flow.feed_review_findings(result)
+    elif state.signal.value == "send_message":
+        result = ...  # SendMessage(to=task.agent_id), or fallback-spawn + capture new ID
+        flow.feed_coder_result("coder", result)
     elif state.signal.value == "relay_findings":
+        send_findings_via_SendMessage(coder_agent_id)
         flow.feed_fix_complete()
     state = flow.run(state.file_path)
 ```

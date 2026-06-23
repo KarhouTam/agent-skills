@@ -27,7 +27,7 @@
 > ![.assets/diagrams/overview.svg](.assets/diagrams/overview.svg)
 
 
-**工作流由 `RefactorFlow` 状态机驱动**，Claude Code 作为 AI 运行时——Flow 返回 `FlowSignal` 信号来指示何时需要生成 AI Agent。
+**工作流由 `RefactorFlow` 状态机驱动**，通过 `orchestrator.py` 作为 CLI 桥接层输出 JSON 任务规格，Claude Code 作为 AI 运行时——Flow 返回 `FlowSignal` 信号来指示何时需要生成 AI Agent 或向已有 Agent 发送后续指令。Agent ID 在首次生成时注册并被持久化，后续指令通过 `SendMessage(agent_id)` 自动恢复已终止的 Agent（保留完整上下文）。
 
 ---
 
@@ -36,6 +36,8 @@
 > ![.assets/diagrams/architecture.svg](.assets/diagrams/architecture.svg)
 
 ```
+orchestrator.py (CLI 桥接层 → JSON 任务规格 ↔ Agent / SendMessage 工具调用)
+    │
 RefactorFlow (状态机核心)
     │
     ├── Agent 适配层 (agent/)  → AI Prompts: analyst / coder / checker
@@ -51,7 +53,8 @@ RefactorFlow (状态机核心)
 | 层             | 文件         | 职责                                                                   |
 | -------------- | ------------ | ---------------------------------------------------------------------- |
 | **状态模型**   | `state.py`   | Pydantic 模型定义（`FlowSignal`、`AnalystReport`、`RefactorState` 等） |
-| **状态机**     | `flow.py`    | 7 阶段编排，信号生成，进度恢复                                         |
+| **CLI 桥接**   | `orchestrator.py` | 将 Flow 信号转换为 JSON 任务规格，Agent ID 注册与持久化，结果路由          |
+| **状态机**     | `flow.py`    | 7 阶段编排，信号生成，进度恢复，Agent ID 生命周期管理                    |
 | **Agent 适配** | `agent/`     | 为每个阶段生成 Agent 任务，包含专业 Prompt                             |
 | **确定性脚本** | `scripts/`   | 无需 AI 的阶段：评估、验证、报告生成                                   |
 | **参考知识**   | `reference/` | API 分类目录、分类指南、设备特性报告                                   |
@@ -121,15 +124,15 @@ Category C（设备专属） > Category B（通用概念） > Category A（有 a
 
 **输出**：`analyst_report.md` + `analyst_report.json`
 
-#### 📦 Phase 3：Distribute（分发 / 分片）
+#### 📦 Phase 3：Assign（派发）
 
 **类型**：确定性脚本，无需 AI
 
-**职责**：**分片（Sharding）**——将分析师的分策略分配转换为 coder 任务。分析师负责分类，分发阶段负责按规则创建任务。
+**职责**：**派发（Assigning）**——将分析师的分策略转换为 coder 子任务，分发阶段负责按规则创建任务。
 
 **做什么**：
-- 根据分析师报告中的策略分配决定适用的重构规则（1-4 条）
-- 每条规则创建一个 coder 任务——coder 逐个执行，每个规则完成后由 checker 验证
+- 根据分析师报告中的策略决定适用的重构规则
+- 每条规则创建一个 coder 任务——单一coder 逐个执行，每个规则完成后由 checker 验证
 - 将分析师 findings 按规则映射到对应 coder
 - 输出：`coder_tasks.json`
 
@@ -137,20 +140,19 @@ Category C（设备专属） > Category B（通用概念） > Category A（有 a
 
 **类型**：AI Agent（单个 coder，通过消息驱动）— 信号 `SPAWN_SINGLE` + `SEND_MESSAGE`
 
-**循环**：一个 coder 保持活跃，逐规则接收指令：
+**循环**：一个 coder agent 逐规则执行，agent_id 持久化用于跨消息恢复：
 
 ```
-SPAWN coder（规则 1）→ checker → pass
-SEND_MESSAGE "规则 2" → checker → pass
-SEND_MESSAGE "规则 3" → checker → fail
-SEND_MESSAGE "修复规则 3" → checker → pass
+SPAWN coder（规则 1，注册 agent_id）→ checker → pass
+SEND_MESSAGE(agent_id) "规则 2" → checker → pass
+SEND_MESSAGE(agent_id) "规则 3" → checker → fail
+SEND_MESSAGE(agent_id) "修复规则 3" → checker → pass
 → 全部完成
 ```
 
 **做什么**：
-- 第一条规则：生成 coder agent（名称为 "coder"）
-- 后续规则：通过 `SendMessage` 发送给同一个 coder，无需重新生成
-- Coder 在每条规则之间保持活跃，累积文件上下文
+- 第一条规则：生成 coder agent（名称为 "coder"），**捕获并持久化 agent_id**
+- 后续规则：通过 `SendMessage(to=agent_id)` 自动恢复已终止的 agent，保留完整对话历史
 - Checker 在每条规则后验证；同一 checker 处理逐规则和最终审查
 
 **输出**：每次响应的 `CoderResult`
@@ -181,7 +183,7 @@ SEND_MESSAGE "修复规则 3" → checker → pass
 - 阅读团队状态和审计日志
 - 对所有 coder 的工作进行全文件质量审查
 - 9 大审查重点（黑名单跳过保留、白名单扩大、分类正确性、命名规范等）
-- 如果发现问题 → `RELAY_FINDINGS` 信号 → 通知对应 coder 修复 → 重新验证（最多重试 3 次）
+- 如果发现问题 → `RELAY_FINDINGS` 信号 → 通过 `SendMessage(coder_agent_id)` 通知对应 coder 修复 → 重新验证（最多重试 3 次）
 
 > **与 Phase 4 的 checker 角色相同**——Phase 4 的逐规则检查和本阶段的最终审查使用同一个 checker agent，共享完整的参考上下文。
 
@@ -209,6 +211,7 @@ RefactorState
 ├── 文件信息：file_path, file_name, file_size
 ├── 分片信息：coder_count, line_ranges[], class_layout[]
 ├── 阶段产物：analyst_report / coder_tasks / coder_results / verification / review_findings / final_summary
+├── Agent 追踪：agent_ids{} (name → agent_id 映射，用于 SendMessage 恢复)
 ├── 控制状态：current_phase / retry_count (最多3次) / signal: FlowSignal
 └── 工作空间: workspace: Path
 ```
@@ -218,7 +221,7 @@ RefactorState
 | 信号             | 含义                     | Claude 的动作                                                  |
 | ---------------- | ------------------------ | -------------------------------------------------------------- |
 | `SPAWN_SINGLE`   | 需要生成 1 个 Agent      | 生成 Analyst / Coder（首规则）/ Checker，等待结果，调用 `feed_*_result()` |
-| `SEND_MESSAGE`   | 向现有 agent 发送后续指令 | `SendMessage(to="coder", message=...)`，coder 响应后调用 `feed_coder_result()` |
+| `SEND_MESSAGE`   | 向已终止 agent 发送后续指令 | `SendMessage(to=agent_id)` 自动恢复 agent（保留完整上下文），coder 响应后调用 `feed_coder_result()` |
 | `RELAY_FINDINGS` | 审查发现问题需要修复     | 将 findings 发送给 coder，修复后调用 `feed_fix_complete()` |
 | `DONE`           | 阶段完成，继续下一步     | 重新调用 `flow.run()` 进入下一阶段                             |
 | `WAITING`        | 等待外部输入             | 等待用户/Agent 完成                                            |
@@ -231,15 +234,19 @@ state = flow.run("test/test_ops.py")
 
 while state.signal.value != "done":
     if state.signal == SPAWN_SINGLE:
-        result = spawn_agent(...)      # 生成 1 个 agent
+        agent_id, result = spawn_agent(...)       # 生成 1 个 agent，捕获 agent_id
+        flow.feed_agent_spawned(name, agent_id)   # 注册 agent_id（用于后续恢复）
         if state.current_phase == "analyze":
             flow.feed_analyst_result(result)
         elif state.current_phase == "code":
-            flow.feed_coder_result("coder-1", result)
+            flow.feed_coder_result("coder", result)
         elif state.current_phase == "review":
             flow.feed_review_findings(result)
+    elif state.signal == SEND_MESSAGE:
+        result = SendMessage(to=agent_id, ...)    # 恢复已终止 agent
+        flow.feed_coder_result("coder", result)
     elif state.signal == RELAY_FINDINGS:
-        send_findings_to_coders(...)   # 转发给 coder 修复
+        SendMessage(to=coder_agent_id, ...)       # 转发给 coder 修复
         flow.feed_fix_complete()
 
     state = flow.run(state.file_path)  # 重新进入，从断点继续
@@ -336,17 +343,19 @@ for t in tasks:
 # 循环处理直到完成
 while state.signal.value != "done":
     if state.signal.value == "spawn_single":
-        # 生成 1 个 Agent...
-        result = agent_output  # 来自 Agent 的 AnalystReport
-        flow.feed_analyst_result(result)  # 或 feed_review_findings()
+        # 生成 1 个 Agent，捕获 agent_id
+        agent_id, result = agent_output
+        flow.feed_agent_spawned(task.agent_name, agent_id)
+        flow.feed_analyst_result(result)  # 或 feed_coder_result / feed_review_findings
 
-    elif state.signal.value == "spawn_parallel":
-        # 并行生成 N 个 Agent...
-        results = {...}  # {coder_id: CoderResult}
-        flow.feed_coder_results(results)
+    elif state.signal.value == "send_message":
+        # 向已有 agent 发送后续指令（agent_id 自动恢复）
+        result = SendMessage(to=task.agent_id, ...)
+        flow.feed_coder_result("coder", result)
 
     elif state.signal.value == "relay_findings":
         # 将审查发现转发给对应 coder 修复
+        SendMessage(to=coder_agent_id, ...)
         flow.feed_fix_complete()
 
     state = flow.run(state.file_path)
@@ -357,9 +366,9 @@ while state.signal.value != "done":
 | `state.signal`   | `state.current_phase` | 应执行          | 应调用                   |
 | ---------------- | --------------------- | --------------- | ------------------------ |
 | `SPAWN_SINGLE`   | `"analyze"`           | 生成 Analyst    | `feed_analyst_result()`  |
-| `SPAWN_SINGLE`   | `"code"` (首规则)     | 生成 Coder      | `feed_coder_result()`    |
-| `SEND_MESSAGE`   | `"code"` (后续规则)   | SendMessage     | `feed_coder_result()`    |
-| `SEND_MESSAGE`   | `"code"` (修复)       | SendMessage     | `feed_rule_fix_result()` |
+| `SPAWN_SINGLE`   | `"code"` (首规则)     | 生成 Coder + 注册 agent_id | `feed_coder_result()`    |
+| `SEND_MESSAGE`   | `"code"` (后续规则)   | SendMessage(agent_id) | `feed_coder_result()`    |
+| `SEND_MESSAGE`   | `"code"` (修复)       | SendMessage(agent_id) | `feed_rule_fix_result()` |
 | `SPAWN_SINGLE`   | `"review"`            | 生成 Checker    | `feed_review_findings()` |
 | `RELAY_FINDINGS` | `"fix"`               | 通知 Coder 修复 | `feed_fix_complete()`    |
 | `DONE`           | 任意                  | 无需            | 继续 `flow.run()`        |
@@ -380,7 +389,8 @@ agent_space/refactor/test_ops/
 ├── review_findings.json      # Phase 6：审查发现
 ├── final_summary.md          # Phase 7：最终总结
 ├── audit.jsonl               # 审计日志（每行一个事件）
-└── status.json               # 团队状态（实时可查询）
+├── status.json               # 团队状态（实时可查询）
+└── flow_state.json            # 状态机断点（phase, rule_index, agent_ids 等）
 ```
 
 **`status.json`** 和 **`audit.jsonl`** 用于团队协调——Checker 和 Team Lead 读取这些文件来了解进度和干预。
@@ -393,6 +403,7 @@ agent_space/refactor/test_ops/
 pytorch-test-refactoring/
 ├── README.md                    # 本文件
 ├── SKILL.md                     # Skill 入口定义
+├── orchestrator.py              # CLI 桥接层（JSON 任务规格 ⇄ Agent/SendMessage）
 ├── flow.py                      # RefactorFlow 状态机（核心）
 ├── state.py                     # Pydantic 状态模型
 ├── utils.py                     # 常量和工具函数
@@ -427,15 +438,16 @@ pytorch-test-refactoring/
 ### 依赖关系
 
 ```
+orchestrator.py → flow.py
 flow.py
-├── state.py          (数据模型)
+├── state.py          (数据模型，含 agent_ids)
 ├── utils.py          (工具函数)
 ├── scripts/assess.py (Phase 1)
 ├── scripts/verify.py (Phase 5)
 ├── scripts/report.py (Phase 7)
 ├── scripts/logger.py (日志)
 └── agent/
-    ├── adapter.py    (抽象基类)
+    ├── adapter.py    (抽象基类，含 AgentTask.mode)
     └── claude_code.py (Claude Code 适配器)
 ```
 

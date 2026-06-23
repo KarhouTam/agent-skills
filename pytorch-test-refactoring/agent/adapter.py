@@ -20,6 +20,7 @@ class AgentTask(BaseModel):
     agent_type: str = "general-purpose"
     prompt: str
     run_in_background: bool = False
+    mode: str = "default"  # Permission mode: "dontAsk" | "acceptEdits" | "bypassPermissions" | "default"
     context: dict = {}
     agent_id: str = ""
 

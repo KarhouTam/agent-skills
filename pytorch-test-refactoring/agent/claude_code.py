@@ -39,6 +39,7 @@ class ClaudeCodeAdapter(BaseAdapter):
             agent_type="general-purpose",
             prompt=prompt,
             run_in_background=True,
+            mode="acceptEdits",
         )
 
     def build_coder_tasks(
@@ -69,6 +70,7 @@ class ClaudeCodeAdapter(BaseAdapter):
                     agent_type="general-purpose",
                     prompt=prompt,
                     run_in_background=True,
+                    mode="acceptEdits",
                 )
             )
         return tasks
@@ -150,6 +152,7 @@ class ClaudeCodeAdapter(BaseAdapter):
             agent_type="general-purpose",
             prompt=prompt,
             run_in_background=True,
+            mode="acceptEdits",
         )
 
     def build_fix_tasks(

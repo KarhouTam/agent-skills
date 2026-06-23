@@ -253,7 +253,14 @@ def _check_external_refs(
         if not dir_path.exists() or not dir_path.is_dir():
             continue
         for orig in renamed_classes:
-            prefix = f"{orig}."
+            # Use prefix without trailing dot to catch device-variant
+            # filenames created by instantiate_device_type_tests.
+            # E.g. TestShapeOps renames to TestShapeOpsDevice, and
+            # file "TestShapeOpsCUDA.test_foo" must be renamed to
+            # "TestShapeOpsDeviceCUDA.test_foo". A prefix of
+            # "TestShapeOps." would miss it because the dot comes
+            # AFTER "CUDA", not after "TestShapeOps".
+            prefix = f"{orig}"
             matches = sorted(
                 f.name
                 for f in dir_path.iterdir()
@@ -263,8 +270,8 @@ def _check_external_refs(
                 stale.append(f"{label}/{m}")
 
     cmd = (
-        f"ls {DYNAMO_SKIPS_DIR}/{renamed_classes[0]}.* "
-        f"{DYNAMO_EXPECTED_FAILURES_DIR}/{renamed_classes[0]}.* 2>/dev/null || true"
+        f"find {DYNAMO_SKIPS_DIR} {DYNAMO_EXPECTED_FAILURES_DIR} "
+        f'-name "{renamed_classes[0]}*" 2>/dev/null || true'
         if renamed_classes
         else "true"
     )

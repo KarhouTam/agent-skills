@@ -174,9 +174,9 @@ stop matching, turning expected failures into unexpected failures.
 
 | File/Directory | Example Reference | How to Verify |
 |---------------|-------------------|---------------|
-| `test/dynamo_skips/` | `TestIndexing.test_invalid_sparse_coo_values_cpu` | `grep -r "OldClassName\b" test/dynamo_skips/` |
-| `test/dynamo_expected_failures/` | `TestIndexingCPU.test_byte_mask_cpu` | `grep -r "OldClassName\b" test/dynamo_expected_failures/` |
-| `test/inductor_expected_failures/` | `TestIndexing.test_foo` | `grep -r "OldClassName\b" test/inductor_expected_failures/` |
+| `test/dynamo_skips/` | `TestIndexing.test_invalid_sparse_coo_values_cpu` | `find test/dynamo_skips/ -name "OldClassName*"` **(by filename, NOT grep — these are sentinel files, often 0 bytes)** |
+| `test/dynamo_expected_failures/` | `TestIndexingCPU.test_byte_mask_cpu` | `find test/dynamo_expected_failures/ -name "OldClassName*"` **(by filename, NOT grep)** |
+| `test/inductor_expected_failures/` | `TestIndexing.test_foo` | `find test/inductor_expected_failures/ -name "OldClassName*"` **(by filename, NOT grep)** |
 | `torch/testing/_internal/common_methods_invocations.py` | `DecorateInfo(unittest.skip("..."), 'TestCommon', 'test_complex_half_reference_testing')` | Search for `'OldClassName'` string in `DecorateInfo(...)` constructor calls |
 | `.ci/pytorch/test_exclude_list.py` | Test name in skip list | `grep -r "OldClassName\b" .ci/pytorch/` |
 | `.ci/pytorch/*-trunk.yml` | Test name in CI config | `grep -r "OldClassName\b" .ci/` |

@@ -32,6 +32,7 @@ Protocol:
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -58,8 +59,6 @@ from utils import ANALYST_REPORT_JSON
 
 
 def _parse_args() -> argparse.Namespace:
-    import argparse
-
     parser = argparse.ArgumentParser(
         description="PyTorch Test Refactoring Orchestrator"
     )
@@ -93,7 +92,7 @@ def main() -> None:
 
     if args.feed:
         # ── feed path ──────────────────────────────────────────
-        # Step 1: Restore state and position the state machine at the
+        # Step 1: Restore  state and position the state machine at the
         #   correct phase.  flow.run() with resume=True loads artifacts
         #   from disk and runs _run_phases() to set current_phase,
         #   rule_sub_phase, etc.  It stops at the same AI-needed step
@@ -448,6 +447,7 @@ def _task_to_spec(
         "agent_name": task.agent_name,
         "agent_type": getattr(task, "agent_type", "general-purpose"),
         "run_in_background": getattr(task, "run_in_background", False),
+        "mode": getattr(task, "mode", "default"),
         "prompt": task.prompt,
     }
 
@@ -467,6 +467,7 @@ def _task_to_spec(
             "agent_name": task.agent_name,
             "agent_type": getattr(task, "agent_type", "general-purpose"),
             "run_in_background": True,
+            "mode": getattr(task, "mode", "default"),
             "prompt": task.prompt,
             "note": (
                 "If you use this fallback, include "

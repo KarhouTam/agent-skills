@@ -71,7 +71,12 @@ Apply each section below for every rule assigned to you above.
 ### If assigned cleanup:
 - Remove stale imports: `TEST_CUDA`, `TEST_MPS`, `TEST_XPU`, `onlyOn`, `onlyCUDA` (only if no Strategy 3 class remains)
 - Search `common_methods_invocations.py` for old class names and update to new names
-- Search `test/dynamo_skips/` and `test/dynamo_expected_failures/` for filenames starting with old class names and rename to match new class names
+- Search `test/dynamo_skips/` and `test/dynamo_expected_failures/` for filenames starting with old class names and rename to match new class names. **CRITICAL: these are sentinel files (often 0 bytes). You MUST search by FILENAME, not file contents.** Use:
+  ```bash
+  # Search by FILENAME (not grep — these are sentinel files!)
+  find test/dynamo_skips/ test/dynamo_expected_failures/ -name "OLD_CLASS_NAME*"
+  ```
+  Replace `OLD_CLASS_NAME` with each old class name. When a device-parametrized class is renamed (e.g. TestFoo → TestFooDevice), `instantiate_device_type_tests` creates variants like `TestFooCUDA` which becomes `TestFooDeviceCUDA`. Files named after the OLD variant (e.g. `TestFooCUDA.test_method`) must be renamed to the NEW variant (e.g. `TestFooDeviceCUDA.test_method`).
 - Verify naming conventions are correct across all classes
 
 ## After Changes

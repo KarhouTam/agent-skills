@@ -10,7 +10,7 @@ description: Orchestrate PyTorch test file refactoring to decouple tests from sp
 ## Usage (one command)
 
 ```bash
-python orchestrator.py <test_file_path>
+python /root/.claude/skills/pytorch-test-refactoring/orchestrator.py <test_file_path>
 ```
 
 The orchestrator outputs a JSON task spec to stdout. Follow this loop:
@@ -132,6 +132,8 @@ The orchestrator handles all of this automatically:
 
 Your ONLY job: run the command → follow the JSON → extract result → pipe JSON back.
 
+**Important: When you spawn a new agent (method=spawn),** capture the `agent_id` from the Agent tool result and include it (along with `agent_name`) in the result JSON you pipe back. This is how the orchestrator learns the agent's identity for future `SendMessage` calls. Without it, `SendMessage` will fail because it needs an agent ID, not a name.
+
 ## Workspace
 
 ```
@@ -143,7 +145,8 @@ agent_space/refactor/{file_name}/
 ├── review_findings.json
 ├── final_summary.md
 ├── audit.jsonl
-└── status.json
+├── status.json
+└── flow_state.json
 ```
 
 ## Resuming After Interruption
@@ -170,7 +173,7 @@ The orchestrator loads all artifacts from the workspace and continues from where
 - **ENLARGE whitelist**: `@onlyCUDA` → `@onlyAccelerator`, `@onlyOn` → `@onlyAccelerator`
 - **Class naming**: `TestFoo` (S1), `TestFooDevice` (S2), `TestFooCUDA` (S3)
 - **Phase 6 is mandatory** — checker always reviews, even if verification passes
-- **External refs after rename**: When classes are renamed, check `common_methods_invocations.py`, `test/dynamo_skips/`, and `test/dynamo_expected_failures/` for stale references to old class names
+- **External refs after rename**: When classes are renamed, update `common_methods_invocations.py` DecorateInfo entries, and rename stale entries in `test/dynamo_skips/` and `test/dynamo_expected_failures/`. **CRITICAL: dynamo skip/expected-failure files are sentinels (often 0 bytes). Search by FILENAME (`find -name`), NEVER by content (`grep`).** When a device-parametrized class is renamed (TestFoo → TestFooDevice), `instantiate_device_type_tests` renames device variants too (TestFooCUDA → TestFooDeviceCUDA). Files named after old variants must be renamed to match
 
 ### Three strategies
 

@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram name="7-Phase Workflow" id="workflow">
-        <mxGraphModel dx="1633" dy="1147" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+        <mxGraphModel dx="1601" dy="1147" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -49,10 +49,10 @@
                 <mxCell id="p3-num" value="Phase 3" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=10;fontColor=#666;" parent="1" vertex="1">
                     <mxGeometry x="803" y="85" width="200" height="18" as="geometry"/>
                 </mxCell>
-                <mxCell id="p3-title" value="📦 DISTRIBUTE&lt;br&gt;分发" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=16;fontStyle=1;fontColor=#2e7d32;" parent="1" vertex="1">
+                <mxCell id="p3-title" value="📦 ASSIGN&lt;br&gt;派发" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=16;fontStyle=1;fontColor=#2e7d32;" parent="1" vertex="1">
                     <mxGeometry x="808" y="102" width="190" height="35" as="geometry"/>
                 </mxCell>
-                <mxCell id="p3-desc" value="&lt;b&gt;确定性&lt;/b&gt; · 无需 AI&lt;br&gt;· 按重构规则分配&lt;br&gt;· 每规则一个 coder&lt;br&gt;· 按规则映射 findings&lt;br&gt;→ coder_tasks.json" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=10;fontColor=#333;" parent="1" vertex="1">
+                <mxCell id="p3-desc" value="&lt;b&gt;确定性&lt;/b&gt; · 无需 AI&lt;br&gt;· 按重构规则分配&lt;br&gt;· coder 每次遵从一个规则进行修复&lt;br&gt;· 按规则映射 findings&lt;br&gt;→ coder_tasks.json" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=10;fontColor=#333;" parent="1" vertex="1">
                     <mxGeometry x="815" y="140" width="180" height="62" as="geometry"/>
                 </mxCell>
                 <mxCell id="a3" value="" style="endArrow=classic;html=1;strokeWidth=2;strokeColor=#555;" parent="1" edge="1">
@@ -70,7 +70,7 @@
                 <mxCell id="p4-title" value="✏️ CODE+CHECK&lt;br&gt;编码+检查" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=16;fontStyle=1;fontColor=#1a3a6e;" parent="1" vertex="1">
                     <mxGeometry x="1043" y="102" width="190" height="35" as="geometry"/>
                 </mxCell>
-                <mxCell id="p4-desc" value="&lt;b&gt;AI × 1 + SendMessage&lt;/b&gt;&lt;br&gt;· 单 coder 逐规则执行&lt;br&gt;· 每规则后 checker 验证&lt;br&gt;· code→check→fix 循环&lt;br&gt;→ CoderResult × N" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=10;fontColor=#333;" parent="1" vertex="1">
+                <mxCell id="p4-desc" value="&lt;b&gt;AI × 1 + SendMessage(恢复)&lt;/b&gt;&lt;br&gt;· 单 coder 逐规则执行&lt;br&gt;· 每规则后 checker 验证&lt;br&gt;· code→check→fix 循环&lt;br&gt;→ CoderResult × N" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=10;fontColor=#333;" parent="1" vertex="1">
                     <mxGeometry x="1050" y="140" width="180" height="62" as="geometry"/>
                 </mxCell>
                 <mxCell id="a4" value="" style="endArrow=classic;html=1;strokeWidth=2;strokeColor=#555;entryX=1;entryY=0.5;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;" parent="1" target="p5-box" edge="1">
@@ -131,7 +131,7 @@
                 <mxCell id="loop-title" value="🔄 双重检查循环：逐规则 (P4) + 最终审查 (P6)，各最多 3 次重试" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#8b0000;" parent="1" vertex="1">
                     <mxGeometry x="210" y="498" width="1180" height="25" as="geometry"/>
                 </mxCell>
-                <mxCell id="loop-desc" value="P4 逐规则: Checker 发现问题 → SendMessage 通知 Coder 修复 → 重新 Check | P6 最终审查: 发现问题 → RELAY_FINDINGS → Coder 修复 → 重新 Verify → 重新 Review" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#333;" parent="1" vertex="1">
+                <mxCell id="loop-desc" value="P4 逐规则: Checker 发现问题 → SendMessage(agent_id) 恢复 Coder 修复 → 重新 Check&lt;div&gt;&amp;nbsp;P6 最终审查: 发现问题 → RELAY_FINDINGS → SendMessage(coder_id) → Coder 修复 → 重新 Verify → 重新 Review&lt;/div&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#333;" parent="1" vertex="1">
                     <mxGeometry x="210" y="525" width="1180" height="30" as="geometry"/>
                 </mxCell>
                 <mxCell id="loop-detail" value="超过 3 次重试仍未通过 → 记录错误并继续 Finalize（不阻塞流程）" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#888;fontStyle=2;" parent="1" vertex="1">
@@ -161,7 +161,7 @@
                 <mxCell id="leg-ai" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
                     <mxGeometry x="345" y="690" width="35" height="18" as="geometry"/>
                 </mxCell>
-                <mxCell id="leg-ai-t" value="AI Agent — Phase 2 (×1), Phase 4 (×1 + SendMessage), Phase 6 (×1)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;" parent="1" vertex="1">
+                <mxCell id="leg-ai-t" value="AI Agent — Phase 2 (×1), Phase 4 (×1 SPAWN + SendMessage 恢复), Phase 6 (×1)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="388" y="688" width="320" height="22" as="geometry"/>
                 </mxCell>
             </root>
