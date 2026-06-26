@@ -132,6 +132,68 @@ class ReviewFindings(BaseModel):
     summary: str = ""
 
 
+# ── CI Automation models (Phase 8) ──────────────────────────────────
+
+
+class CIBotHints(BaseModel):
+    """Best-effort parse of pytorch-bot PR comment."""
+
+    flaky_checks: list[str] = []  # checks the bot labeled flaky
+    unrelated_failures: list[str] = []  # checks labeled unrelated/not-caused-by-PR
+    trunk_broken: list[str] = []  # checks broken on trunk
+    raw_comment: str = ""  # the full comment text
+
+
+class CICheckRun(BaseModel):
+    """Single check run from GitHub Checks API."""
+
+    name: str
+    status: str  # queued | in_progress | completed
+    conclusion: str  # success | failure | neutral | cancelled | timed_out | skipped
+    html_url: str = ""
+    log_snippet: str = ""  # truncated log for failed checks
+
+
+class CIFailure(BaseModel):
+    """A classified CI failure."""
+
+    check_name: str
+    log_excerpt: str
+    bot_label: str = ""  # best-effort hint from bot
+    debugger_verdict: str = ""  # "caused_by_us" | "unrelated" | ""
+    debugger_rationale: str = ""
+    fix_applied: str = ""  # description of the fix, if any
+
+
+class CIDebuggerResult(BaseModel):
+    """Parsed output from the debugger agent."""
+
+    agent_id: str = ""
+    agent_name: str = "debugger"
+    fixes_applied: list[dict] = []
+    unrelated: list[dict] = []
+    summary: str = ""
+
+
+class CIState(BaseModel):
+    """State for the CI automation phase (Phase 8)."""
+
+    file_path: str = ""
+    workspace: Optional[Path] = None
+    pr_number: Optional[int] = None
+    pr_url: str = ""
+    pr_branch: str = ""
+    head_sha: str = ""
+    check_runs: list[CICheckRun] = []
+    bot_hints: Optional[CIBotHints] = None
+    ci_phase: str = "monitor"  # "monitor" | "debug" | "done"
+    failures: list[CIFailure] = []
+    fix_history: list[str] = []  # SHA history of fix commits
+    cron_job_id: Optional[str] = None
+    max_fix_rounds: int = 5
+    signal: FlowSignal = FlowSignal.DONE
+
+
 class RefactorState(BaseModel):
     """The complete state of a refactoring workflow."""
 
@@ -150,6 +212,7 @@ class RefactorState(BaseModel):
     verification: Optional[VerificationResult] = None
     review_findings: Optional[ReviewFindings] = None
     final_summary: Optional[str] = None
+    ci_state: Optional[CIState] = None
 
     current_phase: str = "assess"
     retry_count: int = 0

@@ -9,9 +9,11 @@
 - [概述](#概述)
 - [架构设计](#架构设计)
 - [核心概念：三大策略](#核心概念三大策略)
-- [七阶段工作流](#七阶段工作流)
+- [八阶段工作流](#八阶段工作流)
+    - [Phase 8：CI 监控](#phase-8ci-monitorci-监控)
 - [状态机与信号机制](#状态机与信号机制)
 - [关键规则](#关键规则)
+- [CI 监控](#ci-监控)
 - [使用方式](#使用方式)
 - [工作空间](#工作空间)
 - [项目结构](#项目结构)
@@ -20,9 +22,9 @@
 
 ## 概述
 
-**TL;DR**：`pytorch-test-refactoring` 是一个 AI 驱动的 7 阶段状态机工作流，将 PyTorch 测试文件按三种策略拆分为设备无关/设备通用/设备专属类。Flow 发出 `SPAWN_SINGLE`、`RELAY_FINDINGS` 信号由 Claude Code 生成 Agent 执行，中间穿插确定性脚本进行文件评估、7 项自动化验证和总结报告生成。核心原则：黑名单跳过必须保留（有意的已知缺陷）、白名单限制必须扩大（历史遗留的人为限制）、Category A/B API 不是设备专属（Category C 才是）。
+**TL;DR**：`pytorch-test-refactoring` 是一个 AI 驱动的 8 阶段状态机工作流（7 阶段重构 + 1 阶段 CI 监控），将 PyTorch 测试文件按三种策略拆分为设备无关/设备通用/设备专属类。Flow 发出 `SPAWN_SINGLE`、`RELAY_FINDINGS` 信号由 Claude Code 生成 Agent 执行，中间穿插确定性脚本进行文件评估、7 项自动化验证和总结报告生成。核心原则：黑名单跳过必须保留（有意的已知缺陷）、白名单限制必须扩大（历史遗留的人为限制）、Category A/B API 不是设备专属（Category C 才是）。
 
-本工作流是一个 **AI 驱动的 7 阶段状态机**，用于将 PyTorch 测试文件按设备依赖度拆分为三类：
+本工作流是一个 **AI 驱动的 8 阶段状态机**（7 阶段重构 + 1 阶段 CI 监控），用于将 PyTorch 测试文件按设备依赖度拆分为三类：
 
 > ![.assets/diagrams/overview.svg](.assets/diagrams/overview.svg)
 
@@ -55,8 +57,9 @@ RefactorFlow (状态机核心)
 | **状态模型**   | `state.py`   | Pydantic 模型定义（`FlowSignal`、`AnalystReport`、`RefactorState` 等） |
 | **CLI 桥接**   | `orchestrator.py` | 将 Flow 信号转换为 JSON 任务规格，Agent ID 注册与持久化，结果路由          |
 | **状态机**     | `flow.py`    | 7 阶段编排，信号生成，进度恢复，Agent ID 生命周期管理                    |
+| **CI 监控**    | `ci_ops.py`  | CI 监控状态机：监控 CI 状态、分类失败、生成 debugger agent               |
 | **Agent 适配** | `agent/`     | 为每个阶段生成 Agent 任务，包含专业 Prompt                             |
-| **确定性脚本** | `scripts/`   | 无需 AI 的阶段：评估、验证、报告生成                                   |
+| **确定性脚本** | `scripts/`   | 无需 AI 的阶段：评估、验证、CI 操作、报告生成                          |
 | **参考知识**   | `reference/` | API 分类目录、分类指南、设备特性报告                                   |
 | **工具函数**   | `utils.py`   | 路径常量、工作空间、git 工具                                           |
 
@@ -93,7 +96,7 @@ Category C（设备专属） > Category B（通用概念） > Category A（有 a
 
 ---
 
-## 七阶段工作流
+## 八阶段工作流
 
 > ![.assets/diagrams/workflow.svg](.assets/diagrams/workflow.svg)
 
@@ -197,6 +200,26 @@ SEND_MESSAGE(agent_id) "修复规则 3" → checker → pass
 - 生成最终的 Markdown 总结报告
 - 汇总：类布局、验证结果、审查发现、策略分配
 - 输出：`final_summary.md`
+
+#### 👀 Phase 8：CI Monitor（CI 监控）
+
+**类型**：用户驱动 + 确定性脚本 + AI Agent
+
+**触发方式**：
+- 用户完成 P1-P7 重构后，手动创建分支、提交、推送、创建 Draft PR
+- 通过 **"look after the CI"** 或 `python orchestrator.py <file> --ci-check` 触发 CI 监控
+- 可选 `--pr-number N` 参数明确指定 PR 编号（否则自动从当前分支检测）
+
+**做什么**：
+1. 自动检测当前分支和 PR 信息
+2. 定期获取 GitHub Check Runs 状态
+3. 获取 pytorch-bot 评论以识别 flaky/unrelated 失败
+4. 分类 CI 状态：全部通过 → 完成 | 仍有 pending → 调度 cron 等待 | 发现失败 → 生成 Debugger agent
+5. Debugger agent 分析失败原因，确认是否由重构引起
+6. 对确认由重构引起的失败进行代码修复，commit + push
+7. 最多重复 5 轮修复 → 标记 PR 就绪
+
+**输出**：CI 状态 (`ci_state.json`)、修复历史
 
 ---
 
@@ -404,13 +427,16 @@ pytorch-test-refactoring/
 ├── README.md                    # 本文件
 ├── SKILL.md                     # Skill 入口定义
 ├── orchestrator.py              # CLI 桥接层（JSON 任务规格 ⇄ Agent/SendMessage）
-├── flow.py                      # RefactorFlow 状态机（核心）
+├── orchestrator.py              # CLI 桥接层（JSON 任务规格 ⇄ Agent/SendMessage）
+├── flow.py                      # RefactorFlow 状态机（核心，P1-P7）
+├── ci_ops.py                    # CIOps 状态机（CI 监控，P8）
 ├── state.py                     # Pydantic 状态模型
 ├── utils.py                     # 常量和工具函数
 ├── scripts/
 │   ├── assess.py                # Phase 1：文件评估（确定性）
 │   ├── verify.py                # Phase 5：7 项自动化验证（确定性）
 │   ├── report.py                # Phase 7：生成总结报告（确定性）
+│   ├── ci.py                    # Phase 8：CI 操作（check-run、bot 评论）
 │   └── logger.py                # 审计日志和状态管理
 ├── agent/
 │   ├── adapter.py               # Agent 任务构建抽象基类
@@ -418,15 +444,17 @@ pytorch-test-refactoring/
 │   ├── prompts/
 │   │   ├── analyst.md           # 分析师 Prompt
 │   │   ├── coder.md             # 编码者 Prompt
-│   │   └── checker.md           # 审查者 Prompt
+│   │   ├── checker.md           # 审查者 Prompt
+│   │   └── debugger.md          # CI 失败调试 Prompt
 │   └── skills/
 │       ├── classify-test-files/ # 测试文件分类 skill
 │       ├── refactor-test-decoupling/  # 解耦方法论 skill
-│       └── review-test-refactoring/   # 重构审查 skill
+│       ├── review-test-refactoring/   # 重构审查 skill
+│       └── ci-automation/       # CI 自动化 skill
 ├── .assets/diagrams/                             # 📊 draw.io 架构图表
 │   ├── overview.svg                   #   概览：三大策略拆分
 │   ├── architecture.svg               #   架构：分层组件设计
-│   ├── workflow.svg                   #   流程：七阶段工作流
+│   ├── workflow.svg                   #   流程：八阶段工作流
 │   ├── decision-tree.svg              #   决策树：测试分类逻辑
 │   └── signal-flow.svg                #   信号流：状态机与信号机制
 └── reference/
@@ -438,7 +466,7 @@ pytorch-test-refactoring/
 ### 依赖关系
 
 ```
-orchestrator.py → flow.py
+orchestrator.py → flow.py / ci_ops.py
 flow.py
 ├── state.py          (数据模型，含 agent_ids)
 ├── utils.py          (工具函数)
@@ -448,6 +476,13 @@ flow.py
 ├── scripts/logger.py (日志)
 └── agent/
     ├── adapter.py    (抽象基类，含 AgentTask.mode)
+    └── claude_code.py (Claude Code 适配器)
+ci_ops.py
+├── state.py          (CIState, CICheckRun 等 CI 模型)
+├── scripts/ci.py     (Phase 8 CI 操作)
+├── scripts/logger.py (日志)
+└── agent/
+    ├── adapter.py    (抽象基类)
     └── claude_code.py (Claude Code 适配器)
 ```
 

@@ -63,10 +63,11 @@ Apply each section below for every rule assigned to you above.
 - `@onlyAccelerator` is a METHOD decorator, NOT a class decorator
 
 ### If assigned strategy_3 (extract S3 tests):
-- Create `TestFooCUDA` class with `setUp` that calls `self.skipTest` if CUDA unavailable
-- Hardcode device: replace `device` param with `"cuda"`
-- Use `@instantiate_parametrized_tests` if parametrized, otherwise plain `TestCase`
-- Keep `@onlyCUDA` and other device-specific decorators as-is
+- Create `TestFooCUDA` class (plain `TestCase`, no class decorator)
+- Each test method receives `device` as first parameter after `self`
+- **Preferred pattern**: Use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` at module level — this injects `device="cuda"` into every test, handles `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU` resolution correctly, and eliminates the need for per-method `@onlyCUDA` or hardcoded `device = "cuda"` lines
+- Fallback (no device-type-aware decorators): plain `TestCase` with `setUp` guard — use only when the class has NO `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or `@parametrize` decorators
+- Do NOT use `@instantiate_parametrized_tests` for S3 — it breaks `@dtypes`/`@dtypesIfCUDA` resolution (these decorators rely on `instantiate_device_type_tests` for device-type injection)
 
 ### If assigned cleanup:
 - Remove stale imports: `TEST_CUDA`, `TEST_MPS`, `TEST_XPU`, `onlyOn`, `onlyCUDA` (only if no Strategy 3 class remains)

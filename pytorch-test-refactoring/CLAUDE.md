@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This repo is a **Claude Code skill** that orchestrates refactoring PyTorch test files to decouple them from specific hardware accelerators (CUDA, MPS, XPU). Tests are split into three categories across a 7-phase state machine driven by AI agents.
+This repo is a **Claude Code skill** that orchestrates refactoring PyTorch test files to decouple them from specific hardware accelerators (CUDA, MPS, XPU). Tests are split into three categories across an 8-phase workflow (7 refactoring + 1 CI automation) driven by AI agents.
 
 **This skill is invoked by Claude Code, not run standalone.** The SKILL.md entry point triggers the workflow; `flow.py` is the state machine core; Claude Code spawns AI agents when the flow emits `FlowSignal` values.
 
@@ -12,19 +12,21 @@ This repo is a **Claude Code skill** that orchestrates refactoring PyTorch test 
 
 ```
 orchestrator.py (CLI bridge — JSON task spec ↔ Agent/SendMessage tool calls)
-flow.py (RefactorFlow state machine — core orchestrator)
-├── state.py              Pydantic models for all workflow data (signals, reports, tasks, results)
+flow.py (RefactorFlow state machine — core orchestrator, phases 1-7)
+ci_ops.py (CIOps state machine — CI monitoring & debug, phase 8)
+├── state.py              Pydantic models for all workflow data (signals, reports, tasks, results, CI)
 ├── utils.py              Path constants, workspace helpers, refactoring rule definitions
 ├── scripts/
 │   ├── assess.py         Phase 1: deterministic file analysis (class layout, test counts)
 │   ├── verify.py         Phase 5: 7 deterministic verification checks
 │   ├── report.py         Phase 7: final markdown summary generation
+│   ├── ci.py             Phase 8: deterministic CI operations (check-runs, bot comments)
 │   └── logger.py         Structured JSONL audit log + status.json snapshot
 ├── agent/
 │   ├── adapter.py        Abstract BaseAdapter with AgentTask model
 │   ├── claude_code.py    ClaudeCodeAdapter: builds AgentTask objects from prompt templates
-│   ├── prompts/          Markdown prompt templates (analyst.md, coder.md, checker.md)
-│   └── skills/           Sub-skills referenced by agents (classify-test-files, refactor-test-decoupling, review-test-refactoring)
+│   ├── prompts/          Markdown prompt templates (analyst.md, coder.md, checker.md, debugger.md)
+│   └── skills/           Sub-skills referenced by agents (classify-test-files, refactor-test-decoupling, review-test-refactoring, ci-automation)
 └── reference/
     ├── device_api_catalog.yaml      Authoritative API classification (Category A/B/C)
     ├── classification_guide.md      How to look up API categories
@@ -42,6 +44,10 @@ flow.py → scripts/report.py (Phase 7)
 flow.py → scripts/logger.py (audit logging)
 flow.py → agent/adapter.py (abstract base)
 flow.py → agent/claude_code.py (Claude Code adapter)
+ci_ops.py → state.py (data models)
+ci_ops.py → scripts/ci.py (Phase 8 deterministic ops)
+ci_ops.py → agent/adapter.py (abstract base)
+ci_ops.py → agent/claude_code.py (Claude Code adapter)
 ```
 
 ## Core concepts
@@ -52,7 +58,9 @@ flow.py → agent/claude_code.py (Claude Code adapter)
 |----------|-------------|-----------|------|
 | S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | No device dependency, pure CPU logic |
 | S2 | `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter with generic accelerator APIs |
-| S3 | `TestFoo<Device>` (e.g., `TestFooCUDA`) | `@instantiate_parametrized_tests` or `TestCase` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+| S3 | `TestFoo<Device>` (e.g., `TestFooCUDA`) | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`; otherwise plain `TestCase` with `setUp` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+
+**S3 instantiation preference**: Use `instantiate_device_type_tests(..., only_for="cuda")` whenever the class has `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or `@parametrize` — these decorators rely on device-type injection from `instantiate_device_type_tests`. This also eliminates per-method `@onlyCUDA` (device is injected as a parameter). Do NOT use `@instantiate_parametrized_tests` for S3 — it cannot resolve device-type-aware decorators.
 
 ### Device API classification (first match wins)
 
@@ -69,6 +77,7 @@ flow.py → agent/claude_code.py (Claude Code adapter)
 5. **Verify** — deterministic: 7 automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, import audit)
 6. **Final Review** — AI agent (checker): mandatory full-file quality review; findings → coder fix → re-verify (max 3 retries)
 7. **Finalize** — deterministic: generate `final_summary.md`
+8. **CI Ops** — user creates PR manually, then triggers CI monitoring (via "look after the CI" or --ci-check). The state machine cron-monitors CI, classifies failures, spawns a debugger agent to fix regressions, pushes fixes, and marks the PR ready (see `agent/skills/ci-automation/SKILL.md`)
 
 ### FlowSignal mechanism
 
@@ -79,6 +88,7 @@ The state machine stops on these signals and expects Claude Code to handle them:
 | `SPAWN_SINGLE` | Need 1 new AI agent | Spawn analyst/coder/checker via Agent tool; **capture agent_id from result**; include `agent_id` + `agent_name` in the JSON piped to `--feed`; call `feed_*_result()` |
 | `SEND_MESSAGE` | Follow-up to existing agent | `SendMessage(to=agent_id)` to resume the stopped agent (uses registered agent ID, not name); if agent unreachable → fallback spawn + register new ID; call `feed_coder_result()` |
 | `RELAY_FINDINGS` | Review found issues | Forward findings to coder via `SendMessage(coder_agent_id)`; call `feed_fix_complete()` |
+| `WAITING` | CI still running | Schedule durable cron via CronCreate; session exits |
 | `DONE` | Phase complete | Call `flow.run()` to continue |
 
 ## Key rules (non-negotiable)
@@ -105,6 +115,7 @@ final_summary.md      # Phase 7 report
 audit.jsonl           # Append-only event log
 status.json           # Current state snapshot (for team coordination)
 flow_state.json       # Transient state-machine position (phase, rule_index, agent_ids, etc.)
+ci_state.json         # CI automation state (PR number, branch, fix history, cron job ID)
 ```
 
 ## Usage pattern

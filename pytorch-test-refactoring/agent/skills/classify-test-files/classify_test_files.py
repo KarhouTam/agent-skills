@@ -27,8 +27,13 @@ TEST_DIR = REPO_ROOT / "test"
 OUTPUT_DIR = REPO_ROOT / "agent_space" / "classified_test_files"
 
 DEVICE_SPECIFIC_FILENAMES = {
-    "test_cuda.py", "test_mps.py", "test_xpu.py", "test_rocm.py",
-    "test_mtia.py", "test_tpu.py", "test_lazy.py",
+    "test_cuda.py",
+    "test_mps.py",
+    "test_xpu.py",
+    "test_rocm.py",
+    "test_mtia.py",
+    "test_tpu.py",
+    "test_lazy.py",
 }
 
 DEVICE_SPECIFIC_IMPORTS = re.compile(
@@ -36,9 +41,7 @@ DEVICE_SPECIFIC_IMPORTS = re.compile(
     r"|import\s+torch\.testing\._internal\.common_(?:cuda|mps|xpu|rocm|mtia)\b)"
 )
 
-DEVICE_SPECIFIC_APIS = re.compile(
-    r"\btorch\.(cuda|mps|xpu)\."
-)
+DEVICE_SPECIFIC_APIS = re.compile(r"\btorch\.(cuda|mps|xpu)\.")
 
 DEVICE_AGNOSTIC_IMPORTS = re.compile(
     r"from\s+torch\.testing\._internal\.common_device_type\s+import.*\binstantiate_device_type_tests\b"
@@ -46,9 +49,7 @@ DEVICE_AGNOSTIC_IMPORTS = re.compile(
     r"|from\s+torch\.testing\._internal\.common_(?:dtype|device_type)\s+import"
 )
 
-DEVICE_AGNOSTIC_CALL = re.compile(
-    r"\binstantiate_device_type_tests\s*\("
-)
+DEVICE_AGNOSTIC_CALL = re.compile(r"\binstantiate_device_type_tests\s*\(")
 
 DEVICE_AGNOSTIC_DECORATORS = re.compile(
     r"@(?:ops|dtypes|dtypesIfCPU|dtypesIfCUDA|dtypesIfMPS|dtypesIfXPU)\s*\("

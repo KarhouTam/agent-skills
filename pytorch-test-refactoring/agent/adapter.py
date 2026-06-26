@@ -69,6 +69,13 @@ class BaseAdapter(ABC):
         rule_context: dict | None = None,
     ) -> AgentTask: ...
 
+    @abstractmethod
+    def build_debugger_task(
+        self,
+        file_path: str,
+        workspace: str,
+    ) -> AgentTask: ...
+
     def build_fix_tasks(
         self,
         file_path: str,

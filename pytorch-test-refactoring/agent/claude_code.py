@@ -155,6 +155,24 @@ class ClaudeCodeAdapter(BaseAdapter):
             mode="acceptEdits",
         )
 
+    def build_debugger_task(
+        self,
+        file_path: str,
+        workspace: str,
+    ) -> AgentTask:
+        prompt = _load_prompt("debugger").format(
+            file_path=file_path,
+            workspace=workspace,
+        )
+        return AgentTask(
+            phase="debug",
+            agent_name="debugger",
+            agent_type="general-purpose",
+            prompt=prompt,
+            run_in_background=True,
+            mode="bypassPermissions",
+        )
+
     def build_fix_tasks(
         self,
         file_path: str,

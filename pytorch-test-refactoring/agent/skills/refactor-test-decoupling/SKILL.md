@@ -13,9 +13,11 @@ Refactor PyTorch test files so tests focus on core functional logic and are deco
 |----------|-----------|---------------|---------|
 | **Accelerator-unrelated** (S1) | `TestFoo` (original name) | `@instantiate_parametrized_tests` or plain `TestCase` | `TestBinaryUfuncs` |
 | **Accelerator-agnostic** (S2) | `TestFooDevice` | `instantiate_device_type_tests()` | `TestBinaryUfuncsDevice` |
-| **Accelerator-specific** (S3) | `TestFoo<Device>` | `@instantiate_parametrized_tests` or plain `TestCase` | `TestBinaryUfuncsCUDA` |
+| **Accelerator-specific** (S3) | `TestFoo<Device>` | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`; otherwise plain `TestCase` with `setUp` guard | `TestBinaryUfuncsCUDA` |
 
 `instantiate_device_type_tests` **removes** the generic class from scope and replaces it with per-device variants (`TestFooDeviceCPU`, `TestFooDeviceCUDA`, etc.). `instantiate_parametrized_tests` keeps the class discoverable.
+
+**S3 instantiation rule**: When an S3 class uses `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or other device-type-aware decorators (which are designed for `instantiate_device_type_tests`), use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` instead of `@instantiate_parametrized_tests`. Each test method receives `device` as its first parameter (always `"cuda"`), eliminating the need for per-method `@onlyCUDA` decorators or hardcoded `device = "cuda"` lines. This keeps mechanism consistency with S2 and lets `instantiate_device_type_tests` inject device-aware dtype resolution.
 
 ## Classification
 
@@ -25,7 +27,7 @@ Every test falls into one of three categories. Classification is hierarchical: *
 |----------|-----------|-----------|
 | **Accelerator-unrelated (S1)** | No device usage; CPU only | `instantiate_parametrized_tests()` or plain `TestCase` |
 | **Accelerator-agnostic (S2)** | Uses a device but only generic accelerator APIs | `instantiate_device_type_tests()` |
-| **Accelerator-specific (S3)** | Requires a particular accelerator's unique features | `@instantiate_parametrized_tests` or plain `TestCase` on that device |
+| **Accelerator-specific (S3)** | Requires a particular accelerator's unique features | `instantiate_device_type_tests(..., only_for=...)` when `@dtypes`-style decorators exist; otherwise plain `TestCase` |
 
 ### Device API Categories (consult `../../../reference/device_api_catalog.yaml`)
 
@@ -173,7 +175,30 @@ instantiate_device_type_tests(TestFooDevice, globals())
 
 Tests requiring a particular accelerator's unique (Category C) features.
 
-**Pattern A — Plain TestCase:**
+**Preferred Pattern — `instantiate_device_type_tests` with `only_for`:**
+Use this when the class has `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or `@parametrize` decorators — these rely on device-type injection from `instantiate_device_type_tests`.
+```python
+class TestFooCUDA(TestCase):
+    # device is injected by instantiate_device_type_tests (always "cuda")
+    # @dtypesIfCUDA resolves correctly because device_type is known
+
+    @dtypesIfCUDA(torch.float16, torch.float32)
+    def test_cuda_specific_feature(self, device, dtype):
+        # device == "cuda" always
+        torch.cuda.empty_cache()
+        t = torch.randn(100, 100, device=device, dtype=dtype)
+        ...
+
+# Module level:
+instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")
+```
+This pattern:
+- Injects `device="cuda"` into every test method (no hardcoded `device = "cuda"`)
+- Correctly resolves `@dtypesIfCUDA`/`@dtypesIfCPU`/`@dtypes` (device-type-aware decorators)
+- Eliminates per-method `@onlyCUDA` decorators
+- Keeps mechanism consistency with S2 (`instantiate_device_type_tests`)
+
+**Fallback — Plain TestCase with setUp** (no device-type-aware decorators):
 ```python
 class TestFooCUDA(TestCase):
     def setUp(self):
@@ -182,32 +207,18 @@ class TestFooCUDA(TestCase):
 
     def test_cuda_stream(self):
         s = torch.cuda.Stream()
-        with torch.cuda.stream(s):
-            t = torch.randn(3, 3, device="cuda")
-            self.assertEqual(t.sum(), t.sum())
+        ...
 ```
 
-**Pattern B — `@instantiate_parametrized_tests`** (non-device parametrization needed):
-```python
-@instantiate_parametrized_tests
-class TestFooCUDA(TestCase):
-    def setUp(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA not available")
-
-    @parametrize("dtype", [torch.float16, torch.float32])
-    def test_cuda_memory_behavior(self, dtype):
-        torch.cuda.empty_cache()
-        t = torch.randn(100, 100, device="cuda", dtype=dtype)
-        self.assertEqual(t.shape, (100, 100))
-```
+**Why NOT `@instantiate_parametrized_tests`?**
+`@instantiate_parametrized_tests` cannot resolve `@dtypesIfCUDA`/`@dtypesIfCPU` correctly — these decorators rely on the device-type context that only `instantiate_device_type_tests` provides. Using `@instantiate_parametrized_tests` for S3 classes with device-type-aware decorators results in incorrect dtype selection or runtime errors.
 
 **Steps:**
-1. Confirm the test genuinely uses Category C APIs (consult `device_api_catalog.yaml`).
+1. Confirm the test genuinely uses Category C APIs.
 2. Extract into `TestFoo<Device>` class with descriptive name.
-3. Add `setUp` with `self.skipTest` if the accelerator is unavailable.
-4. Hardcode device: replace `device` param with `"cuda"` / `"mps"` / `"xpu"`.
-5. Use `@instantiate_parametrized_tests` if parametrized, otherwise plain `TestCase`.
+3. Add `device` parameter to each test method (injected by `instantiate_device_type_tests`).
+4. Use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` at module level — preferred if any `@dtypes`/`@dtypesIfCUDA`/`@parametrize` decorators exist.
+5. Fallback: plain `TestCase` with `setUp` guard and hardcoded `device = "cuda"` — only when NO device-type-aware decorators exist.
 
 ## Combined Workflow
 
@@ -283,6 +294,7 @@ ls test/dynamo_expected_failures/TestFoo.* 2>/dev/null
 | Plain `TestCase` | No | Yes | No parametrization needed |
 | `instantiate_parametrized_tests()` | No | Yes | Tests with `@parametrize`/`@ops`/`@dtypes`, no device dependency |
 | `instantiate_device_type_tests()` | Yes (CPU, CUDA, MPS, ...) | No (removed from scope) | Tests with a `device` parameter, works on any accelerator |
+| `instantiate_device_type_tests(..., only_for="cuda")` | Yes (CUDA only) | No (removed from scope) | S3 classes with `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`; device injected as `"cuda"` |
 
 ## Common Pitfalls
 
@@ -298,6 +310,7 @@ ls test/dynamo_expected_failures/TestFoo.* 2>/dev/null
 | **Renaming class without updating dynamo_skips/** | Search `test/dynamo_skips/` for filenames starting with old class name and rename to new class name |
 | **Renaming class without updating dynamo_expected_failures/** | Search `test/dynamo_expected_failures/` for filenames starting with old class name and rename to new class name |
 | **Using `instantiate_device_type_tests` for S1 tests** | Creates wasteful per-device variants doing the same CPU work — use `instantiate_parametrized_tests` |
+| **Using `@instantiate_parametrized_tests` for S3 with `@dtypesIfCUDA`** | `@dtypesIfCUDA` needs device-type context from `instantiate_device_type_tests` — use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` |
 | **Mixing `device` param and hardcoded `"cuda"` in same class** | Pick one strategy per class |
 
 ## Related Skills

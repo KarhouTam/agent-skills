@@ -45,6 +45,7 @@ if _skill_dir not in sys.path:
     sys.path.insert(0, _skill_dir)
 
 from flow import RefactorFlow
+from ci_ops import CIOps
 from state import (
     FlowSignal,
     AnalystReport,
@@ -68,7 +69,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--feed",
-        choices=["analyst", "coder", "checker"],
+        choices=["analyst", "coder", "checker", "debugger"],
         help=(
             "Feed agent output back to the orchestrator. "
             "Reads a JSON object from stdin describing the agent result."
@@ -79,6 +80,17 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Resume from workspace artifacts on disk (cross-process resume).",
     )
+    parser.add_argument(
+        "--ci-check",
+        action="store_true",
+        help="Run CI monitoring phase (for cron invocations). Skips refactoring phases.",
+    )
+    parser.add_argument(
+        "--pr-number",
+        type=int,
+        default=None,
+        help="PR number for CI monitoring. If omitted, auto-detected from current branch.",
+    )
     return parser.parse_args()
 
 
@@ -87,6 +99,10 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+
+    if args.ci_check:
+        _run_ci_check(args)
+        return
 
     flow = RefactorFlow()
 
@@ -356,14 +372,22 @@ def _emit_next_action(flow: RefactorFlow, state: RefactorState) -> None:
 def _emit_done(state: RefactorState) -> None:
     """Emit the 'done' signal — workflow complete."""
     ws = str(state.workspace) if state.workspace else ""
-    _write_json(
-        {
-            "status": "done",
-            "phase": state.current_phase,
-            "summary_path": f"{ws}/final_summary.md" if ws else "",
-            "workspace": ws,
-        }
-    )
+    payload: dict = {
+        "status": "done",
+        "phase": state.current_phase,
+        "summary_path": f"{ws}/final_summary.md" if ws else "",
+        "workspace": ws,
+    }
+    if state.current_phase == "finalize":
+        file_path = state.file_path
+        payload["next_steps"] = (
+            "Refactoring is complete. To start CI monitoring:\n"
+            "1. Create a branch, commit, and push your changes\n"
+            "2. Create a draft PR targeting upstream main\n"
+            '3. Say "look after the CI" or run:\n'
+            f"   python orchestrator.py {file_path} --ci-check"
+        )
+    _write_json(payload)
 
 
 def _emit_tasks(
@@ -413,6 +437,161 @@ def _emit_error(flow: RefactorFlow, message: str) -> None:
             "status": "error",
             "message": message,
             "phase": flow.state.current_phase,
+            "workspace": ws,
+        }
+    )
+
+
+# -- CI handoff -------------------------------------------------------
+
+
+def _run_ci_check(args) -> None:
+    """Handle --ci-check: monitor CI state, possibly spawn debugger."""
+    from utils import get_workspace
+
+    file_name = Path(args.file_path).stem
+    workspace = get_workspace(file_name)
+
+    ci = CIOps()
+
+    if args.feed:
+        ci.run(args.file_path, str(workspace), resume=True)
+
+        raw = _read_stdin()
+        feed_data = _parse_feed_json(raw, args.feed)
+
+        if args.feed == "debugger":
+            ci.feed_debugger_result(feed_data)
+
+        ci.run(args.file_path, str(workspace))
+
+    else:
+        ci.run(
+            args.file_path,
+            str(workspace),
+            resume=args.resume,
+            pr_number=args.pr_number,
+        )
+
+    _emit_ci_action(ci)
+
+
+def _emit_ci_action(ci: CIOps) -> None:
+    """Emit the next CI ops action as JSON to stdout."""
+    ci_state = ci.state
+    signal = ci_state.signal
+    ws = str(ci_state.workspace) if ci_state.workspace else ""
+    file_path = ci_state.file_path
+
+    if ci_state.ci_phase == "monitor" and signal == FlowSignal.WAITING:
+        _write_json(
+            {
+                "status": "schedule_cron",
+                "phase": "ci_monitor",
+                "pr_url": ci_state.pr_url,
+                "pr_number": ci_state.pr_number,
+                "head_sha": ci_state.head_sha,
+                "ci_phase": ci_state.ci_phase,
+                "fix_round": len(ci_state.fix_history),
+                "on_complete": {
+                    "action": "CronCreate",
+                    "cron_interval": "*/7 * * * *",
+                    "durable": True,
+                    "prompt": (
+                        f"Run `python orchestrator.py {file_path} --ci-check`. "
+                        f"Read the JSON output. If status is `need_agent`, spawn the "
+                        f"debugger agent with the provided parameters "
+                        f"(run_in_background=true, mode=bypassPermissions). "
+                        f"When done, pipe result back. "
+                        f"Loop until status is `schedule_cron` or `done`."
+                    ),
+                    "note": "Use CronCreate with this prompt. Save the job ID for later cleanup.",
+                },
+            }
+        )
+
+    elif ci_state.ci_phase == "monitor" and signal == FlowSignal.DONE:
+        ci_state2 = ci.run(
+            file_path, str(ci_state.workspace) if ci_state.workspace else ""
+        )
+        _emit_ci_action(ci)
+
+    elif ci_state.ci_phase == "debug" and signal == FlowSignal.SPAWN_SINGLE:
+        tasks = ci.get_pending_tasks()
+        if not tasks:
+            _emit_error_ci(ci, "No debugger task returned")
+            return
+        task_specs = [_ci_task_to_spec(t) for t in tasks]
+        cmd = f"python orchestrator.py {file_path} --ci-check --feed debugger"
+        _write_json(
+            {
+                "status": "need_agent",
+                "phase": "ci_debug",
+                "ci_phase": ci_state.ci_phase,
+                "fix_round": len(ci_state.fix_history),
+                "failures": [
+                    {"check_name": f.check_name, "bot_label": f.bot_label}
+                    for f in ci_state.failures
+                ],
+                "tasks": task_specs,
+                "on_complete": {
+                    "feed_as": "debugger",
+                    "command": cmd,
+                    "note": (
+                        "1. Read the debugger agent's output.\\n"
+                        "2. Extract key result into JSON (see ci-automation SKILL.md).\\n"
+                        '3. Include "agent_id" (from the Agent tool result) and '
+                        '"agent_name": "debugger" in the JSON.\\n'
+                        "4. Pipe the JSON to this command:\\n"
+                        f"   echo '{{...}}' | {cmd}"
+                    ),
+                },
+            }
+        )
+
+    elif ci_state.ci_phase == "done" or signal == FlowSignal.DONE:
+        _write_json(
+            {
+                "status": "done",
+                "phase": "ci_done",
+                "pr_url": ci_state.pr_url,
+                "pr_number": ci_state.pr_number,
+                "fix_history": ci_state.fix_history,
+                "workspace": ws,
+                "next_steps": (
+                    "All CI checks passed. Mark the draft PR as ready for review:\n"
+                    f"  gh pr ready {ci_state.pr_number}\n"
+                    "Then delete the CI cron jobs (CronDelete). The workflow is truly finished."
+                ),
+            }
+        )
+
+    else:
+        _emit_error_ci(
+            ci, f"Unexpected CI state: phase={ci_state.ci_phase}, signal={signal.value}"
+        )
+
+
+def _ci_task_to_spec(task: Any) -> dict[str, Any]:
+    """Convert a CI AgentTask into a JSON spec."""
+    return {
+        "method": "spawn",
+        "agent_name": task.agent_name,
+        "agent_type": getattr(task, "agent_type", "general-purpose"),
+        "run_in_background": getattr(task, "run_in_background", False),
+        "mode": getattr(task, "mode", "default"),
+        "prompt": task.prompt,
+    }
+
+
+def _emit_error_ci(ci: CIOps, message: str) -> None:
+    """Emit an error signal for CI ops."""
+    ws = str(ci.state.workspace) if ci.state.workspace else ""
+    _write_json(
+        {
+            "status": "error",
+            "message": message,
+            "phase": f"ci_{ci.state.ci_phase}",
             "workspace": ws,
         }
     )

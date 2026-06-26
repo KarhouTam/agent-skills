@@ -1,11 +1,11 @@
 ---
 name: pytorch-test-refactoring
-description: Orchestrate PyTorch test file refactoring to decouple tests from specific hardware accelerators. Use this skill whenever the user asks to refactor, decouple, or reorganize a PyTorch test file for cross-accelerator compatibility, or when they ask to apply the test decoupling workflow to a specific test file. Triggers on phrases like "refactor test_ops.py", "decouple tests in test_file.py", "apply test decoupling to X", or "use pytorch-test-refactoring on X". Always invoke this skill before starting any test refactoring work that involves splitting tests into accelerator-unrelated, accelerator-agnostic, and accelerator-specific classes.
+description: Orchestrate PyTorch test file refactoring to decouple tests from specific hardware accelerators. Use this skill whenever the user asks to refactor, decouple, or reorganize a PyTorch test file for cross-accelerator compatibility, or when they ask to apply the test decoupling workflow to a specific test file. Triggers on phrases like "refactor test_ops.py", "decouple tests in test_file.py", "apply test decoupling to X", or "use pytorch-test-refactoring on X". Also triggers on CI monitoring phrases like "look after the ci", "monitor ci", "check ci status", "watch the pr checks", or "debug ci failures". Always invoke this skill before starting any test refactoring work that involves splitting tests into accelerator-unrelated, accelerator-agnostic, and accelerator-specific classes.
 ---
 
 # PyTorch Test Refactoring
 
-7-phase workflow driven by `flow.py` state machine + `orchestrator.py` deterministic wrapper.
+8-phase workflow (7 refactoring + 1 CI automation) driven by `flow.py` + `ci_ops.py` state machines + `orchestrator.py` deterministic wrapper.
 
 ## Usage (one command)
 
@@ -21,37 +21,50 @@ The orchestrator outputs a JSON task spec to stdout. Follow this loop:
 └────────────┬────────────────────────────┘
              │ JSON on stdout
              ▼
-     ┌───────────────┐
-     │ Read JSON     │
-     │ status=?      │
-     └───┬───────┬───┘
+     ┌─────────────────┐
+     │ Read JSON       │
+     │ status=?        │
+     └───┬───────┬─────┘
          │       │
-   "need_agent"  "done" → workflow complete ✓
-         │
-         ▼
-     ┌────────────────────────────────┐
-     │ For each task in tasks[]:      │
-     │  method=spawn → Agent tool     │
-     │    → capture agent_id from     │
-     │      Agent tool result         │
-     │  method=send_message →         │
-     │    SendMessage(to=send_to);    │
-     │    if agent dead/unreachable   │
-     │    → use fallback.spawn        │
-     │      → capture new agent_id    │
-     └────────────┬───────────────────┘
-                  │ agent completes
-                  ▼
-     ┌────────────────────────────────┐
-     │ Read agent output              │
-     │ Extract result → JSON (below)  │
-     │ Include agent_id + agent_name  │
-     │   if agent was spawned/new     │
-     │ Pipe to on_complete.command    │
-     └────────────┬───────────────────┘
-                  │
-                  ▼
-          (loop back to top)
+         │       ├── "done" + phase="ci_done"
+         │       │   → gh pr ready, CronDelete, truly done ✓
+         │       │
+         │       ├── "done" + phase: "finalize"
+         │       │   → Refactoring complete. User creates
+         │       │     PR manually, then says "look after
+         │       │     the CI" or runs --ci-check
+         │       │
+         │       ├── "schedule_cron"
+         │       │   → CronCreate(on_complete.cron_interval,
+         │       │     durable=true, prompt=on_complete.prompt)
+         │       │   → Session exits. Next firing resumes.
+         │       │
+         │       └── "need_agent"
+         │            │
+         │            ▼
+         │    ┌────────────────────────────────┐
+         │    │ For each task in tasks[]:      │
+         │    │  method=spawn → Agent tool     │
+         │    │    → capture agent_id from     │
+         │    │      Agent tool result         │
+         │    │  method=send_message →         │
+         │    │    SendMessage(to=send_to);    │
+         │    │    if agent dead/unreachable   │
+         │    │    → use fallback.spawn        │
+         │    │      → capture new agent_id    │
+         │    └────────────┬───────────────────┘
+         │                 │ agent completes
+         │                 ▼
+         │    ┌────────────────────────────────┐
+         │    │ Read agent output              │
+         │    │ Extract result → JSON (below)  │
+         │    │ Include agent_id + agent_name  │
+         │    │   if agent was spawned/new     │
+         │    │ Pipe to on_complete.command    │
+         │    └────────────┬───────────────────┘
+         │                 │
+         ▼                 ▼
+     (loop back to top)
 ```
 
 ## Result JSON Formats
@@ -132,7 +145,27 @@ The orchestrator handles all of this automatically:
 
 Your ONLY job: run the command → follow the JSON → extract result → pipe JSON back.
 
+**When you see `"done"` with `phase: "finalize"`, the refactoring is complete.** The `next_steps` field tells you how to proceed: create a PR manually (branch, commit, push, draft PR), then say **"look after the CI"** or run `python orchestrator.py <file> --ci-check` to start CI monitoring. Only when you see `"done"` with `phase: "ci_done"` is the entire workflow truly finished — the `next_steps` field will tell you to mark the PR ready for review and delete cron jobs.
+
 **Important: When you spawn a new agent (method=spawn),** capture the `agent_id` from the Agent tool result and include it (along with `agent_name`) in the result JSON you pipe back. This is how the orchestrator learns the agent's identity for future `SendMessage` calls. Without it, `SendMessage` will fail because it needs an agent ID, not a name.
+
+## CI Automation (Phase 8)
+
+After refactoring completes, the user creates a PR manually. To start CI monitoring, say **"look after the CI"** or run:
+
+```bash
+python orchestrator.py <test_file_path> --ci-check [--pr-number N]
+```
+
+The orchestrator auto-detects the PR from the current branch. Pass `--pr-number` to skip detection.
+
+| Status | `phase` | What to do |
+|--------|---------|------------|
+| `"done"` | `"ci_done"` | All CI green. Run `gh pr ready <N>`, then `CronDelete` all CI cron jobs. Truly finished. |
+| `"schedule_cron"` | `"ci_monitor"` | CI still running. `CronCreate(cron_interval, durable=true, prompt=...)` using the `on_complete` fields. Session exits. |
+| `"need_agent"` | `"ci_debug"` | CI failures found. Spawn debugger agent (background, `mode: bypassPermissions`). When done, pipe result back via `--feed debugger`. Loop. |
+
+The debugger agent's result format and the full CI ops reference: `agent/skills/ci-automation/SKILL.md`.
 
 ## Workspace
 
@@ -166,6 +199,7 @@ The orchestrator loads all artifacts from the workspace and continues from where
 5. **Verify** — deterministic: 7 automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, import audit)
 6. **Final Review** — AI agent (checker): **mandatory** full-file quality review; findings → coder fix → re-verify (max 3 retries)
 7. **Finalize** — deterministic: generate `final_summary.md`
+8. **CI Ops** — user creates PR manually, then triggers CI monitoring (via "look after the CI" or `--ci-check`). The state machine cron-monitors CI, classifies failures, spawns a debugger agent to fix regressions, pushes fixes, and marks the PR ready. See CI Automation section above.
 
 ## Key Rules (non-negotiable, from agent/skills/refactor-test-decoupling)
 
@@ -181,7 +215,9 @@ The orchestrator loads all artifacts from the workspace and continues from where
 |----------|-------------|-----------|------|
 | S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | No device dependency, pure CPU logic |
 | S2 | `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter with generic accelerator APIs |
-| S3 | `TestFooCUDA` | `@instantiate_parametrized_tests` or `TestCase` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+| S3 | `TestFooCUDA` | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`; otherwise `TestCase` with `setUp` guard and `@instantiate_parametrized_tests` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) or constriants |
+
+**S3 instantiation rule**: When an S3 class uses `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or other device-type-aware decorators (which are designed for `instantiate_device_type_tests`), use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` instead of `@instantiate_parametrized_tests`. Each test method receives `device` as its first parameter (always `"cuda"`), eliminating the need for per-method `@onlyCUDA` decorators or hardcoded `device = "cuda"` lines. This is the preferred pattern — it keeps mechanism consistency with S2 and lets `instantiate_device_type_tests` inject device-aware dtype resolution.
 
 ## Related
 
