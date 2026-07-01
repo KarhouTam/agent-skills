@@ -1,19 +1,18 @@
 ---
 name: adversarial-review
-description: Use when explicitly invoked via /gan slash command with an inline task — runs an adversarial review loop where a challenger agent critically reviews an implementer's output, driving iterative improvement until the challenger issues a PASS verdict. Never triggered automatically; must be explicitly called by the user (2 persistent agents, up to 10 rounds).
+description: Runs an adversarial review loop where a challenger agent critically reviews an implementer's output, driving iterative improvement until the challenger issues a PASS verdict. Never triggered automatically; must be explicitly called by the user (2 persistent agents, up to 10 rounds).
 ---
 
 # Adversarial Review (GAN Loop)
 
 ## Overview
 
-A persistent adversarial loop between two agents: an **Implementer** (Sonnet) that produces output, and a **Challenger** (Haiku) that critiques it. The loop drives iterative improvement through structured verdicts until the output is excellent.
+A persistent adversarial loop between two agents: an **Implementer** (Sonnet) that produces output, and a **Challenger** (Sonnet) that critiques it. The loop drives iterative improvement through structured verdicts until the output is excellent.
 
 **Core principle:** The challenger IS the quality gate. Nothing returns to the user until the challenger says PASS.
 
 ## When to Use
 
-- User explicitly types `/gan "..."` or `/gan ...`
 - Complex, multi-faceted tasks where a second pair of eyes catches real issues
 - Tasks where correctness matters: algorithms, parsers, data pipelines, auth logic
 - Design + implementation tasks where blind spots are likely
@@ -25,16 +24,15 @@ A persistent adversarial loop between two agents: an **Implementer** (Sonnet) th
 
 ## Flow
 
-1. Parse the task from `/gan <task>`
-2. Spawn Implementer (Sonnet) with the task
-3. Spawn Challenger (Haiku) with the Implementer's initial output
-4. Loop until exit condition:
+1. Spawn Implementer (Sonnet) with the task
+2. Spawn Challenger (Sonnet) with the Implementer's initial output
+3. Loop until exit condition:
 
 ```dot
 digraph gan_loop {
     rankdir=LR;
 
-    "User: /gan task" [shape=doublecircle];
+    "User: task" [shape=doublecircle];
     "Spawn Implementer\n(model: sonnet)" [shape=box];
     "Spawn Challenger" [shape=box];
     "Implementer produces\nor revises output" [shape=box];
@@ -46,7 +44,7 @@ digraph gan_loop {
     "Max rounds (10)\nor stalemate?" [shape=diamond];
     "Return best output +\nwarning to user" [shape=doublecircle];
 
-    "User: /gan task" -> "Spawn Implementer\n(model: sonnet)";
+    "User: task" -> "Spawn Implementer\n(model: sonnet)";
     "Spawn Implementer\n(model: sonnet)" -> "Implementer produces\nor revises output";
     "Implementer produces\nor revises output" -> "Spawn Challenger";
     "Spawn Challenger" -> "Challenger reviews\n→ PASS/FAIL +\nSUMMARY + FEEDBACK";
@@ -81,9 +79,9 @@ You are a skilled implementer. Produce high-quality output for the given task.
 6. Output ONLY the revised work, not meta-commentary about the process
 ```
 
-### Challenger (spawn once, model: haiku)
+### Challenger (spawn once, model: Sonnet)
 
-Spawn with the Agent tool: `model: haiku`, `name: "challenger"`.
+Spawn with the Agent tool: `model: Sonnet`, `name: "challenger"`.
 
 ```
 You are a rigorous challenger. Your job is to find every flaw in the output — bugs, logic errors, missing edge cases, security issues, design problems, unclear code, performance issues, and missing error handling.
