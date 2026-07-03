@@ -155,17 +155,23 @@ For tests in a Strategy 1 class (`TestFoo` without device suffix):
 
 ### 2. Naming Convention
 
-Verify class names follow the convention from `refactor-test-decoupling`:
+Class renaming is **OPTIONAL**. The future `hw_classification` member on TestCase will handle strategy classification; class names are no longer the primary discriminator. The coder decides whether to rename based on external reference impact (see `refactor-test-decoupling` for the decision framework).
 
-| Strategy | Expected Name | Wrong Name Examples |
-|----------|--------------|---------------------|
-| Strategy 1 (accelerator-unrelated) | `TestFoo` (original name, no device suffix) | `TestFooCPU` |
-| Strategy 2 (accelerator-agnostic) | `TestFooDevice` | `TestFoo`, `TestFooGeneric` |
-| Strategy 3 (accelerator-specific) | `TestFooCUDA`, `TestFooMPS`, `TestFooXPU` | `TestFooDeviceCUDA` |
+**Do NOT flag a class name mismatch as an issue unless it is actively misleading** (e.g., an S1 CPU-only class named `TestFooCUDA`). A class using the original name with the correct strategy mechanism is valid.
+
+For reference, the recommended naming convention (when coder chooses to rename):
+
+| Strategy | Recommended Name | Acceptable Alternative |
+|----------|-----------------|----------------------|
+| Strategy 1 (accelerator-unrelated) | `TestFoo` (original name) | Must NOT have device suffix |
+| Strategy 2 (accelerator-agnostic) | `TestFooDevice` | Original name is fine |
+| Strategy 3 (accelerator-specific) | `TestFooCUDA`, `TestFooMPS`, `TestFooXPU` | Original name is fine |
 
 #### 2a. Cross-File Reference Integrity
 
-**When a class is renamed** (e.g., `TestIndexing` → `TestIndexingDevice`), the
+**If the coder kept the original class names, skip this check** — no external references need updating. This is the primary benefit of not renaming.
+
+**When a class IS renamed** (e.g., `TestIndexing` → `TestIndexingDevice`), the
 old name may still be referenced in external configuration files. A rename
 without updating these files causes CI breakage: dynamo expected-failure entries
 stop matching, turning expected failures into unexpected failures.
@@ -294,7 +300,8 @@ a regression.
 | Category A/B API treated as if it makes a test CUDA-specific | Test locked to CUDA unnecessarily; check the catalog | Major |
 | Missing blacklist skip decorators | `@skipXPU`, `@skipMPS`, `@skipMeta` absent — these document known gaps. If the original file had them and they're now gone, that's a regression | Blocker |
 | `@onlyAccelerator` used without dtype compatibility check | Test runs on MPS/XPU but uses `complex128` or `float64` (unsupported on MPS). For every test using `@onlyAccelerator`, verify every dtype the test uses is supported on ALL target backends. If not, add `@expectedFailureMPS`, `@dtypesIfMPS`, or a skip decorator. | Blocker |
-| Test class name doesn't match OpInfo DecorateInfo references | `DecorateInfo` entries in `common_methods_invocations.py` use exact class name matching in `is_active()`. If the test class in this file has a name that doesn't match existing `DecorateInfo` entries (check section 2a), previously-skipped tests will run and fail, or previously-xfailed tests will hard-fail. In whole-file review, verify the class names against `common_methods_invocations.py`. In diff-based review, check for renames. | Blocker |
+| Test class name doesn't match OpInfo DecorateInfo references | `DecorateInfo` entries in `common_methods_invocations.py` use exact class name matching in `is_active()`. If the test class was RENAMED, verify DecorateInfo entries were updated (section 2a). If the coder kept the original name, this check is a no-op. | Blocker |
+| **Flagging an original class name as "wrong" when the coder chose not to rename** | Renaming is optional. If the coder kept the original name (e.g., `TestFoo` for an S2 class), do NOT flag it unless the name is actively misleading (e.g., a CPU-only class named `TestFooCUDA`). The `hw_classification` member will handle classification. | N/A — reviewer guidance |
 
 ### 8. Decorator Ordering
 

@@ -57,8 +57,10 @@ ci_ops.py → agent/claude_code.py (Claude Code adapter)
 | Strategy | Class naming | Mechanism | When |
 |----------|-------------|-----------|------|
 | S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | No device dependency, pure CPU logic |
-| S2 | `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter with generic accelerator APIs |
-| S3 | `TestFoo<Device>` (e.g., `TestFooCUDA`) | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`; otherwise plain `TestCase` with `setUp` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+| S2 | `TestFoo` or `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter with generic accelerator APIs |
+| S3 | `TestFoo` or `TestFoo<Device>` (e.g., `TestFooCUDA`) | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`; otherwise plain `TestCase` with `setUp` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+
+**Class renaming is OPTIONAL.** The future `hw_classification` member on TestCase (not yet landed) will drive classification, so class names are not the primary discriminator. The agent decides whether to rename based on external reference impact: if the class has many DecorateInfo/dynamo_skip references, keep the original name to avoid breaking them. See `agent/skills/refactor-test-decoupling/SKILL.md` for the full decision framework.
 
 **S3 instantiation preference**: Use `instantiate_device_type_tests(..., only_for="cuda")` whenever the class has `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or `@parametrize` — these decorators rely on device-type injection from `instantiate_device_type_tests`. This also eliminates per-method `@onlyCUDA` (device is injected as a parameter). Do NOT use `@instantiate_parametrized_tests` for S3 — it cannot resolve device-type-aware decorators.
 

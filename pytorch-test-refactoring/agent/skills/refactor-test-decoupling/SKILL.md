@@ -9,11 +9,32 @@ Refactor PyTorch test files so tests focus on core functional logic and are deco
 
 ## Naming Convention
 
-| Strategy | Class Name | Instantiation | Example |
-|----------|-----------|---------------|---------|
-| **Accelerator-unrelated** (S1) | `TestFoo` (original name) | `@instantiate_parametrized_tests` or plain `TestCase` | `TestBinaryUfuncs` |
+Class renaming is **OPTIONAL**. The future `hw_classification` member on TestCase (not yet landed) will handle strategy classification, so class names are no longer the primary classification mechanism. The agent should decide whether to rename based on external reference impact.
+
+### Recommended Names (when renaming)
+
+| Strategy | Recommended Class Name | Instantiation | Example |
+|----------|----------------------|---------------|---------|
+| **Accelerator-unrelated** (S1) | `TestFoo` (keep original name) | `@instantiate_parametrized_tests` or plain `TestCase` | `TestBinaryUfuncs` |
 | **Accelerator-agnostic** (S2) | `TestFooDevice` | `instantiate_device_type_tests()` | `TestBinaryUfuncsDevice` |
 | **Accelerator-specific** (S3) | `TestFoo<Device>` | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`; otherwise plain `TestCase` with `setUp` guard | `TestBinaryUfuncsCUDA` |
+
+### Renaming Decision
+
+**When to rename:**
+- The original class name has few or no external references (DecorateInfo entries, dynamo_skips/, dynamo_expected_failures/)
+- The rename improves clarity (e.g., `TestFoo` → `TestFooDevice` makes the strategy obvious)
+
+**When to keep the original name:**
+- The class has many external references that would need updating
+- Renaming would risk silently breaking CI (stale DecorateInfo, dynamo skip files)
+- The original name is already clear enough
+
+**How to decide:**
+1. Check for DecorateInfo references: `grep "cls_name.*OldName" torch/testing/_internal/common_methods_invocations.py`
+2. Check for dynamo skip/expected-failure files: `find test/dynamo_skips/ test/dynamo_expected_failures/ -name "OldName*"`
+3. If zero or very few external refs → rename is safe
+4. If many external refs → keep the original name (avoids breaking cross-file references)
 
 `instantiate_device_type_tests` **removes** the generic class from scope and replaces it with per-device variants (`TestFooDeviceCPU`, `TestFooDeviceCUDA`, etc.). `instantiate_parametrized_tests` keeps the class discoverable.
 
@@ -100,7 +121,7 @@ class TestFoo(TestCase):
 **Why not `instantiate_device_type_tests`?** It creates per-device variants (TestFooCPU, TestFooCUDA, etc.) — wasteful when all variants do the same CPU-only work.
 
 **Steps:**
-1. Extract test methods into a standalone class named `TestFoo` (original name, no device suffix)
+1. Extract test methods into a standalone class. Keep the original name (no device suffix) — S1 classes should never have device suffixes.
 2. Remove `device` parameter from signatures; hardcode `"cpu"` or omit device args
 3. Remove device decorators and device imports (`TEST_CUDA`, `TEST_MPS`, etc.)
 4. Add `@instantiate_parametrized_tests` if the class has parametrized decorators
@@ -156,12 +177,12 @@ instantiate_device_type_tests(TestFooDevice, globals())
 ### Steps
 
 1. **Scrutinize every CUDA reference.** Ask: "CUDA as device or CUDA as feature?" Most are the former → S2.
-2. **Create `TestFooDevice` class** inheriting from `TestCase`.
+2. **Create the S2 class** inheriting from `TestCase`. Decide whether to rename (see "Renaming Decision" above). If renaming, use `TestFooDevice`; otherwise keep the original name.
 3. **Add `device` parameter** as first arg after `self` on each test method.
 4. **Replace hardcoded device strings**: `"cuda"` → `device` param, `.cuda()` → `.to(device)`.
 5. **Enlarge whitelist, keep blacklist**: `@onlyCUDA` → `@onlyAccelerator`, `@unittest.skipIf(not TEST_CUDA, ...)` → `@onlyAccelerator`. Keep `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd` as-is.
 6. **Replace device-specific APIs**: `torch.cuda.is_available()` → `torch.accelerator.is_available()`, Category A APIs → `torch.accelerator.*` equivalents (see catalog).
-7. **Register**: `instantiate_device_type_tests(TestFooDevice, globals())` at module level.
+7. **Register**: `instantiate_device_type_tests(<ClassName>, globals())` at module level.
 8. **Remove stale imports**: `TEST_CUDA`, `TEST_MPS` only if no longer referenced.
 
 ### Key Rules
@@ -215,9 +236,9 @@ class TestFooCUDA(TestCase):
 
 **Steps:**
 1. Confirm the test genuinely uses Category C APIs.
-2. Extract into `TestFoo<Device>` class with descriptive name.
+2. Extract into the S3 class. Decide whether to rename (see "Renaming Decision" above). If renaming, use `TestFoo<Device>` (e.g., `TestFooCUDA`); otherwise keep the original name.
 3. Add `device` parameter to each test method (injected by `instantiate_device_type_tests`).
-4. Use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` at module level — preferred if any `@dtypes`/`@dtypesIfCUDA`/`@parametrize` decorators exist.
+4. Use `instantiate_device_type_tests(<ClassName>, globals(), only_for="cuda")` at module level — preferred if any `@dtypes`/`@dtypesIfCUDA`/`@parametrize` decorators exist.
 5. Fallback: plain `TestCase` with `setUp` guard and hardcoded `device = "cuda"` — only when NO device-type-aware decorators exist.
 
 ## Combined Workflow
@@ -241,7 +262,9 @@ Create up to three classes following the naming convention and patterns above.
 
 ### Step 4: Update external references after class renames
 
-When a class is renamed (e.g., `TestCommon` → `TestCommonDevice`), external references to the old class name will **silently stop matching**. This causes previously-skipped tests to run and fail, or expected failures to become unguarded.
+**If you kept the original class names, skip this step** — no external references need updating. This is the primary benefit of not renaming.
+
+When a class IS renamed (e.g., `TestCommon` → `TestCommonDevice`), external references to the old class name will **silently stop matching**. This causes previously-skipped tests to run and fail, or expected failures to become unguarded.
 
 **Three locations to check:**
 
@@ -304,7 +327,8 @@ ls test/dynamo_expected_failures/TestFoo.* 2>/dev/null
 | **Treating Cat A/B APIs as CUDA-specific** (`empty_cache`, `synchronize`, `CUDAGraph`, `Stream`, `Event`, `memory_*`) | These are S2 — consult `device_api_catalog.yaml` |
 | **`@onlyAccelerator` as class decorator** | Use as **method decorator** only — on a class it replaces the class with a function |
 | **Using `skipIfXpu`/`skipIfCUDA` from `common_utils` in S2 classes** | Use `common_device_type` equivalents (`skipXPUIf`, `skipCUDAIf`) — they check `self.device_type` and only skip the target variant |
-| **Naming S1 class with device suffix** (e.g., `TestFooCPU`) | Use original name without suffix (`TestFoo`) — S1 has no device dependency |
+| **Naming S1 class with device suffix** (e.g., `TestFooCPU`) | Keep original name without suffix (`TestFoo`) — S1 has no device dependency. S1 classes should never have device suffixes. |
+| **Renaming a class without checking external reference impact** | Before renaming, check DecorateInfo entries and dynamo_skips/dynamo_expected_failures for references to the old name. If there are many external refs, consider keeping the original name to avoid silent breakage. |
 | **Moving cross-device tests (CPU+GPU) to S1** | Tests using both CPU and GPU tensors still need a GPU — keep in S2 |
 | **Renaming class without updating DecorateInfo** | Search `common_methods_invocations.py` for old class name and update |
 | **Renaming class without updating dynamo_skips/** | Search `test/dynamo_skips/` for filenames starting with old class name and rename to new class name |

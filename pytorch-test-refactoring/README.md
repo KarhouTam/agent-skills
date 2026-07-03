@@ -74,11 +74,11 @@ RefactorFlow (状态机核心)
 
 ### 策略对比
 
-| 策略      | 类命名            | 实例化机制                                      | 示例                                                                    | 使用场景                             |
-| --------- | ----------------- | ----------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------ |
-| **策略1** | `TestFoo`（原名） | `@instantiate_parametrized_tests` 或 `TestCase` | `TestBinaryUfuncs`                                                      | 无设备依赖的纯逻辑测试               |
-| **策略2** | `TestFooDevice`   | `instantiate_device_type_tests()`               | `TestBinaryUfuncsDevice` → 生成 `TestBinaryUfuncsDeviceCPU/CUDA/MPS` 等 | 使用 device 参数但仅需通用加速器 API |
-| **策略3** | `TestFoo<Device>` | `@instantiate_parametrized_tests` 或 `TestCase` | `TestBinaryUfuncsCUDA`                                                  | 需要特定加速器的独特功能             |
+| 策略      | 类命名（推荐，可选） | 实例化机制                                      | 示例                                                                    | 使用场景                             |
+| --------- | -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------ |
+| **策略1** | `TestFoo`（保持原名） | `@instantiate_parametrized_tests` 或 `TestCase` | `TestBinaryUfuncs`                                                      | 无设备依赖的纯逻辑测试               |
+| **策略2** | `TestFoo` 或 `TestFooDevice` | `instantiate_device_type_tests()`               | `TestBinaryUfuncsDevice` → 生成 `TestBinaryUfuncsDeviceCPU/CUDA/MPS` 等 | 使用 device 参数但仅需通用加速器 API |
+| **策略3** | `TestFoo` 或 `TestFooCUDA`   | `@instantiate_parametrized_tests` 或 `TestCase` | `TestBinaryUfuncsCUDA`                                                  | 需要特定加速器的独特功能             |
 
 ### 设备 API 分类层次
 

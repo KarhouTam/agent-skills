@@ -205,7 +205,7 @@ The orchestrator loads all artifacts from the workspace and continues from where
 
 - **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd`
 - **ENLARGE whitelist**: `@onlyCUDA` → `@onlyAccelerator`, `@onlyOn` → `@onlyAccelerator`
-- **Class naming**: `TestFoo` (S1), `TestFooDevice` (S2), `TestFooCUDA` (S3)
+- **Class naming**: Renaming is OPTIONAL (the future `hw_classification` member handles classification). Recommended names if renaming: `TestFoo` (S1), `TestFooDevice` (S2), `TestFooCUDA` (S3). Agent decides based on external reference impact.
 - **Phase 6 is mandatory** — checker always reviews, even if verification passes
 - **External refs after rename**: When classes are renamed, update `common_methods_invocations.py` DecorateInfo entries, and rename stale entries in `test/dynamo_skips/` and `test/dynamo_expected_failures/`. **CRITICAL: dynamo skip/expected-failure files are sentinels (often 0 bytes). Search by FILENAME (`find -name`), NEVER by content (`grep`).** When a device-parametrized class is renamed (TestFoo → TestFooDevice), `instantiate_device_type_tests` renames device variants too (TestFooCUDA → TestFooDeviceCUDA). Files named after old variants must be renamed to match
 
@@ -214,8 +214,8 @@ The orchestrator loads all artifacts from the workspace and continues from where
 | Strategy | Class naming | Mechanism | When |
 |----------|-------------|-----------|------|
 | S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | No device dependency, pure CPU logic |
-| S2 | `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter with generic accelerator APIs |
-| S3 | `TestFooCUDA` | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`; otherwise `TestCase` with `setUp` guard and `@instantiate_parametrized_tests` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) or constriants |
+| S2 | `TestFoo` or `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter with generic accelerator APIs |
+| S3 | `TestFoo` or `TestFooCUDA` | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`; otherwise `TestCase` with `setUp` guard and `@instantiate_parametrized_tests` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
 
 **S3 instantiation rule**: When an S3 class uses `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or other device-type-aware decorators (which are designed for `instantiate_device_type_tests`), use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` instead of `@instantiate_parametrized_tests`. Each test method receives `device` as its first parameter (always `"cuda"`), eliminating the need for per-method `@onlyCUDA` decorators or hardcoded `device = "cuda"` lines. This is the preferred pattern — it keeps mechanism consistency with S2 and lets `instantiate_device_type_tests` inject device-aware dtype resolution.
 

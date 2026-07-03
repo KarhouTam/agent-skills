@@ -28,13 +28,15 @@ REFACTOR_RULES: dict[str, str] = {
     "strategy_2": "Convert to device-agnostic tests (S2) — "
     "enlarge @onlyCUDA/@onlyOn to @onlyAccelerator, replace .cuda()/.to('cuda') "
     "with .to(device), replace Category A/B APIs with accelerator equivalents, "
-    "create TestFooDevice with instantiate_device_type_tests()",
+    "create class with instantiate_device_type_tests(). "
+    "Renaming to TestFooDevice is optional — agent decides based on external refs.",
     "strategy_3": "Extract accelerator-specific tests (S3) — "
-    "move tests using Category C APIs into TestFooCUDA, "
+    "move tests using Category C APIs into a class, "
     "give each test a `device` parameter, and register with "
-    "instantiate_device_type_tests(TestFooCUDA, globals(), only_for='cuda') "
+    "instantiate_device_type_tests(<Class>, globals(), only_for='cuda') "
     "when @dtypes/@dtypesIfCUDA/@dtypesIfCPU/@parametrize decorators exist; "
-    "fallback to plain TestCase with setUp guard otherwise",
+    "fallback to plain TestCase with setUp guard otherwise. "
+    "Renaming to TestFooCUDA is optional — agent decides based on external refs.",
     "cleanup": "Import cleanup and external reference updates — "
     "remove stale TEST_CUDA/TEST_MPS/TEST_XPU/onlyOn imports, "
     "update DecorateInfo references in common_methods_invocations.py, "

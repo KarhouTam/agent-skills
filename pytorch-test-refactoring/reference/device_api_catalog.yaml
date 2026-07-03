@@ -667,13 +667,13 @@ decision_rules:
   strategy_assignment:
     strategy_1:
       condition: "No device API usage"
-      class_suffix: ""  # TestFoo
+      class_suffix: ""  # TestFoo (keep original name)
     strategy_2:
       condition: "Only Category A API usage"
-      class_suffix: "Device"  # TestFooDevice
+      class_suffix: ""  # optional: "Device" → TestFooDevice (renaming is optional)
     strategy_3:
       condition: "Any Category B or C API usage"
-      class_suffix: "{Device}"  # TestFooCUDA, TestFooXPU, etc.
+      class_suffix: ""  # optional: "{Device}" → TestFooCUDA, TestFooXPU, etc. (renaming is optional)
 
 # ── Architecture Notes ────────────────────────────────────────────────────
 

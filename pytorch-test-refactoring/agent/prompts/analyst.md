@@ -11,9 +11,9 @@ You are the ANALYST for the {file_name} refactoring team. Analyze `{file_path}` 
 3. **Find stale imports** — `onlyOn`, `TEST_CUDA`, `TEST_MPS`, `TEST_XPU` that are imported but no longer needed after refactoring.
 
 4. **Classify every test** into one of three strategies:
-   - **Strategy 1 (Accelerator-unrelated)**: No device usage, CPU-only. Keep in `Test{{Original}}`.
-   - **Strategy 2 (Accelerator-agnostic)**: Uses device but only generic APIs. Move to `Test{{Original}}Device` with `instantiate_device_type_tests()`.
-   - **Strategy 3 (Accelerator-specific)**: Requires specific accelerator features. Keep in `Test{{Original}}CUDA` etc.
+   - **Strategy 1 (Accelerator-unrelated)**: No device usage, CPU-only. Keep original class name.
+   - **Strategy 2 (Accelerator-agnostic)**: Uses device but only generic APIs. Use `instantiate_device_type_tests()`. Renaming to `Test{{Original}}Device` is optional (agent decides based on external reference impact).
+   - **Strategy 3 (Accelerator-specific)**: Requires specific accelerator features. Use appropriate instantiation. Renaming to `Test{{Original}}CUDA` etc. is optional (agent decides based on external reference impact).
 
 5. **Verify test count** — count every `def test_` method in the file (use `grep -c "def test_"` or equivalent). The `original_test_count` in your JSON output MUST match this exact count. Test helpers (prefixed `_test_` or not prefixed `test_`) do NOT count.
 
