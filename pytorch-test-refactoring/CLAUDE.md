@@ -58,11 +58,10 @@ ci_ops.py → agent/claude_code.py (Claude Code adapter)
 |----------|-------------|-----------|------|
 | S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | No device dependency, pure CPU logic |
 | S2 | `TestFoo` or `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter with generic accelerator APIs |
-| S3 | `TestFoo` or `TestFoo<Device>` (e.g., `TestFooCUDA`) | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`; otherwise plain `TestCase` with `setUp` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+| S3 | `TestFooOn<Device>` (e.g., `TestFooOnCUDA`) | Plain `TestCase` with `setUp` guard (`@unittest.skipIf(not torch.cuda.is_available(), ...)`). Hardcode device strings. NEVER use `instantiate_device_type_tests` for S3. | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
 
 **Class renaming is OPTIONAL.** The future `hw_classification` member on TestCase (not yet landed) will drive classification, so class names are not the primary discriminator. The agent decides whether to rename based on external reference impact: if the class has many DecorateInfo/dynamo_skip references, keep the original name to avoid breaking them. See `agent/skills/refactor-test-decoupling/SKILL.md` for the full decision framework.
 
-**S3 instantiation preference**: Use `instantiate_device_type_tests(..., only_for="cuda")` whenever the class has `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or `@parametrize` — these decorators rely on device-type injection from `instantiate_device_type_tests`. This also eliminates per-method `@onlyCUDA` (device is injected as a parameter). Do NOT use `@instantiate_parametrized_tests` for S3 — it cannot resolve device-type-aware decorators.
 
 ### Device API classification (first match wins)
 
@@ -99,6 +98,7 @@ The state machine stops on these signals and expects Claude Code to handle them:
 - **ENLARGE whitelist**: `@onlyCUDA` → `@onlyAccelerator`; `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator`; `@unittest.skipIf(not TEST_CUDA)` → `@onlyAccelerator`
 - **`@onlyAccelerator` is a METHOD decorator only**, never a class decorator — using it on a class breaks `instantiate_device_type_tests`
 - **"CUDA as device" vs "CUDA as feature"**: If replacing `"cuda"` with `"mps"`/`"xpu"` still makes logical sense, it's Strategy 2 (CUDA was just the device). If the test uses Category C APIs, it's Strategy 3.
+- **Classification note**: An `if device_type == "<backend>"` conditional does NOT make a test S3 — classify based on Category C API calls only.
 - **Phase 6 is mandatory** — the checker always does a full-file review even if per-rule checks passed
 - **Test count must be preserved** — verification check #2 fails on mismatch
 

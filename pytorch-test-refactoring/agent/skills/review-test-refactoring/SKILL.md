@@ -112,6 +112,8 @@ the test is misclassified — it should be Strategy 2 with `@onlyAccelerator`.
 | `torch.cuda.Stream` / `torch.cuda.Event` used but test not marked as Strategy 3 | Category B — general concept; verify usage context, usually Strategy 2 | Info |
 | `TEST_CUDA` import remains but no Strategy 3 CUDA tests exist in the file | Stale import keeps file classified as device_specific | Major |
 
+**Unnecessary `@onlyAccelerator`**: If `@onlyAccelerator` was ADDED to a test that had no prior device restriction, verify the test genuinely requires an accelerator. If it works on CPU, the restriction should have been removed entirely.
+
 #### 1b. Over-generalization Detection
 
 Conversely, check that tests using Category C APIs were NOT incorrectly
@@ -141,6 +143,10 @@ inline tensor creation) against known MPS dtype limitations. The failure
 signature is: `"Cannot convert a MPS Tensor to float64 dtype"` or similar dtype
 conversion errors on MPS. In diff-based mode, pay special attention to tests
 where `@onlyCUDA` was removed.
+
+**MPS coverage safety**: When MPS coverage is broadened (new `allow_mps=True` or `@onlyAccelerator` replacing CUDA-only restriction), verify `@skipIfMPS` is present unless MPS was already covered via `@dtypesIfMPS` or `@onlyMPS`.
+
+**@onlyCPU to device-agnostic**: Verify each `@onlyCPU` test was individually evaluated (not bulk-decided). Check that `device` param was added when `@onlyCPU` was removed.
 
 #### 1c. Strategy 1 Correctness
 
@@ -227,7 +233,8 @@ should run.
 | Strategy | Expected Mechanism | Wrong Mechanism |
 |----------|-------------------|-----------------|
 | Strategy 1, no parametrization | Plain `TestCase` | `instantiate_device_type_tests` |
-| Strategy 1, with `@parametrize`/`@ops`/`@dtypes` | `@instantiate_parametrized_tests` | `instantiate_device_type_tests` |
+| Strategy 1, with `@parametrize`/`@dtypes` | `@instantiate_parametrized_tests` | `instantiate_device_type_tests` |
+| Strategy 1, with `@ops` | `instantiate_device_type_tests(..., only_for="cpu")` | `@instantiate_parametrized_tests` |
 | Strategy 2 | `instantiate_device_type_tests(TestFooDevice, globals())` | `@instantiate_parametrized_tests` |
 | Strategy 3, no parametrization | Plain `TestCase` with `setUp` guard | `instantiate_device_type_tests` |
 | Strategy 3, with parametrization | `@instantiate_parametrized_tests` | `instantiate_device_type_tests` |
@@ -258,6 +265,10 @@ catalog: if Category A, it should be `torch.accelerator.<api>()`. If Category B,
 use the unified type (e.g., `torch.Stream` instead of `torch.cuda.Stream`). If
 Category C, the test belongs in Strategy 3.
 
+**Return type compatibility**: Verify return type compatibility for all `torch.accelerator.*` replacements, especially HIGH RISK APIs: `current_device_index` (returns `int`, compare against `int`), `set_device_index` (takes `int` arg), `get_device_capability` (return type differs across backends). Consult `../../../reference/device_api_catalog.yaml` type annotations.
+
+**Remaining `torch.cuda` in S2 classes**: Scan each S2 class for remaining `torch.cuda.*` calls — each must be either migrated to `torch.accelerator.*` or the test moved to Strategy 3.
+
 ### 5. Import Cleanup
 
 | Check | How to Verify |
@@ -267,6 +278,7 @@ Category C, the test belongs in Strategy 3.
 | `TEST_XPU` import removed if no Strategy 3 XPU tests remain | `grep "TEST_XPU"` in the file |
 | `@onlyCUDA` import removed if no Strategy 3 CUDA tests remain | `grep "onlyCUDA"` in the imports |
 | `@onlyOn` import removed if all uses were replaced | `grep "onlyOn"` in the file |
+| `@onlyNativeDeviceTypes` removal | Before removing `@onlyNativeDeviceTypes`, verify dtype compatibility — `float64`/`complex128`/channels-last may be unsupported on MPS/MTIA. Prefer leaving `@onlyNativeDeviceTypes` as-is. |
 | New imports are correct | `onlyAccelerator` from `common_device_type`, `torch.accelerator` if used |
 
 ### 6. Test Completeness
@@ -281,6 +293,8 @@ its device dependency level (e.g., a test using only CPU ops should not be in a
 | Every `def test_` belongs to the correct strategy class | Cross-reference each test's API usage against the catalog and its enclosing class name |
 | `setUp` guards present for Strategy 3 | `self.skipTest` or `@unittest.skipIf` for device availability |
 | No test logic unintentionally modified | If reviewing a diff, compare test bodies against the base version. If whole-file, flag tests that appear incomplete or have empty bodies |
+| No duplicate test bodies across device-specific classes | If identical test bodies appear across S3 classes, they belong in the S2 shared class |
+| No device-specific artifacts in S2 classes | Scan for `_cuda` suffix in test method names, internal variable names like `cuda_out`, module-level helpers with `if device_type == "<backend>"` branches — clean these when the test is in an S2 class |
 
 **Diff-based review**: Additionally verify that every original test method is
 accounted for (count `def test_` in old vs new). A test "lost" in refactoring is
@@ -302,6 +316,8 @@ a regression.
 | `@onlyAccelerator` used without dtype compatibility check | Test runs on MPS/XPU but uses `complex128` or `float64` (unsupported on MPS). For every test using `@onlyAccelerator`, verify every dtype the test uses is supported on ALL target backends. If not, add `@expectedFailureMPS`, `@dtypesIfMPS`, or a skip decorator. | Blocker |
 | Test class name doesn't match OpInfo DecorateInfo references | `DecorateInfo` entries in `common_methods_invocations.py` use exact class name matching in `is_active()`. If the test class was RENAMED, verify DecorateInfo entries were updated (section 2a). If the coder kept the original name, this check is a no-op. | Blocker |
 | **Flagging an original class name as "wrong" when the coder chose not to rename** | Renaming is optional. If the coder kept the original name (e.g., `TestFoo` for an S2 class), do NOT flag it unless the name is actively misleading (e.g., a CPU-only class named `TestFooCUDA`). The `hw_classification` member will handle classification. | N/A — reviewer guidance |
+| `@unittest.skipIf(not TEST_CUDA, ...)` leftover in S2 class | Should be `@onlyAccelerator` | Major |
+| `@skipIfMPS`/`@skipXPU`/`@skipCUDAIf` applied to method without `device` parameter | These decorators check the `device` kwarg and silently fail if missing | Blocker |
 
 ### 8. Decorator Ordering
 

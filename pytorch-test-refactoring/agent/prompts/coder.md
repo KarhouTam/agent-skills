@@ -35,9 +35,18 @@ A checker will verify your work. If issues are found, you will be asked to fix t
 
 - **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipCUDAIfRocm`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd` — these document known gaps
 - **ENLARGE whitelist**: `@onlyCUDA` -> `@onlyAccelerator`, `@onlyOn` -> `@onlyAccelerator`
-- **Class naming**: Renaming is OPTIONAL. The future `hw_classification` member will handle classification. Before renaming, check external references (DecorateInfo, dynamo_skips, dynamo_expected_failures) — if many exist, keep the original name to avoid breaking them. Recommended names if renaming: S1 = keep original (no device suffix), S2 = `TestFooDevice`, S3 = `TestFooCUDA`
+- `@onlyCPU` → REMOVE (make device-agnostic: add `device` param, use `device=device`). Respect analyst's per-test classification — some may be S1.
+- **MPS safety**: When enlarging `@onlyCUDA` or `@onlyOn(["cuda", "xpu"])` → `@onlyAccelerator`, MPS is newly covered. Add `@skipIfMPS` to the method unless the test already has `@dtypesIfMPS`, `@onlyMPS`, or was already running on MPS.
+- Only enlarge `@onlyCUDA` → `@onlyAccelerator` when test logic is genuinely device-agnostic. If the test had no prior device restriction or works correctly on CPU, REMOVE the restriction entirely — do NOT add `@onlyAccelerator`. Tests relying on backend-specific behavioral guarantees (NaN handling, determinism, precision characteristics, rounding modes) should keep `@onlyCUDA`.
+- **Class naming**: Renaming is OPTIONAL. The future `hw_classification` member will handle classification. Before renaming, check external references (DecorateInfo, dynamo_skips, dynamo_expected_failures) — if many exist, keep the original name to avoid breaking them. Recommended names if renaming: S1 = keep original (no device suffix), S2 = `TestFooDevice`, S3 = `TestFooOnCUDA`
 - **Category A APIs** (`torch.cuda.empty_cache`, `synchronize`, `CUDAGraph`, `memory_*`) -> replace with `torch.accelerator.*`
 - **Category C APIs** (NCCL, NVTX, cuDNN, TF32, CUDA AMP) -> truly device-specific, keep in Strategy 3
+- **High Risk torch.accelerator APIs** (from `device_api_catalog.yaml`):
+  - `torch.accelerator.current_device_index()` — returns `int`, NOT `str`. Compare against `int` values only.
+  - `torch.accelerator.set_device_index(device_index)` — takes `int`, not a device object.
+  - `torch.accelerator.get_device_capability()` — return type DIFFERS across backends: `tuple[int, int]` on CUDA/MTIA, `dict[str, Any]` on Accelerator/XPU. Do NOT compare capability values directly without type-normalization.
+- **Derive device type from existing data — never add new parameters.** The `device` parameter from `instantiate_device_type_tests` or `tensor.device.type` from any tensor already in scope tells you the device type. Adding explicit `device_type`/`device` parameters to functions that already receive tensors or already have access to the test's `device` kwarg is redundant and breaks conventions (especially for `autograd.Function.forward()`).
+- **Device comparison patterns**: `device` is a `torch.device` object. Use `device.type` for string comparisons (`device.type == "xpu"`, not `device == "xpu"`). Use `device_type=device` in autocast calls.
 - When a test class is renamed, update ALL external references (DecorateInfo in common_methods_invocations.py, filenames in test/dynamo_skips/ and test/dynamo_expected_failures/)
 - Match existing code style
 - Do NOT commit changes
@@ -51,6 +60,7 @@ Apply each section below for every rule assigned to you above.
 - Remove `device` parameter from signatures; hardcode `"cpu"` or omit device args
 - Remove device decorators and device imports
 - Add `@instantiate_parametrized_tests` if the class has `@parametrize`/`@ops`/`@dtypes`
+- When moving a `@dtypes(dtype_a, dtype_b, ...)`-decorated test to an S1 class, convert to `@parametrize("dtype", [dtype_a, dtype_b, ...])` with `@instantiate_parametrized_tests` on the class. This preserves per-dtype independence and `@unittest.expectedFailure` per variant. Do NOT collapse `@dtypes` into a for-loop.
 
 ### If assigned strategy_2 (convert S2 tests):
 - Decide whether to rename the class. Check external references first — if the class name appears in many DecorateInfo entries or dynamo_skips/dynamo_expected_failures files, keep the original name. Otherwise, rename to `TestFooDevice` for clarity.
@@ -64,12 +74,8 @@ Apply each section below for every rule assigned to you above.
 - `@onlyAccelerator` is a METHOD decorator, NOT a class decorator
 
 ### If assigned strategy_3 (extract S3 tests):
-- Decide whether to rename the class. Check external references first — if the class name appears in many DecorateInfo entries or dynamo_skips/dynamo_expected_failures files, keep the original name. Otherwise, rename to `TestFooCUDA` for clarity.
-- Create the S3 class (plain `TestCase`, no class decorator)
-- Each test method receives `device` as first parameter after `self`
-- **Preferred pattern**: Use `instantiate_device_type_tests(<ClassName>, globals(), only_for="cuda")` at module level — this injects `device="cuda"` into every test, handles `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU` resolution correctly, and eliminates the need for per-method `@onlyCUDA` or hardcoded `device = "cuda"` lines
-- Fallback (no device-type-aware decorators): plain `TestCase` with `setUp` guard — use only when the class has NO `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or `@parametrize` decorators
-- Do NOT use `@instantiate_parametrized_tests` for S3 — it breaks `@dtypes`/`@dtypesIfCUDA` resolution (these decorators rely on `instantiate_device_type_tests` for device-type injection)
+- S3 classes MUST NOT use `instantiate_device_type_tests`. Use plain `TestCase` with `setUp` guard (`@unittest.skipIf(not torch.cuda.is_available(), ...)`). Hardcode device strings (`"cuda"`, `torch.cuda.*` calls).
+- Naming: `TestFooOn<Device>` (e.g., `TestFooOnCUDA`), NOT `TestFooCUDA`.
 
 ### If assigned cleanup:
 - Remove stale imports: `TEST_CUDA`, `TEST_MPS`, `TEST_XPU`, `onlyOn`, `onlyCUDA` (only if no Strategy 3 class remains)
@@ -81,7 +87,17 @@ Apply each section below for every rule assigned to you above.
   ```
   Replace `OLD_CLASS_NAME` with each old class name. When a device-parametrized class is renamed (e.g. TestFoo → TestFooDevice), `instantiate_device_type_tests` creates variants like `TestFooCUDA` which becomes `TestFooDeviceCUDA`. Files named after the OLD variant (e.g. `TestFooCUDA.test_method`) must be renamed to the NEW variant (e.g. `TestFooDeviceCUDA.test_method`).
   If original names were kept, skip this step.
+  **CRITICAL**: You MUST check BOTH `dynamo_skips/` AND `dynamo_expected_failures/` — updating only one will cause CI failures. NEVER add new `@unittest.skip` or `@skipIf` decorators to work around CI failures from class renames — fix the sentinel files or revert the rename.
 - Verify classification is correct across all classes (naming is secondary — mechanism and API usage are what matter)
+- Verify each imported symbol exists in the target module. Do NOT assume a symbol is re-exported from a module just because it was grouped with that module's imports. When in doubt, check the defining module via `grep "def <symbol>\|<symbol> ="`.
+
+### Common Pitfalls
+
+- **Mixed-device tests**: When a test deliberately creates tensors on different devices (CPU + accelerator) to verify cross-device error handling:
+  - Keep CPU tensors as explicit CPU (part of test logic, not a device assumption)
+  - Use the `device` parameter for accelerator tensors
+  - Scope with `@onlyAccelerator`
+  - Do NOT move to S1 or blindly convert all tensors to `device`
 
 ## After Changes
 

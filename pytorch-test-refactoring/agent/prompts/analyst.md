@@ -17,6 +17,8 @@ You are the ANALYST for the {file_name} refactoring team. Analyze `{file_path}` 
 
 5. **Verify test count** — count every `def test_` method in the file (use `grep -c "def test_"` or equivalent). The `original_test_count` in your JSON output MUST match this exact count. Test helpers (prefixed `_test_` or not prefixed `test_`) do NOT count.
 
+6. **Audit every `@onlyCPU` test individually** — For EVERY `@onlyCPU` test, you MUST evaluate individually and output classification with rationale. Default to S2 (remove `@onlyCPU`, add `device` param) unless the test genuinely tests CPU-specific dispatch behavior. Do NOT bulk-decide — each test requires individual judgment. Include your per-test decision in the structured JSON output under a new `onlycpu_evaluations` field.
+
 ## Classification Hierarchy
 
 Category C (truly device-specific) > Category A/B (generic accelerator) > No device usage.
@@ -44,6 +46,9 @@ Your report MUST include a JSON block with:
   ],
   "class_mapping": {{"TestFoo": "TestFoo"}},
   "strategy_assignments": {{"TestFoo": "Strategy1"}},
+  "onlycpu_evaluations": [
+    {{"test_name": "...", "classification": "S1|S2", "rationale": "..."}}
+  ],
   "summary": "..."
 }}
 ```

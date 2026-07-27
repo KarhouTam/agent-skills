@@ -176,6 +176,23 @@ class RefactorLogger:
             }
         )
 
+    def warning(self, phase: str, warning_type: str, warning_message: str):
+        """Log a non-blocking warning to the audit trail and status summary."""
+        self._write_audit(
+            {
+                "event": "warning",
+                "phase": phase,
+                "warning_type": warning_type,
+                "warning_message": warning_message,
+            }
+        )
+        summary = self._status.get("summary", "")
+        self._update_status(
+            {
+                "summary": f"{summary} | WARNING: {warning_message[:200]}",
+            }
+        )
+
     def error(self, phase: str, error_type: str, error_message: str):
         self._write_audit(
             {

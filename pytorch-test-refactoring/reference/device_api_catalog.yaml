@@ -675,6 +675,26 @@ decision_rules:
       condition: "Any Category B or C API usage"
       class_suffix: ""  # optional: "{Device}" → TestFooCUDA, TestFooXPU, etc. (renaming is optional)
 
+# ── Decorator Classification ───────────────────────────────────────────────
+# Device scope decorators and their relationships
+# Consumed by: Analyst and Checker agents during test classification
+
+decorator_classification:
+  description: "Device scope decorators and their relationships"
+  decorators:
+    onlyNativeDeviceTypes:
+      scope: "Native devices (cpu, cuda, xpu, meta, mps, mtia)"
+      includes_cpu: true
+      action: "LEAVE AS-IS — not interchangeable with @onlyAccelerator"
+      note: "Has BROADER coverage than @onlyAccelerator (includes CPU). Do NOT replace with @onlyAccelerator."
+    onlyAccelerator:
+      scope: "Accelerator devices only"
+      includes_cpu: false
+      action: "Use for device-agnostic tests requiring accelerator hardware"
+    onlyNativeDeviceTypesAnd:
+      scope: "Native devices plus specified backends"
+      note: "Superset of @onlyNativeDeviceTypes with additional backends"
+
 # ── Architecture Notes ────────────────────────────────────────────────────
 
 architecture:

@@ -17,7 +17,7 @@ Class renaming is **OPTIONAL**. The future `hw_classification` member on TestCas
 |----------|----------------------|---------------|---------|
 | **Accelerator-unrelated** (S1) | `TestFoo` (keep original name) | `@instantiate_parametrized_tests` or plain `TestCase` | `TestBinaryUfuncs` |
 | **Accelerator-agnostic** (S2) | `TestFooDevice` | `instantiate_device_type_tests()` | `TestBinaryUfuncsDevice` |
-| **Accelerator-specific** (S3) | `TestFoo<Device>` | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`; otherwise plain `TestCase` with `setUp` guard | `TestBinaryUfuncsCUDA` |
+| **Accelerator-specific** (S3) | `TestFooOn<Device>` | Plain `TestCase` with `setUp` guard (NEVER uses `instantiate_device_type_tests`) | `TestBinaryUfuncsOnCUDA` |
 
 ### Renaming Decision
 
@@ -38,7 +38,7 @@ Class renaming is **OPTIONAL**. The future `hw_classification` member on TestCas
 
 `instantiate_device_type_tests` **removes** the generic class from scope and replaces it with per-device variants (`TestFooDeviceCPU`, `TestFooDeviceCUDA`, etc.). `instantiate_parametrized_tests` keeps the class discoverable.
 
-**S3 instantiation rule**: When an S3 class uses `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or other device-type-aware decorators (which are designed for `instantiate_device_type_tests`), use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` instead of `@instantiate_parametrized_tests`. Each test method receives `device` as its first parameter (always `"cuda"`), eliminating the need for per-method `@onlyCUDA` decorators or hardcoded `device = "cuda"` lines. This keeps mechanism consistency with S2 and lets `instantiate_device_type_tests` inject device-aware dtype resolution.
+**S3 mechanism**: S3 classes use plain `TestCase` with `setUp` guard and hardcoded device strings — they NEVER use `instantiate_device_type_tests`. When a test has both Category C APIs and `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU` decorators (which depend on `instantiate_device_type_tests` for resolution), the test is not suitable for S3 extraction and should remain as-is in its original class.
 
 ## Classification
 
@@ -48,7 +48,7 @@ Every test falls into one of three categories. Classification is hierarchical: *
 |----------|-----------|-----------|
 | **Accelerator-unrelated (S1)** | No device usage; CPU only | `instantiate_parametrized_tests()` or plain `TestCase` |
 | **Accelerator-agnostic (S2)** | Uses a device but only generic accelerator APIs | `instantiate_device_type_tests()` |
-| **Accelerator-specific (S3)** | Requires a particular accelerator's unique features | `instantiate_device_type_tests(..., only_for=...)` when `@dtypes`-style decorators exist; otherwise plain `TestCase` |
+| **Accelerator-specific (S3)** | Requires a particular accelerator's unique features | Plain `TestCase` with `setUp` guard (NEVER uses `instantiate_device_type_tests`) |
 
 ### Device API Categories (consult `../../../reference/device_api_catalog.yaml`)
 
@@ -65,7 +65,10 @@ Every test falls into one of three categories. Classification is hierarchical: *
 | Decorator Type | Examples | Principle | Action |
 |---------------|----------|-----------|--------|
 | **Blacklist** (explicit skips) | `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd` | Documents a **known gap** — intentional and informed | **KEEP as-is** |
-| **Whitelist** (restrictive) | `@onlyCUDA`, `@onlyCPU`, `@onlyOn(["cuda","xpu"])`, `@unittest.skipIf(not TEST_CUDA, ...)` | Artificially **restricts** — usually historical accident | **ENLARGE** to `@onlyAccelerator` |
+| **Whitelist** (restrictive) | `@onlyCUDA`, `@onlyOn(["cuda","xpu"])`, `@unittest.skipIf(not TEST_CUDA, ...)` | Artificially **restricts** — usually historical accident | **ENLARGE** to `@onlyAccelerator` |
+| **Whitelist** (restrictive) | `@onlyCPU` | Artificially **restricts** — usually historical accident | **REMOVE** — make test device-agnostic (add `device` param, pass `device=device`). MUST evaluate each `@onlyCPU` test individually. Default to S2 unless the test genuinely tests CPU-only dispatch behavior. |
+
+**`@onlyNativeDeviceTypes`** is NOT in the whitelist/enlargement list — leave it untouched. It includes CPU (`native_devices = ('cpu', 'cuda', 'xpu', 'meta', 'mps', 'mtia')`) while `@onlyAccelerator` excludes CPU — they are not interchangeable.
 
 ### Decision Tree
 
@@ -81,6 +84,8 @@ Does the test reference a device?
 What decorators?
 ├─ Blacklist (@skipXPU, @skipCUDAIf, @skipMPS, @skipMeta, @onlyNativeDeviceTypesAnd) → KEEP
 ├─ Whitelist (@onlyCUDA, @onlyOn, @unittest.skipIf(not TEST_CUDA, ...)) → ENLARGE to @onlyAccelerator
+
+> **Note:** An `if device_type == "<backend>"` conditional in the test body does NOT make a test S3 — only Category C API calls do.
 ```
 
 ### False-CUDA Patterns (→ S2, NOT S3)
@@ -94,6 +99,10 @@ These almost always indicate S2:
 | `device="cuda"` in tensor creation | Any device would work | `device` param |
 | `@unittest.skipIf(not TEST_CUDA, ...)` | Proxy for "needs accelerator" | `@onlyAccelerator` |
 | Test name contains `_cuda` | Naming, not functional | Remove suffix |
+
+**Caveats:**
+- Do NOT enlarge `@onlyCUDA` → `@onlyAccelerator` if the test had no prior device restriction — remove the restriction entirely instead.
+- Keep `@onlyCUDA` if the test relies on backend-specific behavioral guarantees (NaN handling, determinism, precision, rounding modes).
 
 ## Strategy 1: Accelerator-Unrelated (S1)
 
@@ -196,32 +205,10 @@ instantiate_device_type_tests(TestFooDevice, globals())
 
 Tests requiring a particular accelerator's unique (Category C) features.
 
-**Preferred Pattern — `instantiate_device_type_tests` with `only_for`:**
-Use this when the class has `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or `@parametrize` decorators — these rely on device-type injection from `instantiate_device_type_tests`.
+**S3 NEVER uses `instantiate_device_type_tests`.** Use plain `TestCase` with `setUp` guard. Hardcode device strings (`"cuda"`, `torch.cuda.*` calls). Naming convention: `TestFooOn<Device>` (e.g., `TestFooOnCUDA`), NOT `TestFooCUDA` — the latter could collide with `instantiate_device_type_tests(TestFoo)` generating `TestFooCUDA`.
+
 ```python
-class TestFooCUDA(TestCase):
-    # device is injected by instantiate_device_type_tests (always "cuda")
-    # @dtypesIfCUDA resolves correctly because device_type is known
-
-    @dtypesIfCUDA(torch.float16, torch.float32)
-    def test_cuda_specific_feature(self, device, dtype):
-        # device == "cuda" always
-        torch.cuda.empty_cache()
-        t = torch.randn(100, 100, device=device, dtype=dtype)
-        ...
-
-# Module level:
-instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")
-```
-This pattern:
-- Injects `device="cuda"` into every test method (no hardcoded `device = "cuda"`)
-- Correctly resolves `@dtypesIfCUDA`/`@dtypesIfCPU`/`@dtypes` (device-type-aware decorators)
-- Eliminates per-method `@onlyCUDA` decorators
-- Keeps mechanism consistency with S2 (`instantiate_device_type_tests`)
-
-**Fallback — Plain TestCase with setUp** (no device-type-aware decorators):
-```python
-class TestFooCUDA(TestCase):
+class TestFooOnCUDA(TestCase):
     def setUp(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA not available")
@@ -231,15 +218,16 @@ class TestFooCUDA(TestCase):
         ...
 ```
 
+For tests that use `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`/`@parametrize` decorators alongside Category C APIs, these device-type-aware decorators cannot be resolved outside `instantiate_device_type_tests`. Such tests are not suitable for S3 extraction and should remain as-is in their original class.
+
 **Why NOT `@instantiate_parametrized_tests`?**
 `@instantiate_parametrized_tests` cannot resolve `@dtypesIfCUDA`/`@dtypesIfCPU` correctly — these decorators rely on the device-type context that only `instantiate_device_type_tests` provides. Using `@instantiate_parametrized_tests` for S3 classes with device-type-aware decorators results in incorrect dtype selection or runtime errors.
 
 **Steps:**
-1. Confirm the test genuinely uses Category C APIs.
-2. Extract into the S3 class. Decide whether to rename (see "Renaming Decision" above). If renaming, use `TestFoo<Device>` (e.g., `TestFooCUDA`); otherwise keep the original name.
-3. Add `device` parameter to each test method (injected by `instantiate_device_type_tests`).
-4. Use `instantiate_device_type_tests(<ClassName>, globals(), only_for="cuda")` at module level — preferred if any `@dtypes`/`@dtypesIfCUDA`/`@parametrize` decorators exist.
-5. Fallback: plain `TestCase` with `setUp` guard and hardcoded `device = "cuda"` — only when NO device-type-aware decorators exist.
+1. Confirm the test genuinely uses Category C APIs and has no `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU` decorators (tests with those decorators should remain as-is).
+2. Extract into the S3 class. Decide whether to rename (see "Renaming Decision" above). If renaming, use `TestFooOn<Device>` (e.g., `TestFooOnCUDA`), NOT `TestFooCUDA` — the latter could collide with `instantiate_device_type_tests(TestFoo)` generating `TestFooCUDA`; otherwise keep the original name.
+3. Hardcode device strings — no `device` parameter (S3 uses plain `TestCase`, not `instantiate_device_type_tests`).
+4. Add `setUp` guard: skip test if the required device is unavailable.
 
 ## Combined Workflow
 
@@ -317,7 +305,7 @@ ls test/dynamo_expected_failures/TestFoo.* 2>/dev/null
 | Plain `TestCase` | No | Yes | No parametrization needed |
 | `instantiate_parametrized_tests()` | No | Yes | Tests with `@parametrize`/`@ops`/`@dtypes`, no device dependency |
 | `instantiate_device_type_tests()` | Yes (CPU, CUDA, MPS, ...) | No (removed from scope) | Tests with a `device` parameter, works on any accelerator |
-| `instantiate_device_type_tests(..., only_for="cuda")` | Yes (CUDA only) | No (removed from scope) | S3 classes with `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`; device injected as `"cuda"` |
+| Plain `TestCase` with `setUp` guard | No | Yes (no parametrization) | S3 classes — Category C APIs, no device-type-aware decorators |
 
 ## Common Pitfalls
 
@@ -334,8 +322,11 @@ ls test/dynamo_expected_failures/TestFoo.* 2>/dev/null
 | **Renaming class without updating dynamo_skips/** | Search `test/dynamo_skips/` for filenames starting with old class name and rename to new class name |
 | **Renaming class without updating dynamo_expected_failures/** | Search `test/dynamo_expected_failures/` for filenames starting with old class name and rename to new class name |
 | **Using `instantiate_device_type_tests` for S1 tests** | Creates wasteful per-device variants doing the same CPU work — use `instantiate_parametrized_tests` |
-| **Using `@instantiate_parametrized_tests` for S3 with `@dtypesIfCUDA`** | `@dtypesIfCUDA` needs device-type context from `instantiate_device_type_tests` — use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` |
+| **Using `@instantiate_parametrized_tests` for S3 with `@dtypesIfCUDA`** | `@dtypesIfCUDA` needs device-type context from `instantiate_device_type_tests`. Tests with both Category C APIs and `@dtypesIfCUDA`/`@dtypes`/`@parametrize` are not suitable for S3 extraction — keep in original class |
 | **Mixing `device` param and hardcoded `"cuda"` in same class** | Pick one strategy per class |
+| **Including device suffix in S3 class name when using `instantiate_device_type_tests(..., only_for=...)` produces doubled names** | S3 should use plain `TestCase` with `setUp` guard instead |
+| **Derive device type from existing data — never add new parameters** | The `device` parameter from `instantiate_device_type_tests` or `tensor.device.type` from any tensor in scope already provides the device type. Adding explicit `device_type`/`device` parameters to functions that already receive tensors or have access to the test's `device` kwarg is redundant and breaks conventions (especially `autograd.Function.forward()`). |
+| **Mixed-device tests** | When a test deliberately creates tensors on different devices (CPU + accelerator) for cross-device error handling: keep CPU tensors as explicit CPU, use `device` param for accelerator tensors, scope with `@onlyAccelerator`. Do NOT move to S1 or blindly convert all tensors to `device`. |
 
 ## Related Skills
 

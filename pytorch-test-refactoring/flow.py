@@ -282,6 +282,23 @@ class RefactorFlow:
                 except Exception:
                     pass
 
+    # ── PR scope warning ─────────────────────────────────────────
+
+    DIFF_SIZE_WARN_THRESHOLD = 500
+
+    @staticmethod
+    def _estimate_diff_size(file_size: int, num_rules: int) -> int:
+        """Rough heuristic for total diff size of a refactoring.
+
+        Estimates lines changed as ~30% of the file, distributed across
+        applicable rules.  This is a ballpark figure — not a precise
+        diff prediction.
+        """
+        if num_rules < 1:
+            return 0
+        lines_per_rule = file_size / num_rules * 0.3
+        return int(num_rules * lines_per_rule)
+
     def _run_phases(self):
         # Phase 1: Assess (no AI) — skip if already computed
         if not self.state.line_ranges:
@@ -324,6 +341,18 @@ class RefactorFlow:
                 coder_count=self.state.coder_count,
                 tasks_distributed=len(self.state.coder_tasks or []),
             )
+
+            # Non-blocking PR scope warning
+            num_rules = len(self.state.coder_tasks or [])
+            estimated = self._estimate_diff_size(self.state.file_size, num_rules)
+            if estimated > self.DIFF_SIZE_WARN_THRESHOLD:
+                self.log.warning(
+                    "distribute",
+                    "LargeDiff",
+                    f"Estimated diff ~{estimated} lines ({self.state.file_size} lines, "
+                    f"{num_rules} rules). Consider splitting across multiple PRs "
+                    f"for easier review.",
+                )
 
         # Phase 4: Code-Check loop (per-rule: code → check → fix → check ...)
         if self.state.rule_index < len(self.state.coder_tasks or []):
