@@ -36,7 +36,11 @@ A checker will verify your work. If issues are found, you will be asked to fix t
 - **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipCUDAIfRocm`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd` — these document known gaps
 - **ENLARGE whitelist**: `@onlyCUDA` -> `@onlyAccelerator`, `@onlyOn` -> `@onlyAccelerator`
 - `@onlyCPU` → REMOVE (make device-agnostic: add `device` param, use `device=device`). Respect analyst's per-test classification — some may be S1.
-- **MPS safety**: When enlarging `@onlyCUDA` or `@onlyOn(["cuda", "xpu"])` → `@onlyAccelerator`, MPS is newly covered. Add `@skipIfMPS` to the method unless the test already has `@dtypesIfMPS`, `@onlyMPS`, or was already running on MPS.
+- **MPS safety**: Add `@skipIfMPS` to ANY test that was previously scoped OUT of MPS but is now scoped to run on MPS for the first time. This applies to THREE scenarios:
+  1. Enlarging `@onlyCUDA` or `@onlyOn(["cuda", "xpu"])` → `@onlyAccelerator` (MPS is newly covered)
+  2. Removing `@onlyCPU` from a test to make it device-agnostic (test now runs on MPS for the first time)
+  3. Moving a test from an S1 context (CPU-only) to an S2 context (device-parametrized)
+  Exception: Do NOT add `@skipIfMPS` if the test already has `@dtypesIfMPS`, `@onlyMPS`, or was already running on MPS (i.e., had no device restriction before).
 - Only enlarge `@onlyCUDA` → `@onlyAccelerator` when test logic is genuinely device-agnostic. If the test had no prior device restriction or works correctly on CPU, REMOVE the restriction entirely — do NOT add `@onlyAccelerator`. Tests relying on backend-specific behavioral guarantees (NaN handling, determinism, precision characteristics, rounding modes) should keep `@onlyCUDA`.
 - **Class naming**: Renaming is OPTIONAL. The future `hw_classification` member will handle classification. Before renaming, check external references (DecorateInfo, dynamo_skips, dynamo_expected_failures) — if many exist, keep the original name to avoid breaking them. Recommended names if renaming: S1 = keep original (no device suffix), S2 = `TestFooDevice`, S3 = `TestFooOnCUDA`
 - **Category A APIs** (`torch.cuda.empty_cache`, `synchronize`, `CUDAGraph`, `memory_*`) -> replace with `torch.accelerator.*`
@@ -91,6 +95,24 @@ Apply each section below for every rule assigned to you above.
 - Verify classification is correct across all classes (naming is secondary — mechanism and API usage are what matter)
 - Verify each imported symbol exists in the target module. Do NOT assume a symbol is re-exported from a module just because it was grouped with that module's imports. When in doubt, check the defining module via `grep "def <symbol>\|<symbol> ="`.
 
+### If assigned extraction of S1 tests into new class:
+- Create a new class inheriting from `TestCase` (NOT using `instantiate_device_type_tests`)
+- Move the listed test methods from the original class into the new class
+- Remove `device` parameter from moved test signatures
+- Hardcode `device="cpu"` or omit device args entirely in moved tests
+- Add `@instantiate_parametrized_tests` on the new class if any moved test uses `@parametrize`/`@ops`/`@dtypes`
+- When a moved test had `@dtypes(dtype_a, dtype_b, ...)`, convert to `@parametrize("dtype", [dtype_a, dtype_b, ...])` with `@instantiate_parametrized_tests` on the class. This preserves per-dtype independence and `@unittest.expectedFailure` per variant. Do NOT collapse `@dtypes` into a for-loop.
+- Verify test count is preserved: sum of tests in original class (after removal) + new class = original total
+
+### Helper Function Refactoring
+
+When a helper function (prefixed `_test_` or `_`) in the original class contains device-specific patterns that are now inconsistent with the refactored tests:
+- **Signature change**: If the helper uses `device_type` (module-level) or `self.device_type`, and all callers now pass a `device` parameter from `instantiate_device_type_tests`, add `device` as a parameter to the helper.
+- **Internal updates**: Replace `device_type` references with `device` or `device.type` inside the helper. Replace `tensor.to(device_type)` → `tensor.to(device)`.
+- **Call site updates**: Update ALL call sites to pass the `device` parameter.
+- **Markers**: Look for "TODO: update this to use the device argument properly" comments — these are explicit signals that the helper needs refactoring.
+- **Module-level `device_type` variable**: If the module-level `device_type` variable was only used by helpers you're refactoring, remove it. If it's still used elsewhere, keep it but flag it in your report.
+
 ### Common Pitfalls
 
 - **Mixed-device tests**: When a test deliberately creates tensors on different devices (CPU + accelerator) to verify cross-device error handling:
@@ -103,7 +125,7 @@ Apply each section below for every rule assigned to you above.
 
 Verify syntax:
 ```bash
-python -c "import py_compile; py_compile.compile('{file_path}', doraise=True)"
+python -c "import py_compile; py_compile.compile('{file_path}', doraise=True)" 
 ```
 
 When done, report back with:

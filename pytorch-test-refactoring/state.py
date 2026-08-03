@@ -60,6 +60,23 @@ class AnalystFinding(BaseModel):
     target_class: str = ""
 
 
+class NewClassSpec(BaseModel):
+    """Specification for a new class to create during refactoring.
+
+    When an existing class contains tests of mixed strategies, the analyst
+    recommends extracting some tests into a new class.  This model captures
+    the new class's name, strategy, instantiation mechanism, and which
+    tests to move into it.
+    """
+
+    name: str
+    strategy: str  # "Strategy1" | "Strategy2" | "Strategy3"
+    base_class: str = "TestCase"
+    instantiation: str = ""  # e.g. "@instantiate_parametrized_tests" or ""
+    tests: list[str] = []  # test method names to move
+    rationale: str = ""
+
+
 class AnalystReport(BaseModel):
     """Parsed output of the analyst agent's report."""
 
@@ -68,6 +85,8 @@ class AnalystReport(BaseModel):
     findings: list[AnalystFinding]
     class_mapping: dict[str, str] = {}
     strategy_assignments: dict[str, str] = {}
+    new_classes: list[NewClassSpec] = []
+    onlycpu_evaluations: list[dict] = []
     summary: str = ""
 
 

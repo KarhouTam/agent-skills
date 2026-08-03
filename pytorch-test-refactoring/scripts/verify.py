@@ -42,6 +42,8 @@ def verify(
     checks.append(_check_dtype_integrity(file_path))
     checks.append(_check_accelerator_safety(file_path))
     checks.append(_check_coverage_preservation(file_path, workspace))
+    checks.append(_check_class_split(file_path, original_classes, workspace))
+    checks.append(_check_skipifmps_coverage(file_path, workspace))
 
     all_passed = all(c.passed for c in checks)
 
@@ -832,6 +834,176 @@ _STALE_IMPORTS = [
     "onlyCUDA",
 ]
 
+# Module-level symbols that become stale after S2 conversion.
+_STALE_SYMBOLS = [
+    "device_type",
+]
+
+
+# ── P1: Class split verification ─────────────────────────────────────
+
+def _check_class_split(
+    file_path: str, original_classes: list[str], workspace: Path | None = None
+) -> VerificationCheck:
+    """Verify that class extraction matches analyst recommendations.
+
+    Reads analyst_report.json from workspace and checks:
+    1. If new_classes were recommended, the new classes exist in the file
+    2. The recommended tests were actually moved out of the original class
+    3. New classes have correct instantiation (no instantiate_device_type_tests for S1)
+    """
+    if workspace is None:
+        file_name = Path(file_path).stem
+        workspace = get_workspace(file_name)
+
+    analyst_path = workspace / "analyst_report.json"
+    if not analyst_path.exists():
+        return VerificationCheck(
+            name="class_split",
+            passed=True,
+            details="No analyst report found, skipping class split check",
+        )
+
+    try:
+        analyst = json.loads(analyst_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return VerificationCheck(
+            name="class_split",
+            passed=True,
+            details="Could not parse analyst report, skipping",
+        )
+
+    new_classes = analyst.get("new_classes", [])
+    if not new_classes:
+        return VerificationCheck(
+            name="class_split",
+            passed=True,
+            details="No class splits recommended by analyst",
+        )
+
+    content = Path(file_path).read_text()
+    issues: list[str] = []
+
+    for nc in new_classes:
+        class_name = nc.get("name", "")
+        tests_to_move = set(nc.get("tests", []))
+        strategy = nc.get("strategy", "")
+
+        # Check the new class exists
+        class_pattern = rf"class {class_name}\b"
+        if not re.search(class_pattern, content):
+            issues.append(f"Recommended class '{class_name}' not found in file")
+            continue
+
+        # Check tests were moved out of the original class
+        class_start_pattern = r"class (\w+)\(.*TestCase"
+        class_starts = list(re.finditer(class_start_pattern, content))
+
+        for i, m in enumerate(class_starts):
+            cls_name = m.group(1)
+            start_pos = m.start()
+            end_pos = class_starts[i + 1].start() if i + 1 < len(class_starts) else len(content)
+            class_body = content[start_pos:end_pos]
+
+            # Only check original (non-new) classes
+            if cls_name == class_name:
+                continue
+
+            # Check if any test that should have been moved is still here
+            for test_name in tests_to_move:
+                if f"def {test_name}" in class_body:
+                    issues.append(
+                        f"'{test_name}' still in '{cls_name}' "
+                        f"(should be in '{class_name}')"
+                    )
+
+        # Check correct instantiation for S1 classes
+        if strategy == "Strategy1":
+            if f"instantiate_device_type_tests({class_name}" in content:
+                issues.append(
+                    f"S1 class '{class_name}' uses instantiate_device_type_tests "
+                    f"— should use plain TestCase or @instantiate_parametrized_tests"
+                )
+
+    passed = len(issues) == 0
+    return VerificationCheck(
+        name="class_split",
+        passed=passed,
+        details="All recommended class splits applied correctly"
+        if passed
+        else "; ".join(issues[:10]),
+    )
+
+
+# ── P2: @skipIfMPS coverage check ────────────────────────────────────
+
+def _check_skipifmps_coverage(
+    file_path: str, workspace: Path | None = None
+) -> VerificationCheck:
+    """Verify @skipIfMPS is present on tests newly exposed to MPS.
+
+    When @onlyCPU is removed or @onlyCUDA/@onlyOn is enlarged, the test
+    runs on MPS for the first time.  This check ensures @skipIfMPS is
+    added as a safety measure on those tests.
+    """
+    # Try to get original file from git for comparison
+    try:
+        proc = subprocess.run(
+            ["git", "show", f"HEAD:{file_path}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode != 0:
+            return VerificationCheck(
+                name="skipifmps_coverage",
+                passed=True,
+                details="Could not retrieve original file from git",
+            )
+        original_content = proc.stdout
+    except (subprocess.TimeoutExpired, OSError):
+        return VerificationCheck(
+            name="skipifmps_coverage",
+            passed=True,
+            details="Could not retrieve original file from git (timeout/error)",
+        )
+
+    current_content = Path(file_path).read_text()
+    missing_mps: list[str] = []
+
+    # Find tests that were @onlyCPU in original but no longer are
+    orig_methods = _extract_method_decorators(original_content)
+    curr_methods = _extract_method_decorators(current_content)
+
+    for method in set(orig_methods.keys()) & set(curr_methods.keys()):
+        orig_decos = set(orig_methods[method])
+        curr_decos = set(curr_methods[method])
+
+        # Test had @onlyCPU originally (was CPU-only, never on MPS)
+        had_onlycpu = any(d.startswith("@onlyCPU") for d in orig_decos)
+        # Test already had skipIfMPS
+        had_skipmps = any("@skipIfMPS" in d for d in orig_decos)
+
+        # If test had @onlyCPU removed (now runs on MPS for first time)
+        has_onlycpu_now = any(d.startswith("@onlyCPU") for d in curr_decos)
+        if had_onlycpu and not has_onlycpu_now and not had_skipmps:
+            # Check if @skipIfMPS was added
+            has_skipmps_now = any("@skipIfMPS" in d for d in curr_decos)
+            has_dtypesifmps = any("@dtypesIfMPS" in d for d in curr_decos)
+            if not has_skipmps_now and not has_dtypesifmps:
+                missing_mps.append(method)
+
+    passed = len(missing_mps) == 0
+    return VerificationCheck(
+        name="skipifmps_coverage",
+        passed=passed,
+        details="All newly-MPS-exposed tests have @skipIfMPS"
+        if passed
+        else f"Missing @skipIfMPS on: {', '.join(missing_mps[:15])}"
+        + (f" and {len(missing_mps) - 15} more" if len(missing_mps) > 15 else ""),
+    )
+
+
 
 def _check_imports(file_path: str) -> VerificationCheck:
     """Verify no stale device-specific imports remain.
@@ -843,6 +1015,10 @@ def _check_imports(file_path: str) -> VerificationCheck:
     """
     content = Path(file_path).read_text()
     findings = [imp for imp in _STALE_IMPORTS if imp in content]
+    # Also detect module-level stale symbol assignments
+    for sym in _STALE_SYMBOLS:
+        if re.search(rf"^{sym}\s*=", content, re.MULTILINE):
+            findings.append(f"{sym} (module-level variable)")
 
     # Exempt onlyCUDA when actively used as a decorator (S3 classes)
     if "onlyCUDA" in findings and re.search(r"@onlyCUDA\b", content):

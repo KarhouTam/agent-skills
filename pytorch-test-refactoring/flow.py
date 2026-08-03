@@ -50,15 +50,17 @@ def _finding_matches_rule(finding, rule_id: str) -> bool:
     cat = finding.category
     tgt = finding.target_class
     if rule_id == "strategy_1":
+        # Match S1 classifications AND findings targeting non-device classes.
+        # Also match when the target class is a new CPU-only class (S1 extraction).
         return bool(
             tgt
             and "Device" not in tgt
             and "CUDA" not in tgt
             and "MPS" not in tgt
             and "XPU" not in tgt
-        )
+        ) or cat in ("classification",)
     if rule_id == "strategy_2":
-        return cat in ("whitelist", "device_api") or (tgt and "Device" in tgt)
+        return cat in ("whitelist", "device_api", "stale_symbol") or (tgt and "Device" in tgt)
     if rule_id == "strategy_3":
         return (
             cat == "classification"
@@ -66,7 +68,7 @@ def _finding_matches_rule(finding, rule_id: str) -> bool:
             and any(d in tgt for d in ("CUDA", "MPS", "XPU"))
         )
     if rule_id == "cleanup":
-        return cat == "stale_import"
+        return cat in ("stale_import", "stale_symbol")
     return False
 
 
@@ -642,6 +644,10 @@ class RefactorFlow:
         Sharding is deterministic (no AI): one coder per applicable refactoring rule.
         The analyst owns classification (what strategy each test needs);
         distribute owns sharding (how to divide the work across coders).
+
+        When the analyst recommends class splits (new_classes), the strategy_1
+        rule is augmented with explicit extraction instructions: which tests
+        to move, the new class name, base class, and instantiation method.
         """
         self.state.current_phase = "distribute"
         if self.state.analyst_report is None:
@@ -657,6 +663,28 @@ class RefactorFlow:
         report = self.state.analyst_report
         rules = compute_applicable_rules(report.strategy_assignments)
         self.state.coder_count = len(rules)
+
+        # Build extraction instructions from new_classes for strategy_1
+        new_class_instructions = ""
+        if report.new_classes:
+            parts = []
+            for nc in report.new_classes:
+                test_list = "\n".join(f"    - {t}" for t in nc.tests)
+                inst = nc.instantiation or "none"
+                parts.append(
+                    f"**Create class `{nc.name}` ({nc.strategy})**\n"
+                    f"  - Base class: `{nc.base_class}`\n"
+                    f"  - Instantiation: `{inst}`\n"
+                    f"  - Rationale: {nc.rationale}\n"
+                    f"  - Tests to move ({len(nc.tests)} total):\n{test_list}"
+                )
+            new_class_instructions = (
+                "\n## Class Extraction Plan\n\n"
+                + "\n\n".join(parts)
+                + "\n\n**IMPORTANT**: The strategy_1 rule includes class extraction. "
+                "Do NOT skip creating the new class — keeping S1 tests in an S2 "
+                "class with @onlyCPU preserved does NOT achieve the refactoring goal."
+            )
 
         coder_tasks: list[CoderTask] = []
         for i, rule_id in enumerate(rules):
@@ -675,6 +703,11 @@ class RefactorFlow:
                     f"No specific findings for rule '{rule_id}'. "
                     f"Apply the rule across the entire file."
                 )
+
+            # Augment strategy_1 instructions with class extraction plan
+            if rule_id == "strategy_1" and new_class_instructions:
+                instructions = new_class_instructions + "\n\n## Per-Finding Actions\n\n" + instructions
+
             coder_tasks.append(
                 CoderTask(
                     coder_id=f"coder-{i + 1}",

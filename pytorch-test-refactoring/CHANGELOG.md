@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-07-31 ~ 08-03 — 工作流改进与全流程验证（test_reductions.py × PR #185881）
+
+以合入 PR #185881（545b05f → 341a9a2）为 gold standard，两轮迭代改进后全流程评估。评估产物在 `eval_scratch/`。
+
+> **结论**：工作流结构正确，瓶颈在分类精度。两轮改进后分类准确率 77% → 80%（+3pp），类拆分/MPS 安全/过期符号检测等 5 项满分通过。唯一差距 G6（`apply_` carve-out 缺失，6 个误分类），`analyst.md` 单点修复后预计 → ~100%。
+
+### 改进要点
+
+- **类拆分支持**：`state.py` +`NewClassSpec`，`analyst.md` +Task 7，`flow.py` 从 analyst 报告生成类提取任务。此前 0% 覆盖率。
+- **@onlyCPU 分类启发式**：两轮迭代——第一轮 6 个增强启发式 + tiebreaker；第二轮修复 5 个可泛化差距（Scope Guard、三级决策、扩展 S1 指标、优先级规则、上下文线索），误分类率 23% → 预估 <5%。
+- **MPS 安全规则**：`coder.md` 3 场景覆盖 + `verify.py` `_check_skipifmps_coverage()`。
+- **类拆分验证**：`verify.py` `_check_class_split()`。
+- **Helper 重构 + 过期符号**：`coder.md` helper 重构指导，`analyst.md` stale_import → stale_symbol，`verify.py` `_STALE_SYMBOLS`。
+
+### 全流程验证（08-03）
+
+155 个独立测试，整体准确率 **80.0%** (24/30)。S1 F1: 0.80，S2 F1: 0.80。
+
+**✅ 满分 (5/5)**：过期符号 100%、白名单/黑名单 100%、类拆分正确、测试计数 155、S3 假阳性 0。
+
+**🔴 G6**：`apply_` 调用链被误判为 numpy-bound → S1，实际可机械替换为 `torch.empty` + `.copy_()` → S2。影响 6 个 `test_*_dim` 测试，涟漪传导至 P3-P7。tiebreaker tier 1 新增 `apply_` carve-out 修复。
+
+**🟡 次要**：评估指南 gold label 一处勘误；`assess.py` 测试计数无缩进感知；`verify.py` `_check_skipifmps_coverage` 依赖 `git show HEAD` 可能在重构后失效；`flow.py` 单 coder 处理 4110 行文件存在上下文压力。
+
+### 文件变更
+
+| 文件 | 变更 |
+|------|------|
+| `agent/prompts/analyst.md` | +Task 7, +6 @onlyCPU 启发式, +tiebreaker, +Scope Guard, +扩展 S1 #4, +优先级规则, +三级决策, +上下文线索, +`apply_` carve-out, stale_import→stale_symbol |
+| `agent/prompts/coder.md` | +MPS 安全 3 场景, +类提取指导, +helper 函数重构 |
+| `state.py` | +`NewClassSpec`; `AnalystReport` +`new_classes` +`onlycpu_evaluations` |
+| `flow.py` | `_phase_distribute` 类提取; `_finding_matches_rule` 更新 |
+| `scripts/verify.py` | +`_check_class_split()`, +`_check_skipifmps_coverage()`, +`_STALE_SYMBOLS` |
+
 ## 2026-07-28 — Workflow Improvements from Reviewer Feedback
 
 从 10 个 PyTorch test refactoring PR 的 reviewer 反馈中提取 17 项改进（fffrog + albanD + others）。

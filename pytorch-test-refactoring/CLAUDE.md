@@ -92,6 +92,16 @@ The state machine stops on these signals and expects Claude Code to handle them:
 | `WAITING` | CI still running | Schedule durable cron via CronCreate; session exits |
 | `DONE` | Phase complete | Call `flow.run()` to continue |
 
+## Changelog
+
+Workflow evolution and evaluation history are documented in [CHANGELOG.md](CHANGELOG.md). Before modifying agent prompts or verification logic, read the latest entries — they record classification accuracy trends, known gaps, and the rationale behind each heuristic iteration.
+
+Key evaluation runs:
+- **2026-08-03**: 80.0% classification accuracy on `test_reductions.py` (G6: `apply_` carve-out still needed)
+- **2026-07-31**: Heuristic precision fixes dropped error rate from 23% → estimated <5%
+- **2026-07-31**: Class split support added (previously 0% coverage)
+- **2026-07-28**: 17 improvements from 10 PR reviewer feedback rounds
+
 ## Key rules (non-negotiable)
 
 - **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd` — these are intentional and must be preserved
