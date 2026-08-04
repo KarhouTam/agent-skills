@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-08-04 — HardwareClassification 自动标注
+
+基于社区 PR #190508 引入的 `HardwareClassification` enum（`torch.testing._internal.common_utils`），工作流现在自动为重构后的每个 test class 添加 `hw_classification` 类属性，使测试运行器可通过 `--hw-classification` 按硬件类别过滤执行。
+
+### 改进要点
+
+- **自动标注**：coder agent 在重构时自动为每个 class 添加 `hw_classification = HardwareClassification.XXX`，按策略映射：
+  - S1 (CPU-only) → `HardwareClassification.GENERIC`（或 `CPU`，若使用 `instantiate_device_type_tests(only_for="cpu")` for `@ops`）
+  - S2 (device-agnostic) → `HardwareClassification.ACCELERATOR`
+  - S3 (device-specific) → `HardwareClassification.CUDA` / `MPS` / `XPU`（按设备）
+- **验证检查 H1**：`verify.py` 新增 `_check_hw_classification()`，自动检测 import 是否存在、每个 TestCase 子类是否标注、标注值是否匹配 class 机制（通过 `instantiate_device_type_tests` 调用模式 + `setUp` guard + `device` 参数推断预期值）
+- **全链路覆盖**：analyst → coder → checker → verify 四阶段均纳入 `hw_classification` 检查
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `utils.py` | +`HW_CLASSIFICATION_IMPORT`, +`HW_CLASSIFICATION_MAP`, +`STRATEGY_TO_HW_CLASSIFICATION` |
+| `state.py` | `NewClassSpec` +`hw_classification`; `AnalystReport` +`hw_classifications` |
+| `CLAUDE.md` | 三策略表 +`hw_classification` 列 + import 说明 |
+| `agent/prompts/coder.md` | +6 值标注要求（Refactoring Standards 章节）；每个策略指导 +`hw_classification` 精确值 |
+| `agent/prompts/checker.md` | 审查点 #8：每个 class 必须标注正确 `HardwareClassification` |
+| `agent/prompts/analyst.md` | JSON 输出 +`hw_classifications` 字段；`new_classes` +`hw_classification` |
+| `agent/skills/refactor-test-decoupling/SKILL.md` | 所有策略代码示例 +`hw_classification`；每个策略 Steps +标注步骤；Pitfalls +1；Instantiation 表 +`hw_classification` 列 |
+| `agent/skills/review-test-refactoring/SKILL.md` | 审查清单 #9：`HardwareClassification Tag`（import/存在性/正确性/字母序）；Pitfalls +3（Blocker 级） |
+| `scripts/verify.py` | +`_check_hw_classification()` + 3 个 helper（`_find_test_classes_with_bodies`, `_extract_hw_classification`, `_infer_hw_classification`），启发式推断预期值 |
+| `scripts/report.py` | 策略分配行追加 `hw_classification` 括号注释 |
+
+### 数据来源
+
+- PyTorch PR #190508 (`HardwareClassification` enum 定义，6 值)
+- 社区落地 PRs: #191889, #191909, #191913 (import 风格、属性放置位置、per-category linter 规则)
+- `tools/linter/adapters/hw_classification_linter.py` (PR #190173) — 每类约束规则
+
 ## 2026-07-31 ~ 08-03 — 工作流改进与全流程验证（test_reductions.py × PR #185881）
 
 以合入 PR #185881（545b05f → 341a9a2）为 gold standard，两轮迭代改进后全流程评估。评估产物在 `eval_scratch/`。

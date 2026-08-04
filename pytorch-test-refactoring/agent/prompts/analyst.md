@@ -93,10 +93,12 @@ Your report MUST include a JSON block with:
   ],
   "class_mapping": {{"TestFoo": "TestFoo", "TestFoo": "TestFooOnCPU"}},
   "strategy_assignments": {{"TestFoo": "Strategy2", "TestFooOnCPU": "Strategy1"}},
+  "hw_classifications": {{"TestFoo": "ACCELERATOR", "TestFooOnCPU": "GENERIC"}},
   "new_classes": [
     {{
       "name": "TestFooOnCPU",
       "strategy": "Strategy1",
+      "hw_classification": "GENERIC",
       "base_class": "TestCase",
       "instantiation": "",
       "tests": ["test_max_elementwise", "test_min_elementwise"],
@@ -114,7 +116,8 @@ Your report MUST include a JSON block with:
 
 - `class_mapping`: Map old class names → new class names. When a class is split, list the old name multiple times mapping to each new class (e.g., `"TestReductions": "TestReductions"` and `"TestReductions": "TestReductionsOnCPU"` — this tells the flow the old class had tests moved to two destinations).
 - `strategy_assignments`: Include ALL classes (original + new). For a split class, list both the remaining S2 class AND the new S1 class.
-- `new_classes`: Required when tests should be extracted into a new class. Each entry specifies the new class name, strategy, base class, instantiation method, which tests to move, and the rationale.
+- `hw_classifications`: Map each class name to its recommended `HardwareClassification` value (GENERIC, ACCELERATOR, CPU, CUDA, MPS, XPU). Derive from strategy: Strategy1→GENERIC (or CPU if `instantiate_device_type_tests(only_for="cpu")`), Strategy2→ACCELERATOR, Strategy3→CUDA/MPS/XPU per device.
+- `new_classes`: Required when tests should be extracted into a new class. Each entry specifies the new class name, strategy, hw_classification, base class, instantiation method, which tests to move, and the rationale.
 - `onlycpu_evaluations`: One entry per `@onlyCPU` test, each with individual classification and rationale.
 - `findings`: Use `stale_symbol` (not `stale_import`) for module-level variables like `device_type`, `TEST_CUDA`, `TEST_MPS`, `TEST_XPU` that will become unused after refactoring.
 - `original_test_count`: Count of top-level `def test_` methods in class scope ONLY. Exclude nested functions. Use `grep -c "def test_"` and subtract nested functions found inside other methods.

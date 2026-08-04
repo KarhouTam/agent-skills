@@ -49,7 +49,9 @@ def generate_report(state: RefactorState) -> str:
         lines.append("")
         lines.append("## Strategy Assignments")
         for cls, strategy in state.analyst_report.strategy_assignments.items():
-            lines.append(f"- `{cls}` -> **{strategy}**")
+            hw_cls = state.analyst_report.hw_classifications.get(cls, "")
+            hw_suffix = f" ({hw_cls})" if hw_cls else ""
+            lines.append(f"- `{cls}` -> **{strategy}**{hw_suffix}")
 
     report = "\n".join(lines)
 

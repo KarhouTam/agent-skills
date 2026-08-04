@@ -27,10 +27,18 @@ Use the review checklist at `agent/skills/review-test-refactoring/SKILL.md`
 1. **Blacklist skips** (@skipXPU, @skipCUDAIf, @skipMPS, @skipMeta, @onlyNativeDeviceTypesAnd) MUST be kept — do NOT flag their presence as issues
 2. **Whitelist** (@onlyCUDA, @onlyOn) MUST be enlarged to @onlyAccelerator
 3. **Stale imports** must be removed
-4. **Class naming**: Renaming is OPTIONAL. The future `hw_classification` member handles classification. Only flag a name as an issue if it's actively misleading (e.g., a CPU-only class named `TestFooCUDA`). Recommended names: TestFoo (S1), TestFooDevice (S2), TestFooCUDA (S3).
+4. **Class naming**: Renaming is OPTIONAL. The `hw_classification` member handles classification. Only flag a name as an issue if it's actively misleading (e.g., a CPU-only class named `TestFooCUDA`). Recommended names: TestFoo (S1), TestFooDevice (S2), TestFooCUDA (S3).
 5. **Test count** must match original: {original_test_count}
 6. **Device-specific APIs** correctly classified (Category A/B vs C per {ref_dir}/classification_guide.md)
 7. **External reference alignment**: If classes were NOT renamed, skip this check. If test classes WERE renamed, stale references in these locations MUST be updated:
+8. **HardwareClassification tag**: Every test class MUST have a `hw_classification` class attribute with the correct value:
+   - S1 (no device, plain TestCase or `@instantiate_parametrized_tests`): `HardwareClassification.GENERIC`
+   - S1 (with `@ops`, uses `instantiate_device_type_tests(only_for="cpu")`): `HardwareClassification.CPU`
+   - S2 (device-agnostic, `instantiate_device_type_tests(except_for=...)`): `HardwareClassification.ACCELERATOR`
+   - S3 (CUDA-specific): `HardwareClassification.CUDA`
+   - S3 (MPS-specific): `HardwareClassification.MPS`
+   - S3 (XPU-specific): `HardwareClassification.XPU`
+   Verify the import `from torch.testing._internal.common_utils import HardwareClassification` is present and merged alphabetically into the existing `common_utils` import block.
    - `torch/testing/_internal/common_methods_invocations.py` — DecorateInfo entries use exact `cls_name` matching; an old class name silently stops matching
    - `test/dynamo_skips/` — **sentinel files (often 0 bytes)**. Search by FILENAME, not content. When a class is renamed from `TestFoo` to `TestFooDevice`, `instantiate_device_type_tests` renames device variants too: `TestFooCUDA` → `TestFooDeviceCUDA`. Files named after old variants must be renamed.
    - `test/dynamo_expected_failures/` — **sentinel files (often 0 bytes)**. Same filename-based search required. Use:

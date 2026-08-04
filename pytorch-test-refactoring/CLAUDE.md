@@ -54,11 +54,13 @@ ci_ops.py → agent/claude_code.py (Claude Code adapter)
 
 ### Three strategies
 
-| Strategy | Class naming | Mechanism | When |
-|----------|-------------|-----------|------|
-| S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | No device dependency, pure CPU logic |
-| S2 | `TestFoo` or `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter with generic accelerator APIs |
-| S3 | `TestFooOn<Device>` (e.g., `TestFooOnCUDA`) | Plain `TestCase` with `setUp` guard (`@unittest.skipIf(not torch.cuda.is_available(), ...)`). Hardcode device strings. NEVER use `instantiate_device_type_tests` for S3. | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+| Strategy | Class naming | Mechanism | hw_classification | When |
+|----------|-------------|-----------|-------------------|------|
+| S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | `HardwareClassification.GENERIC` (or `CPU` if `instantiate_device_type_tests(only_for="cpu")` for `@ops`) | No device dependency, pure CPU logic |
+| S2 | `TestFoo` or `TestFooDevice` | `instantiate_device_type_tests()` | `HardwareClassification.ACCELERATOR` | Uses `device` parameter with generic accelerator APIs |
+| S3 | `TestFooOn<Device>` (e.g., `TestFooOnCUDA`) | Plain `TestCase` with `setUp` guard (`@unittest.skipIf(not torch.cuda.is_available(), ...)`). Hardcode device strings. NEVER use `instantiate_device_type_tests` for S3. | `HardwareClassification.CUDA` / `MPS` / `XPU` per device | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+
+**Import:** `from torch.testing._internal.common_utils import HardwareClassification`
 
 **Class renaming is OPTIONAL.** The future `hw_classification` member on TestCase (not yet landed) will drive classification, so class names are not the primary discriminator. The agent decides whether to rename based on external reference impact: if the class has many DecorateInfo/dynamo_skip references, keep the original name to avoid breaking them. See `agent/skills/refactor-test-decoupling/SKILL.md` for the full decision framework.
 

@@ -45,6 +45,31 @@ REFACTOR_RULES: dict[str, str] = {
 
 RULE_ORDER = ["strategy_1", "strategy_2", "strategy_3", "cleanup"]
 
+# HardwareClassification mapping — strategy → (hw_classification_value, import_line)
+# Maps refactoring strategy + optional device to the correct HardwareClassification enum member.
+# Reference: torch/testing/_internal/common_utils.py
+HW_CLASSIFICATION_IMPORT = (
+    "from torch.testing._internal.common_utils import HardwareClassification"
+)
+HW_CLASSIFICATION_MAP: dict[str, str] = {
+    # S1 — no device dependency
+    "GENERIC": "HardwareClassification.GENERIC",   # plain TestCase or @instantiate_parametrized_tests
+    "CPU": "HardwareClassification.CPU",             # instantiate_device_type_tests(only_for="cpu")
+    # S2 — device-agnostic (any accelerator)
+    "ACCELERATOR": "HardwareClassification.ACCELERATOR",  # instantiate_device_type_tests(except_for=...)
+    # S3 — device-specific
+    "CUDA": "HardwareClassification.CUDA",  # Category C CUDA APIs
+    "MPS": "HardwareClassification.MPS",    # Category C MPS APIs
+    "XPU": "HardwareClassification.XPU",    # Category C XPU APIs
+}
+
+# Mapping from strategy assignment to recommended hw_classification key
+STRATEGY_TO_HW_CLASSIFICATION: dict[str, str] = {
+    "Strategy1": "GENERIC",
+    "Strategy2": "ACCELERATOR",
+    "Strategy3": "CUDA",  # default for S3; overridden per device (CUDA/MPS/XPU)
+}
+
 
 def compute_applicable_rules(strategy_assignments: dict[str, str]) -> list[str]:
     """Return list of rule IDs that apply based on strategy assignments.

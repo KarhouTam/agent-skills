@@ -318,6 +318,9 @@ a regression.
 | **Flagging an original class name as "wrong" when the coder chose not to rename** | Renaming is optional. If the coder kept the original name (e.g., `TestFoo` for an S2 class), do NOT flag it unless the name is actively misleading (e.g., a CPU-only class named `TestFooCUDA`). The `hw_classification` member will handle classification. | N/A — reviewer guidance |
 | `@unittest.skipIf(not TEST_CUDA, ...)` leftover in S2 class | Should be `@onlyAccelerator` | Major |
 | `@skipIfMPS`/`@skipXPU`/`@skipCUDAIf` applied to method without `device` parameter | These decorators check the `device` kwarg and silently fail if missing | Blocker |
+| Missing `hw_classification` class attribute | Every test class must have `hw_classification = HardwareClassification.XXX`. Missing attr causes test runner to skip or misroute tests. | Blocker |
+| Incorrect `hw_classification` value | Value must match the class mechanism: GENERIC for S1, ACCELERATOR for S2, CUDA/MPS/XPU for S3 per device, CPU for S1-with-`@ops`. A wrong value (e.g., GENERIC on an S2 class) breaks `--hw-classification` filtering. | Blocker |
+| `HardwareClassification` not imported | Must be imported from `torch.testing._internal.common_utils` and merged alphabetically into the existing import block. | Blocker |
 
 ### 8. Decorator Ordering
 
@@ -338,6 +341,35 @@ def test_foo(self, device, dtype):
 def test_foo(self, device, dtype):  # incorrect
     ...
 ```
+
+### 9. HardwareClassification Tag
+
+Every test class must have a `hw_classification` class attribute matching its
+strategy and instantiation mechanism. **This is mandatory** — the test runner
+uses `--hw-classification` to filter test execution by hardware category.
+
+| Class Mechanism | Expected `hw_classification` |
+|----------------|------------------------------|
+| Plain `TestCase` or `@instantiate_parametrized_tests`, no `device` param | `HardwareClassification.GENERIC` |
+| `instantiate_device_type_tests(only_for="cpu")` | `HardwareClassification.CPU` |
+| `instantiate_device_type_tests(except_for=...)` | `HardwareClassification.ACCELERATOR` |
+| `instantiate_device_type_tests(only_for="cuda")` | `HardwareClassification.CUDA` |
+| `instantiate_device_type_tests(only_for="mps")` | `HardwareClassification.MPS` |
+| `instantiate_device_type_tests(only_for="xpu")` | `HardwareClassification.XPU` |
+| Plain `TestCase` with `setUp` guard + hardcoded `"cuda"` | `HardwareClassification.CUDA` |
+| Plain `TestCase` with `setUp` guard + hardcoded `"mps"` | `HardwareClassification.MPS` |
+| Plain `TestCase` with `setUp` guard + hardcoded `"xpu"` | `HardwareClassification.XPU` |
+
+**How to verify:**
+
+| Check | How to Verify |
+|-------|---------------|
+| Import present | `grep "HardwareClassification" <file>` — must be imported from `torch.testing._internal.common_utils` |
+| Every class tagged | `grep "hw_classification" <file>` — count must equal number of TestCase subclasses |
+| Value matches strategy | Cross-reference each class's mechanism (instantiate call + device params) against the table above |
+| Import merged alphabetically | `HardwareClassification` must appear in the existing `common_utils` import block in alphabetical order |
+
+**Severity**: Blocker — missing or incorrect `hw_classification` causes the test runner to skip or misroute tests.
 
 ## Review Output Format
 

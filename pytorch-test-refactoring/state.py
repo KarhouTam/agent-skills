@@ -71,6 +71,7 @@ class NewClassSpec(BaseModel):
 
     name: str
     strategy: str  # "Strategy1" | "Strategy2" | "Strategy3"
+    hw_classification: str = ""  # "GENERIC" | "ACCELERATOR" | "CPU" | "CUDA" | "MPS" | "XPU"
     base_class: str = "TestCase"
     instantiation: str = ""  # e.g. "@instantiate_parametrized_tests" or ""
     tests: list[str] = []  # test method names to move
@@ -85,6 +86,7 @@ class AnalystReport(BaseModel):
     findings: list[AnalystFinding]
     class_mapping: dict[str, str] = {}
     strategy_assignments: dict[str, str] = {}
+    hw_classifications: dict[str, str] = {}  # class_name → "GENERIC"|"ACCELERATOR"|"CPU"|"CUDA"|"MPS"|"XPU"
     new_classes: list[NewClassSpec] = []
     onlycpu_evaluations: list[dict] = []
     summary: str = ""

@@ -44,6 +44,7 @@ def verify(
     checks.append(_check_coverage_preservation(file_path, workspace))
     checks.append(_check_class_split(file_path, original_classes, workspace))
     checks.append(_check_skipifmps_coverage(file_path, workspace))
+    checks.append(_check_hw_classification(file_path))
 
     all_passed = all(c.passed for c in checks)
 
@@ -1003,6 +1004,210 @@ def _check_skipifmps_coverage(
         + (f" and {len(missing_mps) - 15} more" if len(missing_mps) > 15 else ""),
     )
 
+
+
+# ── H1: HardwareClassification tag check ──────────────────────────────────
+
+_HW_CLASSIFICATION_VALUES = {
+    "GENERIC", "ACCELERATOR", "CPU", "CUDA", "MPS", "XPU"
+}
+
+
+def _check_hw_classification(file_path: str) -> VerificationCheck:
+    """Verify every test class has the correct hw_classification attribute.
+
+    For each TestCase subclass in the file:
+    1. Extract the class body
+    2. Check for hw_classification = HardwareClassification.<VALUE>
+    3. Determine the expected value from the class mechanism
+    4. Report missing, mismatched, or unrecognized classes
+    """
+    content = Path(file_path).read_text()
+    classes = _find_test_classes_with_bodies(content)
+
+    if not classes:
+        return VerificationCheck(
+            name="hw_classification",
+            passed=True,
+            details="No test classes found",
+        )
+
+    findings: list[str] = []
+    for cls_name, cls_body, cls_start_line in classes:
+        actual = _extract_hw_classification(cls_body)
+        expected = _infer_hw_classification(cls_name, cls_body, content)
+
+        if actual is None:
+            findings.append(
+                f"MISSING: {cls_name} (line {cls_start_line}) has no "
+                f"hw_classification — expected {expected}"
+            )
+        elif expected and actual != expected:
+            findings.append(
+                f"MISMATCH: {cls_name} (line {cls_start_line}) has "
+                f"{actual}, expected {expected}"
+            )
+        elif not expected:
+            findings.append(
+                f"UNRECOGNIZED: {cls_name} (line {cls_start_line}) has "
+                f"{actual} but class mechanism could not be determined"
+            )
+
+    # Also check the import exists
+    has_import = "HardwareClassification" in content
+    if not has_import:
+        findings.insert(
+            0,
+            "MISSING IMPORT: HardwareClassification not imported from "
+            "torch.testing._internal.common_utils",
+        )
+
+    passed = len(findings) == 0
+    return VerificationCheck(
+        name="hw_classification",
+        passed=passed,
+        details="All classes correctly tagged"
+        if passed
+        else "; ".join(findings[:15]),
+        command=f"grep -n 'hw_classification\\|HardwareClassification' {file_path}",
+    )
+
+
+def _find_test_classes_with_bodies(content: str) -> list[tuple[str, str, int]]:
+    """Find all TestCase subclasses and return (name, body, start_line).
+
+    Uses regex to find class definitions, then extracts the body between
+    this class and the next top-level class/function definition.
+    """
+    lines = content.split("\n")
+    class_pattern = re.compile(
+        r"^class\s+(\w+)\s*\(.*(?:TestCase).*\)\s*:"
+    )
+    results: list[tuple[str, str, int]] = []
+
+    for i, line in enumerate(lines):
+        m = class_pattern.match(line.strip())
+        if not m:
+            continue
+        cls_name = m.group(1)
+        cls_start = i + 1  # 1-indexed
+
+        # Find class end: next line at same/lesser indent that starts a
+        # class, def, or top-level statement
+        cls_indent = len(line) - len(line.lstrip())
+        body_lines: list[str] = []
+        for j in range(i + 1, len(lines)):
+            stripped = lines[j].strip()
+            if not stripped or stripped.startswith("#"):
+                body_lines.append(lines[j])
+                continue
+            line_indent = len(lines[j]) - len(lines[j].lstrip())
+            if line_indent <= cls_indent and (
+                stripped.startswith("class ")
+                or stripped.startswith("def ")
+                or stripped.startswith("@")
+                or stripped.startswith("if __name__")
+            ):
+                break
+            body_lines.append(lines[j])
+
+        results.append((cls_name, "\n".join(body_lines), cls_start))
+
+    return results
+
+
+def _extract_hw_classification(cls_body: str) -> str | None:
+    """Extract the HardwareClassification value from a class body.
+
+    Returns the enum member name (e.g. "ACCELERATOR") or None if not found.
+    """
+    m = re.search(
+        r"hw_classification\s*=\s*HardwareClassification\.(\w+)",
+        cls_body,
+    )
+    if m:
+        value = m.group(1)
+        if value in _HW_CLASSIFICATION_VALUES:
+            return value
+        return f"UNKNOWN({value})"
+    return None
+
+
+def _infer_hw_classification(
+    cls_name: str, cls_body: str, full_content: str
+) -> str | None:
+    """Infer the expected HardwareClassification value from class structure.
+
+    Checks, in priority order:
+    1. instantiate_device_type_tests(ClassName, ..., only_for="X") → X (upper)
+    2. instantiate_device_type_tests(ClassName, ..., except_for=...) → ACCELERATOR
+    3. @instantiate_parametrized_tests (class decorator) → GENERIC
+    4. setUp guard with device.is_available() → device-specific classification
+    5. Plain TestCase (no device mechanism) → GENERIC
+    """
+    # Check for instantiate_device_type_tests call for this class
+    # Pattern: instantiate_device_type_tests(ClassName, globals(), ...)
+    inst_pattern = rf"instantiate_device_type_tests\(\s*{cls_name}\s*,"
+    inst_match = re.search(inst_pattern, full_content)
+    if inst_match:
+        # Find the full argument list
+        start = inst_match.start()
+        # Extract the full call (balance parens)
+        depth = 0
+        end = start
+        for k in range(start, len(full_content)):
+            if full_content[k] == "(":
+                depth += 1
+            elif full_content[k] == ")":
+                depth -= 1
+                if depth == 0:
+                    end = k + 1
+                    break
+        call_str = full_content[start:end]
+
+        # Check only_for
+        only_for_m = re.search(r"only_for\s*=\s*['\"]([^'\"]+)['\"]", call_str)
+        if only_for_m:
+            device = only_for_m.group(1).upper()
+            if device in _HW_CLASSIFICATION_VALUES:
+                return device
+            return None
+
+        # Check except_for → ACCELERATOR
+        except_for_m = re.search(r"except_for\s*=", call_str)
+        if except_for_m:
+            return "ACCELERATOR"
+
+        # No only_for/except_for but has instantiate_device_type_tests
+        # (legacy pattern — defaults to all device types incl CPU)
+        return "ACCELERATOR"
+
+    # Check for @instantiate_parametrized_tests class decorator
+    # (look in full_content for the decorator before the class definition)
+    class_def_pat = rf"(@(?:instantiate_parametrized_tests|unittest\.skipIf)\s*\n\s*)*class\s+{cls_name}\b"
+    class_def_m = re.search(class_def_pat, full_content)
+    if class_def_m:
+        decorator_block = class_def_m.group(0)
+        if "@instantiate_parametrized_tests" in decorator_block:
+            return "GENERIC"
+
+    # Check for setUp guard with device availability check (S3 pattern)
+    if re.search(r"torch\.cuda\.is_available\(\)", cls_body):
+        return "CUDA"
+    if re.search(r"torch\.mps\.is_available\(\)", cls_body):
+        return "MPS"
+    if re.search(r"torch\.xpu\.is_available\(\)", cls_body):
+        return "XPU"
+
+    # Check for device parameter in test methods (S2 without
+    # instantiate_device_type_tests — unusual but possible)
+    if re.search(r"def\s+test_\w+\(self,\s*device\b", cls_body):
+        # Has device param but no instantiate_device_type_tests call found
+        # Could be a class that uses device_type_tests indirectly
+        return "ACCELERATOR"
+
+    # Plain TestCase, no device mechanism → GENERIC
+    return "GENERIC"
 
 
 def _check_imports(file_path: str) -> VerificationCheck:

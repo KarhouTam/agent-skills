@@ -54,6 +54,13 @@ A checker will verify your work. If issues are found, you will be asked to fix t
 - When a test class is renamed, update ALL external references (DecorateInfo in common_methods_invocations.py, filenames in test/dynamo_skips/ and test/dynamo_expected_failures/)
 - Match existing code style
 - Do NOT commit changes
+- **Tag every test class with `hw_classification`**: Add `from torch.testing._internal.common_utils import HardwareClassification` to the existing `common_utils` import block (merge alphabetically). Add `hw_classification = HardwareClassification.XXX` as the first class attribute after the class definition and docstring (if any), before methods:
+  - S1 (no device, plain TestCase or `@instantiate_parametrized_tests`): `HardwareClassification.GENERIC`
+  - S1 (with `@ops`, uses `instantiate_device_type_tests(only_for="cpu")`): `HardwareClassification.CPU`
+  - S2 (device-agnostic, `instantiate_device_type_tests(except_for=...)`): `HardwareClassification.ACCELERATOR`
+  - S3 (CUDA-specific, Category C CUDA APIs): `HardwareClassification.CUDA`
+  - S3 (MPS-specific, Category C MPS APIs): `HardwareClassification.MPS`
+  - S3 (XPU-specific, Category C XPU APIs): `HardwareClassification.XPU`
 
 ## Rule-Specific Guidance
 
@@ -65,6 +72,7 @@ Apply each section below for every rule assigned to you above.
 - Remove device decorators and device imports
 - Add `@instantiate_parametrized_tests` if the class has `@parametrize`/`@ops`/`@dtypes`
 - When moving a `@dtypes(dtype_a, dtype_b, ...)`-decorated test to an S1 class, convert to `@parametrize("dtype", [dtype_a, dtype_b, ...])` with `@instantiate_parametrized_tests` on the class. This preserves per-dtype independence and `@unittest.expectedFailure` per variant. Do NOT collapse `@dtypes` into a for-loop.
+- **hw_classification**: `HardwareClassification.GENERIC` (or `CPU` if the class uses `instantiate_device_type_tests(only_for="cpu")` for `@ops`)
 
 ### If assigned strategy_2 (convert S2 tests):
 - Decide whether to rename the class. Check external references first — if the class name appears in many DecorateInfo entries or dynamo_skips/dynamo_expected_failures files, keep the original name. Otherwise, rename to `TestFooDevice` for clarity.
@@ -76,10 +84,12 @@ Apply each section below for every rule assigned to you above.
 - Replace Category A APIs with `torch.accelerator.*` equivalents
 - Register: `instantiate_device_type_tests(<ClassName>, globals())` at module level
 - `@onlyAccelerator` is a METHOD decorator, NOT a class decorator
+- **hw_classification**: `HardwareClassification.ACCELERATOR`
 
 ### If assigned strategy_3 (extract S3 tests):
 - S3 classes MUST NOT use `instantiate_device_type_tests`. Use plain `TestCase` with `setUp` guard (`@unittest.skipIf(not torch.cuda.is_available(), ...)`). Hardcode device strings (`"cuda"`, `torch.cuda.*` calls).
 - Naming: `TestFooOn<Device>` (e.g., `TestFooOnCUDA`), NOT `TestFooCUDA`.
+- **hw_classification**: `HardwareClassification.CUDA` for CUDA-specific, `HardwareClassification.MPS` for MPS-specific, `HardwareClassification.XPU` for XPU-specific
 
 ### If assigned cleanup:
 - Remove stale imports: `TEST_CUDA`, `TEST_MPS`, `TEST_XPU`, `onlyOn`, `onlyCUDA` (only if no Strategy 3 class remains)
@@ -103,6 +113,7 @@ Apply each section below for every rule assigned to you above.
 - Add `@instantiate_parametrized_tests` on the new class if any moved test uses `@parametrize`/`@ops`/`@dtypes`
 - When a moved test had `@dtypes(dtype_a, dtype_b, ...)`, convert to `@parametrize("dtype", [dtype_a, dtype_b, ...])` with `@instantiate_parametrized_tests` on the class. This preserves per-dtype independence and `@unittest.expectedFailure` per variant. Do NOT collapse `@dtypes` into a for-loop.
 - Verify test count is preserved: sum of tests in original class (after removal) + new class = original total
+- **hw_classification**: `HardwareClassification.GENERIC` (or `CPU` if using `instantiate_device_type_tests(only_for="cpu")` for `@ops`)
 
 ### Helper Function Refactoring
 
