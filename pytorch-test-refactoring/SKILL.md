@@ -145,6 +145,8 @@ The orchestrator handles all of this automatically:
 
 Your ONLY job: run the command → follow the JSON → extract result → pipe JSON back.
 
+**Before spawning the analyst**: quickly skim the test file (first ~50 lines and a few test methods). Note whether the original file is a plain `TestCase` with no device parametrization and whether tests primarily exercise utility/library logic (`rnn_utils`, `nn.functional` helpers, padding/packing utilities, etc.). If so, expect most tests to be S1. When the analyst report arrives, question any bulk S2 classification — a test that merely creates tensors is not automatically S2.
+
 **When you see `"done"` with `phase: "finalize"`, the refactoring is complete.** The `next_steps` field tells you how to proceed: create a PR manually (branch, commit, push, draft PR), then say **"look after the CI"** or run `python orchestrator.py <file> --ci-check` to start CI monitoring. Only when you see `"done"` with `phase: "ci_done"` is the entire workflow truly finished — the `next_steps` field will tell you to mark the PR ready for review and delete cron jobs.
 
 **Important: When you spawn a new agent (method=spawn),** capture the `agent_id` from the Agent tool result and include it (along with `agent_name`) in the result JSON you pipe back. This is how the orchestrator learns the agent's identity for future `SendMessage` calls. Without it, `SendMessage` will fail because it needs an agent ID, not a name.
@@ -213,8 +215,8 @@ The orchestrator loads all artifacts from the workspace and continues from where
 
 | Strategy | Class naming | Mechanism | When |
 |----------|-------------|-----------|------|
-| S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | No device dependency, pure CPU logic |
-| S2 | `TestFoo` or `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter with generic accelerator APIs |
+| S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | No device dependency, pure CPU logic. **Also includes tests of device-agnostic utility logic (`rnn_utils`, `pad_sequence`, `pack_sequence`, `F.pad`, etc.) where running on multiple devices adds no meaningful coverage.** This is the DEFAULT for tests that were previously CPU-only with no device decorators. |
+| S2 | `TestFoo` or `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter AND running on multiple devices provides specific testing value: device transfer semantics, memory format behavior, accelerator-specific error paths, or tests originally gated behind `torch.cuda.is_available()`. **Do NOT classify as S2 just because a test creates tensors.** |
 | S3 | `TestFoo` or `TestFooCUDA` | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`; otherwise `TestCase` with `setUp` guard and `@instantiate_parametrized_tests` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
 
 **S3 instantiation rule**: When an S3 class uses `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or other device-type-aware decorators (which are designed for `instantiate_device_type_tests`), use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` instead of `@instantiate_parametrized_tests`. Each test method receives `device` as its first parameter (always `"cuda"`), eliminating the need for per-method `@onlyCUDA` decorators or hardcoded `device = "cuda"` lines. This is the preferred pattern — it keeps mechanism consistency with S2 and lets `instantiate_device_type_tests` inject device-aware dtype resolution.

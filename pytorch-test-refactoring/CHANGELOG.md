@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-08-10 — S2 过度分类修复 + 导入源纠正 + 分类正确性审查
+
+基于 `test_packed_sequence.py` 重构实战中发现的三类问题，事后复盘并修复。
+
+### 问题回顾
+
+重构 `test_packed_sequence.py` 时连续出现三个错误：
+
+1. **S2 过度分类**：analyst 将原文件全部 11 个 `PackedSequenceTest` 测试分类为 S2，coder 机械添加 `device` 参数和 `instantiate_device_type_tests`。用户指出这些测试只是 `rnn_utils` 工具函数测试（`pad_sequence`、`pack_sequence` 等），在 CPU 和多设备上走相同代码路径，device 参数化毫无意义。最终回退为 GENERIC，仅将真正测试 device transfer 的 `test_to` 提取到 `PackedSequenceTestDevice`。
+
+2. **错误导入源**：coder 将 `instantiate_device_type_tests` 加到 `common_utils` import 块中，但该符号实际定义在 `common_device_type`。运行时 `ImportError` 导致整个模块无法加载。checker 捕获后需额外一轮 fix→re-check。
+
+3. **分类正确性无人审查**：per-rule checker 只验证规则是否正确应用（device 参数是否加了、测试数量是否匹配），不验证规则是否应该应用。Phase 6 full-file checker 也漏过了——它检查 `hw_classification` tag 是否匹配 instantiation 机制，但不质疑分类决策本身。最终用户手动纠正。
+
+**根因**：S2 定义为"使用 device 但只用到通用 API"过于宽泛——创建 tensor 就触发，而创建 tensor 是几乎所有测试都会做的事。S1 应为默认，S2 需举证"device 参数化提供了 CPU 测试无法覆盖的测试价值"。
+
+### 改进要点
+
+- **analyst.md Task 4 重写**：S1 明确为**默认分类**（原文件无 device decorators 的测试优先归 S1）；S2 新增"举证责任"——必须指明测试在 device 上执行的 specific testing value；工具函数测试（`rnn_utils`、`pad_sequence`、`pack_sequence`、`F.pad`、`F.embedding` 等）显式归入 S1。
+- **coder.md 策略指导**：strategy_2 章节首位新增 `instantiate_device_type_tests` 精确 import 语句（`from torch.testing._internal.common_device_type`），标注"NOT `common_utils`"警告。Refactoring Standards 新增"验证每个新增 import 符号存在"规则。
+- **checker.md 审查点**：新增审查点 #8 "分类正确性"——验证 S2 class 确实测试了 device 相关行为；per-rule scope 新增 strategy_2 专项检查——标记 `device` 参数无实际使用的测试（强烈信号：不应 S2）。
+- **SKILL.md**：三策略表 S1 列补充"包括 device-agnostic 工具逻辑测试"；S2 列补充"不能仅因测试创建 tensor 就归 S2"。orchestrator 循环新增"启动 analyst 前快速浏览文件"步骤——若原文件是普通 `TestCase` 且测试主体是工具函数，预估大部分为 S1，对 analyst 的批量 S2 分类保持质疑。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `agent/prompts/analyst.md` | Task 4 重写：S1 默认 + S2 举证责任 + 工具函数显式归 S1 |
+| `agent/prompts/coder.md` | strategy_2 首位 +import 指导；Refactoring Standards +import 验证规则 |
+| `agent/prompts/checker.md` | +审查点 #8 分类正确性；scope 模板 +strategy_2 专项检查 |
+| `SKILL.md` | 三策略表 S1/S2 描述收紧；orchestrator 循环 +pre-analyst 浏览步骤 |
+
 ## 2026-08-04 — HardwareClassification 自动标注
 
 基于社区 PR #190508 引入的 `HardwareClassification` enum（`torch.testing._internal.common_utils`），工作流现在自动为重构后的每个 test class 添加 `hw_classification` 类属性，使测试运行器可通过 `--hw-classification` 按硬件类别过滤执行。

@@ -54,6 +54,7 @@ A checker will verify your work. If issues are found, you will be asked to fix t
 - When a test class is renamed, update ALL external references (DecorateInfo in common_methods_invocations.py, filenames in test/dynamo_skips/ and test/dynamo_expected_failures/)
 - Match existing code style
 - Do NOT commit changes
+- **Verify every added import exists**: Before adding an import, verify the symbol is actually defined in the target module. Use `grep "def <symbol>\|<symbol> =" <module_path>` to check. Do NOT assume a symbol is re-exported from a module just because the analyst report grouped it with that module's imports. `instantiate_device_type_tests` lives in `common_device_type`, not `common_utils`.
 - **Tag every test class with `hw_classification`**: Add `from torch.testing._internal.common_utils import HardwareClassification` to the existing `common_utils` import block (merge alphabetically). Add `hw_classification = HardwareClassification.XXX` as the first class attribute after the class definition and docstring (if any), before methods:
   - S1 (no device, plain TestCase or `@instantiate_parametrized_tests`): `HardwareClassification.GENERIC`
   - S1 (with `@ops`, uses `instantiate_device_type_tests(only_for="cpu")`): `HardwareClassification.CPU`
@@ -75,6 +76,11 @@ Apply each section below for every rule assigned to you above.
 - **hw_classification**: `HardwareClassification.GENERIC` (or `CPU` if the class uses `instantiate_device_type_tests(only_for="cpu")` for `@ops`)
 
 ### If assigned strategy_2 (convert S2 tests):
+- **Import**: `instantiate_device_type_tests` MUST be imported from `torch.testing._internal.common_device_type` (NOT `common_utils`):
+  ```python
+  from torch.testing._internal.common_device_type import instantiate_device_type_tests
+  ```
+  Do NOT add it to the `common_utils` import block — that module does not define or re-export it.
 - Decide whether to rename the class. Check external references first — if the class name appears in many DecorateInfo entries or dynamo_skips/dynamo_expected_failures files, keep the original name. Otherwise, rename to `TestFooDevice` for clarity.
 - Create the S2 class inheriting from `TestCase`
 - Add `device` parameter as first arg after `self` on each test method
