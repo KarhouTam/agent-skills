@@ -33,7 +33,7 @@ A checker will verify your work. If issues are found, you will be asked to fix t
 
 ## Refactoring Standards (All Coders)
 
-- **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipCUDAIfRocm`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd` — these document known gaps
+- **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipCUDAIfRocm`, `@skipMPS`, `@skipMeta` — these document known gaps. `@onlyNativeDeviceTypes` / `@onlyNativeDeviceTypesAnd` are redundant on device-agnostic classes (device instantiation already scopes to the right devices) — REMOVE them.
 - **ENLARGE whitelist**: `@onlyCUDA` -> `@onlyAccelerator`, `@onlyOn` -> `@onlyAccelerator`
 - **ACCELERATOR related TEST_* flags are LazyVal objects, not real bools**: `TEST_ACCELERATOR`, `TEST_MULTIACCELERATOR`, etc. are lazy-evaluated values, so decorators that type-check their condition argument (e.g. `@serialTest(TEST_ACCELERATOR)`) raise `AssertionError` ("expected condition to be bool, got `<class ...LazyVal>`"). Wrap the flag in `bool(...)` when it must be passed as a condition, or prefer `@onlyAccelerator` / `@unittest.skipIf(not bool(TEST_ACCELERATOR))` patterns instead of passing the raw LazyVal into bool-checked decorators.
 - `@onlyCPU` → REMOVE (make device-agnostic: add `device` param, use `device=device`). Respect analyst's per-test classification — some may be S1.
@@ -44,7 +44,7 @@ A checker will verify your work. If issues are found, you will be asked to fix t
   Exception: Do NOT add `@skipIfMPS` if the test already has `@dtypesIfMPS`, `@onlyMPS`, or was already running on MPS (i.e., had no device restriction before).
   Exception: `@skipIfMPS` is NOT required if the test's class is NOT instantiated for MPS. MPS variants are only created when the class's `instantiate_device_type_tests` call passes `allow_mps=True` — `only_for`/`except_for` alone do not enable MPS. If no MPS variant exists, the test can never run on MPS, so the skip is unnecessary.
 - Only enlarge `@onlyCUDA` → `@onlyAccelerator` when test logic is genuinely device-agnostic. If the test had no prior device restriction or works correctly on CPU, REMOVE the restriction entirely — do NOT add `@onlyAccelerator`. Tests relying on backend-specific behavioral guarantees (NaN handling, determinism, precision characteristics, rounding modes) should keep `@onlyCUDA`.
-- **Class naming**: Renaming is OPTIONAL. The future `hw_classification` member will handle classification. Before renaming, check external references (DecorateInfo, dynamo_skips, dynamo_expected_failures) — if many exist, keep the original name to avoid breaking them. Recommended names if renaming: S1 = keep original (no device suffix), S2 = `TestFooDevice`, S3 = `TestFooOnCUDA`
+- **Class naming**: Renaming is OPTIONAL. The future `hw_classification` member will handle classification. Before renaming, check external references (DecorateInfo, dynamo_skips, dynamo_expected_failures) — if many exist, keep the original name to avoid breaking them. Recommended names if renaming: S1 = keep original (no device suffix), S2 = `TestFooDevice`, S3 = keep original name (`instantiate_device_type_tests` appends the device suffix)
 - **Category A APIs** (`torch.cuda.empty_cache`, `synchronize`, `CUDAGraph`, `memory_*`) -> replace with `torch.accelerator.*`
 - **Category C APIs** (NCCL, NVTX, cuDNN, TF32, CUDA AMP) -> truly device-specific, keep in Strategy 3
 - **High Risk torch.accelerator APIs** (from `device_api_catalog.yaml`):
@@ -95,8 +95,8 @@ Apply each section below for every rule assigned to you above.
 - **hw_classification**: `HardwareClassification.ACCELERATOR`
 
 ### If assigned strategy_3 (extract S3 tests):
-- S3 classes MUST NOT use `instantiate_device_type_tests`. Use plain `TestCase` with `setUp` guard (`@unittest.skipIf(not torch.cuda.is_available(), ...)`). Hardcode device strings (`"cuda"`, `torch.cuda.*` calls).
-- Naming: `TestFooOn<Device>` (e.g., `TestFooOnCUDA`), NOT `TestFooCUDA`.
+- S3 classes MUST use `instantiate_device_type_tests(<Class>, globals(), only_for="cuda")` (or `"mps"`/`"xpu"` per device). Add a `device` parameter as first arg after `self` on each test method. Do NOT use `except_for`, and do NOT fall back to a plain `TestCase` with a `setUp` guard.
+- Naming when renaming: avoid a device suffix that `instantiate_device_type_tests` would append again (e.g. `TestFooOnCUDA` + `only_for="cuda"` → `TestFooOnCUDACUDA`). Prefer the original name — `hw_classification` is the discriminator.
 - **hw_classification**: `HardwareClassification.CUDA` for CUDA-specific, `HardwareClassification.MPS` for MPS-specific, `HardwareClassification.XPU` for XPU-specific
 
 ### If assigned cleanup:

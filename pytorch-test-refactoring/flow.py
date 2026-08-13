@@ -23,6 +23,7 @@ from state import (
     BoundedRange,
     CoderResult,
     VerificationResult,
+    ReviewFinding,
 )
 from utils import (
     get_workspace,
@@ -38,6 +39,7 @@ from scripts.assess import assess_file
 from scripts.verify import verify
 from scripts.report import generate_report
 from scripts.logger import RefactorLogger
+from scripts.linter import check_file, LintSeverity
 from agent.adapter import BaseAdapter
 from agent.claude_code import ClaudeCodeAdapter
 
@@ -302,6 +304,16 @@ class RefactorFlow:
         return int(num_rules * lines_per_rule)
 
     def _run_phases(self):
+        # While a fix is being relayed to the coder (lint gate or review fix),
+        # do not advance phases — the orchestrator drives the fix loop via
+        # feed_fix_complete(). Without this guard, a pending RELAY_FINDINGS
+        # would fall through to finalize.
+        if (
+            self.state.current_phase == "fix"
+            and self.state.signal == FlowSignal.RELAY_FINDINGS
+        ):
+            return
+
         # Phase 1: Assess (no AI) — skip if already computed
         if not self.state.line_ranges:
             self.log.phase_start("assess")
@@ -387,6 +399,20 @@ class RefactorFlow:
                 test_count_match=v.test_count_match if v else False,
                 checks={c.name: c.passed for c in v.checks} if v else {},
             )
+
+        # Phase 5.5: Lint gate (deterministic hard gate before final review).
+        # If the refactored file still has error-severity lint messages, enter
+        # the fix loop instead of spawning the checker.
+        if (
+            self.state.verification is not None
+            and self.state.review_findings is None
+        ):
+            lint_errors = self._collect_lint_errors()
+            if lint_errors:
+                self._enter_lint_fix(lint_errors)
+                tasks = self.get_pending_tasks()
+                self.log.signal(self.state.signal.value, "verify", tasks)
+                return
 
         # Phase 6: Review (spawn checker)
         if self.state.review_findings is None:
@@ -605,8 +631,11 @@ class RefactorFlow:
     def feed_fix_complete(self):
         """Called after coders finish fixing review issues."""
         self._validate_phase("fix", self.state.current_phase, "feed_fix_complete")
-        self.state.retry_count += 1
         self._phase_verify()
+        if self.state.lint_gate_pending:
+            self._advance_lint_gate()
+            return
+        self.state.retry_count += 1
         v = self.state.verification
         passed = v.all_passed if v else False
         if self.log:
@@ -621,6 +650,67 @@ class RefactorFlow:
                     "review", "MaxRetries", f"Max retries ({self.MAX_RETRIES}) exceeded"
                 )
             self.state.signal = FlowSignal.DONE
+
+    # --- Lint gate helpers ---
+
+    def _collect_lint_errors(self) -> list:
+        """Return error-severity lint messages for the current file."""
+        messages = check_file(self.state.file_path)
+        return [m for m in messages if m.severity == LintSeverity.ERROR]
+
+    @staticmethod
+    def _synthesize_lint_findings(lint_errors) -> ReviewFindings:
+        """Convert lint errors into review findings routed to the single coder."""
+        findings = [
+            ReviewFinding(
+                severity="error",
+                category="lint",
+                description=f"{m.name} (line {m.line}): {m.description}",
+                line_number=m.line,
+                coder_responsible="coder",
+            )
+            for m in lint_errors
+        ]
+        return ReviewFindings(
+            all_clear=False,
+            findings=findings,
+            summary=f"{len(findings)} lint error(s)",
+        )
+
+    def _enter_lint_fix(self, lint_errors) -> None:
+        """Enter the fix phase with findings synthesized from lint errors."""
+        self.state.review_findings = self._synthesize_lint_findings(lint_errors)
+        self.state.current_phase = "fix"
+        self.state.lint_gate_pending = True
+        self.state.signal = FlowSignal.RELAY_FINDINGS
+
+    def _advance_lint_gate(self) -> None:
+        """Advance the lint-gate fix loop after the coder fixes lint errors.
+
+        Clean lint -> clear the gate and proceed to final review (checker).
+        Still failing and under budget -> re-enter the fix loop.
+        Max retries exceeded -> give up and proceed to final review, letting
+        the checker see the remaining failures.
+        """
+        self.state.lint_retry_count += 1
+        lint_errors = self._collect_lint_errors()
+        if not lint_errors:
+            self.state.lint_gate_pending = False
+            self.state.lint_retry_count = 0
+            self._phase_review()
+        elif self.state.lint_retry_count < self.MAX_RETRIES:
+            self._enter_lint_fix(lint_errors)
+        else:
+            if self.log:
+                self.log.error(
+                    "verify",
+                    "MaxRetries",
+                    f"Lint gate exceeded {self.MAX_RETRIES} fix attempts; "
+                    "continuing to final review",
+                )
+            self.state.lint_gate_pending = False
+            self.state.lint_retry_count = 0
+            self._phase_review()
 
     # --- Private phase methods ---
 

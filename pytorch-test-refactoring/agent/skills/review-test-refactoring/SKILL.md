@@ -135,7 +135,7 @@ uses `@onlyAccelerator`):
 |-------|---------------|
 | `complex128` or `torch.complex128` used in `@dtypes` or as default dtype | MPS does not support double-precision complex. Add `@expectedFailureMPS` or use `@dtypesIfMPS` to exclude `complex128`. |
 | `float64` or `torch.float64` used in `@dtypes` or as default dtype | MPS does not support float64. Add `@expectedFailureMPS` or use `@dtypesIfMPS` to exclude `float64`. |
-| `torch.long` used with MPS convolution/indexing ops | MPS has limited int64 support in some ops. Check if `@onlyNativeDeviceTypes` or a skip is needed. |
+| `torch.long` used with MPS convolution/indexing ops | MPS has limited int64 support in some ops. Add a skip (`@skipIfMPS`) if needed. |
 
 **How to validate**: For every test using `@onlyAccelerator` or the `device`
 parameter, verify every dtype it exercises (from `@dtypes`, `_default_dtype`, or
@@ -171,7 +171,7 @@ For reference, the recommended naming convention (when coder chooses to rename):
 |----------|-----------------|----------------------|
 | Strategy 1 (accelerator-unrelated) | `TestFoo` (original name) | Must NOT have device suffix |
 | Strategy 2 (accelerator-agnostic) | `TestFooDevice` | Original name is fine |
-| Strategy 3 (accelerator-specific) | `TestFooCUDA`, `TestFooMPS`, `TestFooXPU` | Original name is fine |
+| Strategy 3 (accelerator-specific) | Original name (`instantiate_device_type_tests` appends the device suffix) | Original name is fine |
 
 #### 2a. Cross-File Reference Integrity
 
@@ -236,8 +236,7 @@ should run.
 | Strategy 1, with `@parametrize`/`@dtypes` | `@instantiate_parametrized_tests` | `instantiate_device_type_tests` |
 | Strategy 1, with `@ops` | `instantiate_device_type_tests(..., only_for="cpu")` | `@instantiate_parametrized_tests` |
 | Strategy 2 | `instantiate_device_type_tests(TestFooDevice, globals())` | `@instantiate_parametrized_tests` |
-| Strategy 3, no parametrization | Plain `TestCase` with `setUp` guard | `instantiate_device_type_tests` |
-| Strategy 3, with parametrization | `@instantiate_parametrized_tests` | `instantiate_device_type_tests` |
+| Strategy 3 | `instantiate_device_type_tests(..., only_for="<device>")` | Plain `TestCase` with `setUp` guard or `@instantiate_parametrized_tests` |
 
 **Critical**: Check that `instantiate_device_type_tests` is never used for
 CPU-only (Strategy 1) classes — it creates useless per-device variants.
@@ -278,7 +277,7 @@ Category C, the test belongs in Strategy 3.
 | `TEST_XPU` import removed if no Strategy 3 XPU tests remain | `grep "TEST_XPU"` in the file |
 | `@onlyCUDA` import removed if no Strategy 3 CUDA tests remain | `grep "onlyCUDA"` in the imports |
 | `@onlyOn` import removed if all uses were replaced | `grep "onlyOn"` in the file |
-| `@onlyNativeDeviceTypes` removal | Before removing `@onlyNativeDeviceTypes`, verify dtype compatibility — `float64`/`complex128`/channels-last may be unsupported on MPS/MTIA. Prefer leaving `@onlyNativeDeviceTypes` as-is. |
+| `@onlyNativeDeviceTypes` removal | `@onlyNativeDeviceTypes` / `@onlyNativeDeviceTypesAnd` are redundant on device-agnostic classes — REMOVE them. Before removing, verify dtype compatibility (`float64`/`complex128`/channels-last may be unsupported on MPS/MTIA) and add `@skipIfMPS`/`@dtypesIfMPS` if needed. |
 | New imports are correct | `onlyAccelerator` from `common_device_type`, `torch.accelerator` if used |
 
 ### 6. Test Completeness
@@ -291,7 +290,7 @@ its device dependency level (e.g., a test using only CPU ops should not be in a
 | Check | How to Verify |
 |-------|---------------|
 | Every `def test_` belongs to the correct strategy class | Cross-reference each test's API usage against the catalog and its enclosing class name |
-| `setUp` guards present for Strategy 3 | `self.skipTest` or `@unittest.skipIf` for device availability |
+| Device instantiation present for Strategy 3 | `instantiate_device_type_tests(..., only_for="<device>")` with a `device` param on each method |
 | No test logic unintentionally modified | If reviewing a diff, compare test bodies against the base version. If whole-file, flag tests that appear incomplete or have empty bodies |
 | No duplicate test bodies across device-specific classes | If identical test bodies appear across S3 classes, they belong in the S2 shared class |
 | No device-specific artifacts in S2 classes | Scan for `_cuda` suffix in test method names, internal variable names like `cuda_out`, module-level helpers with `if device_type == "<backend>"` branches — clean these when the test is in an S2 class |
@@ -356,9 +355,10 @@ uses `--hw-classification` to filter test execution by hardware category.
 | `instantiate_device_type_tests(only_for="cuda")` | `HardwareClassification.CUDA` |
 | `instantiate_device_type_tests(only_for="mps")` | `HardwareClassification.MPS` |
 | `instantiate_device_type_tests(only_for="xpu")` | `HardwareClassification.XPU` |
-| Plain `TestCase` with `setUp` guard + hardcoded `"cuda"` | `HardwareClassification.CUDA` |
-| Plain `TestCase` with `setUp` guard + hardcoded `"mps"` | `HardwareClassification.MPS` |
-| Plain `TestCase` with `setUp` guard + hardcoded `"xpu"` | `HardwareClassification.XPU` |
+**Structural contract (mirrors the deterministic test linter):**
+- `GENERIC`: class NOT instantiated via `instantiate_device_type_tests`; methods take no `device`/`devices`.
+- `ACCELERATOR`: class instantiated via `instantiate_device_type_tests`; every method takes `device`/`devices`; no `@only*` except `@onlyAccelerator`; the instantiate call uses no `only_for`.
+- `CPU`/`CUDA`/`MPS`/`XPU`: class instantiated via `instantiate_device_type_tests` with `only_for=<device>`; every method takes `device`/`devices`; the instantiate call uses no `except_for`.
 
 **How to verify:**
 

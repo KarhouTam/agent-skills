@@ -25,8 +25,8 @@ First match wins. A test using ANY Category C API is Strategy 3.
 
 ### Decision rules (from YAML):
 
-- **Blacklist skips** (`@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd`, `@onlyNativeDeviceTypes`): NEVER remove
-- **`@onlyNativeDeviceTypes` vs `@onlyAccelerator`**: These are NOT interchangeable. `@onlyNativeDeviceTypes` includes CPU (`native_devices = ('cpu','cuda','xpu','meta','mps','mtia')`); `@onlyAccelerator` excludes CPU. Leave `@onlyNativeDeviceTypes` as-is — do not replace.
+- **Blacklist skips** (`@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`): NEVER remove
+- **`@onlyNativeDeviceTypes` / `@onlyNativeDeviceTypesAnd`**: redundant on device-agnostic classes — REMOVE (device instantiation already scopes to the right devices).
 - **Whitelist** (`@onlyCUDA`, `@onlyOn`): Enlarge to `@onlyAccelerator` IF only Cat A/B APIs used
 - **Cat A same name**: Drop-in replace `torch.{device}` → `torch.accelerator`
 - **Cat A name differs**: Use correct accelerator name (see `name_differs` section)

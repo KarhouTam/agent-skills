@@ -237,6 +237,8 @@ class RefactorState(BaseModel):
 
     current_phase: str = "assess"
     retry_count: int = 0
+    lint_gate_pending: bool = False  # True while the lint-gate fix loop is active
+    lint_retry_count: int = 0  # lint-gate fix attempts (independent of review-fix retries)
     rule_index: int = 0  # which rule we're on in the code-check loop
     rule_sub_phase: str = "code"  # "code" | "check" | "fix"
     rule_retry: int = 0  # fix attempts for current rule

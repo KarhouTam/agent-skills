@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-08-13 — 确定性测试 linter 门禁（Phase 5）
+
+将新增的 `scripts/linter.py`（AST 测试用例 linter）接入重构工作流，作为
+Phase 4 coder 循环与 Phase 6 最终评审之间的硬门禁。linter 强制每个
+`hw_classification` 的结构化契约（device 参数、实例化方式、`only_for`/`except_for`、
+`@only*` 装饰器），现在是文件"完成"的权威定义。
+
+- **Phase 5 `lint` 检查**：`verify.py` 导入 `check_file`，遇到任何 error 级别的lint 消息即失败，取代基于正则的 `_check_hw_classification`（H1）及其四个辅助函数。
+- **硬门禁**：当 linter 报告错误时，`flow.py` 短路 Phase 6——合成 `ReviewFinding`（`category="lint"`、`coder_responsible="coder"`），进入修复循环，仅当 lint 干净后才启动 checker（最多 `MAX_RETRIES` 次，之后带着可见的失败继续进入评审）。
+- **S3 契约对齐**：S3 类现在统一使用`instantiate_device_type_tests(only_for="<device>")` + `device` 参数；移除`utils.py`、`coder.md`、review skill 和 CLAUDE.md 策略表中的 plain-`TestCase`-带-`setUp`-guard 回退方案。
+- **`@onlyNativeDeviceTypes*` 移除**：这些装饰器现已冗余并被移除（linter 会在ACCELERATOR 类上标记它们）；从所有 ruleset 文档的 KEEP 黑名单中剔除。
+- **Checker 增强**：`checker.md` 和 review skill 现在镜像 linter 的结构化契约，使 AI 评审与确定性门禁保持一致。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `scripts/verify.py` | +`_check_lint`；移除 `_check_hw_classification` + 4 个辅助函数 |
+| `flow.py` | lint 硬门禁 + 修复循环（`_collect_lint_errors`/`_enter_lint_fix`/`_advance_lint_gate`） |
+| `state.py` | +`lint_gate_pending`、`lint_retry_count` |
+| `utils.py` | `strategy_3` 不再提及 plain-TestCase 回退 |
+| `agent/prompts/coder.md`、`analyst.md`、`checker.md` | S3 契约、KEEP 黑名单、linter 结构化规则 |
+| `agent/skills/refactor-test-decoupling/SKILL.md`、`review-test-refactoring/SKILL.md` | S3 机制 + 命名、KEEP 黑名单、结构化规则 |
+| `reference/classification_guide.md`、`CLAUDE.md`、`SKILL.md` | KEEP 黑名单 + S3 表 |
+
 ## 2026-08-13 — Reviewer feedback ingest (applied)
 
 - **Minor** [185798-3615096416](https://github.com/pytorch/pytorch/pull/185798#discussion_r3615096416) — TEST_ACCELERATOR is a LazyVal not a bool, so replacing TEST_* in bool-type-checked decorators like serialTest raises AssertionError -- not yet documented in the ruleset. (target: coder.md)

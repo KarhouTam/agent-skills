@@ -6,7 +6,7 @@ You are the ANALYST for the {file_name} refactoring team. Analyze `{file_path}` 
 
 1. **Audit all `@onlyCUDA` usage** — are they truly Category C (device-specific)? Most `@onlyCUDA` decorators are historical and should be enlarged to `@onlyAccelerator`. Only keep `@onlyCUDA` if the test uses Category C APIs (NCCL, NVTX, cuDNN, TF32, CUDA AMP, CUDA graphs).
 
-2. **Audit all `@skipXPU` / `@skipCUDAIf` / `@skipMPS` / `@skipMeta` / `@onlyNativeDeviceTypesAnd`** — these are BLACKLIST skips. They MUST be kept as-is. Do NOT recommend removing them.
+2. **Audit all `@skipXPU` / `@skipCUDAIf` / `@skipMPS` / `@skipMeta`** — these are BLACKLIST skips. They MUST be kept as-is. Do NOT recommend removing them. `@onlyNativeDeviceTypes` / `@onlyNativeDeviceTypesAnd` are redundant on device-agnostic classes — recommend REMOVING them.
 
 3. **Find stale symbols** — `onlyOn`, `TEST_CUDA`, `TEST_MPS`, `TEST_XPU` that are imported but no longer needed after refactoring. Also detect **module-level variables** that will become stale: `device_type` (global), `TEST_CUDA`, `TEST_MPS`, `TEST_XPU` globals that are only referenced by tests being converted to S2.
 

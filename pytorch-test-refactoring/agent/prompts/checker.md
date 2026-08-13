@@ -26,10 +26,10 @@ Use the review checklist at `agent/skills/review-test-refactoring/SKILL.md`
 
 ## Review Points
 
-1. **Blacklist skips** (@skipXPU, @skipCUDAIf, @skipMPS, @skipMeta, @onlyNativeDeviceTypesAnd) MUST be kept — do NOT flag their presence as issues
+1. **Blacklist skips** (@skipXPU, @skipCUDAIf, @skipMPS, @skipMeta) MUST be kept — do NOT flag their presence as issues. @onlyNativeDeviceTypes / @onlyNativeDeviceTypesAnd are redundant and SHOULD be removed.
 2. **Whitelist** (@onlyCUDA, @onlyOn) MUST be enlarged to @onlyAccelerator
 3. **Stale imports** must be removed
-4. **Class naming**: Renaming is OPTIONAL. The `hw_classification` member handles classification. Only flag a name as an issue if it's actively misleading (e.g., a CPU-only class named `TestFooCUDA`). Recommended names: TestFoo (S1), TestFooDevice (S2), TestFooCUDA (S3).
+4. **Class naming**: Renaming is OPTIONAL. The `hw_classification` member handles classification. Only flag a name as an issue if it's actively misleading (e.g., a CPU-only class named `TestFooCUDA`). Recommended names: TestFoo (S1), TestFooDevice (S2), S3 keeps the original name (`instantiate_device_type_tests` appends the device suffix).
 5. **Test count** must match original: {original_test_count}
 6. **Device-specific APIs** correctly classified (Category A/B vs C per {ref_dir}/classification_guide.md)
 7. **External reference alignment**: If classes were NOT renamed, skip this check. If test classes WERE renamed, stale references in these locations MUST be updated:
@@ -42,6 +42,10 @@ Use the review checklist at `agent/skills/review-test-refactoring/SKILL.md`
    - S3 (MPS-specific): `HardwareClassification.MPS`
    - S3 (XPU-specific): `HardwareClassification.XPU`
    Verify the import `from torch.testing._internal.common_utils import HardwareClassification` is present and merged alphabetically into the existing `common_utils` import block.
+   **Structural contract (mirrors the deterministic test linter) — verify per classification:**
+   - `GENERIC`: class must NOT be instantiated via `instantiate_device_type_tests`; test methods must NOT accept a `device`/`devices` parameter.
+   - `ACCELERATOR`: class MUST be instantiated via `instantiate_device_type_tests`; every test method accepts `device`/`devices`; test methods use no `@only*` decorator except `@onlyAccelerator`; the instantiate call must NOT use `only_for` (use `except_for` for a blacklist).
+   - `CPU`/`CUDA`/`MPS`/`XPU`: class MUST be instantiated via `instantiate_device_type_tests` with `only_for=<device>` matching the classification; every test method accepts `device`/`devices`; the instantiate call must NOT use `except_for`.
    - `torch/testing/_internal/common_methods_invocations.py` — DecorateInfo entries use exact `cls_name` matching; an old class name silently stops matching
    - `test/dynamo_skips/` — **sentinel files (often 0 bytes)**. Search by FILENAME, not content. When a class is renamed from `TestFoo` to `TestFooDevice`, `instantiate_device_type_tests` renames device variants too: `TestFooCUDA` → `TestFooDeviceCUDA`. Files named after old variants must be renamed.
    - `test/dynamo_expected_failures/` — **sentinel files (often 0 bytes)**. Same filename-based search required. Use:

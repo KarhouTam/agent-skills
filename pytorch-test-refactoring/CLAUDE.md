@@ -19,7 +19,8 @@ ingest_ops.py (IngestOps state machine — PR feedback ingest sidecar)
 ├── utils.py              Path constants, workspace helpers, refactoring rule definitions
 ├── scripts/
 │   ├── assess.py         Phase 1: deterministic file analysis (class layout, test counts)
-│   ├── verify.py         Phase 5: 7 deterministic verification checks
+│   ├── verify.py         Phase 5: deterministic verification checks (incl. lint check)
+│   ├── linter.py         Test-case linter: enforces hw_classification structural contracts
 │   ├── report.py         Phase 7: final markdown summary generation
 │   ├── ci.py             Phase 8: deterministic CI operations (check-runs, bot comments)
 │   ├── ingest.py         Sidecar: deterministic PR feedback harvest + findings writer
@@ -42,6 +43,7 @@ flow.py → state.py (data models)
 flow.py → utils.py (constants, workspace paths)
 flow.py → scripts/assess.py (Phase 1)
 flow.py → scripts/verify.py (Phase 5)
+flow.py → scripts/linter.py (test-case lint gate)
 flow.py → scripts/report.py (Phase 7)
 flow.py → scripts/logger.py (audit logging)
 flow.py → agent/adapter.py (abstract base)
@@ -64,7 +66,7 @@ ingest_ops.py → agent/claude_code.py (Claude Code adapter)
 |----------|-------------|-----------|-------------------|------|
 | S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | `HardwareClassification.GENERIC` (or `CPU` if `instantiate_device_type_tests(only_for="cpu")` for `@ops`) | No device dependency, pure CPU logic |
 | S2 | `TestFoo` or `TestFooDevice` | `instantiate_device_type_tests()` | `HardwareClassification.ACCELERATOR` | Uses `device` parameter with generic accelerator APIs |
-| S3 | `TestFooOn<Device>` (e.g., `TestFooOnCUDA`) | Plain `TestCase` with `setUp` guard (`@unittest.skipIf(not torch.cuda.is_available(), ...)`). Hardcode device strings. NEVER use `instantiate_device_type_tests` for S3. | `HardwareClassification.CUDA` / `MPS` / `XPU` per device | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+| S3 | `TestFoo` (original name — `instantiate_device_type_tests` appends the device) | `instantiate_device_type_tests(only_for="<device>")` | `HardwareClassification.CUDA` / `MPS` / `XPU` per device | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
 
 **Import:** `from torch.testing._internal.common_utils import HardwareClassification`
 
@@ -83,7 +85,7 @@ ingest_ops.py → agent/claude_code.py (Claude Code adapter)
 2. **Analyze** — AI agent (analyst): classify every test, identify stale imports, review skip decorators
 3. **Distribute** — deterministic: convert strategy assignments into per-rule coder tasks
 4. **Code + Check** — AI loop: coder applies one rule → checker verifies → next rule (single coder, per-rule iteration)
-5. **Verify** — deterministic: 7 automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, import audit)
+5. **Verify** — deterministic: automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, import audit, lint). A **lint hard gate** runs after verify — error-severity linter messages are synthesized into findings and routed to the coder to fix before the final review (max 3 retries).
 6. **Final Review** — AI agent (checker): mandatory full-file quality review; findings → coder fix → re-verify (max 3 retries)
 7. **Finalize** — deterministic: generate `final_summary.md`
 8. **CI Ops** — user creates PR manually, then triggers CI monitoring (via "look after the CI" or --ci-check). The state machine cron-monitors CI, classifies failures, spawns a debugger agent to fix regressions, pushes fixes, and marks the PR ready (see `agent/skills/ci-automation/SKILL.md`)
@@ -132,7 +134,7 @@ Key evaluation runs:
 
 ## Key rules (non-negotiable)
 
-- **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd` — these are intentional and must be preserved
+- **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta` — these are intentional and must be preserved. `@onlyNativeDeviceTypes` / `@onlyNativeDeviceTypesAnd` are redundant and are REMOVED.
 - **ENLARGE whitelist**: `@onlyCUDA` → `@onlyAccelerator`; `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator`; `@unittest.skipIf(not TEST_CUDA)` → `@onlyAccelerator`
 - **`@onlyAccelerator` is a METHOD decorator only**, never a class decorator — using it on a class breaks `instantiate_device_type_tests`
 - **"CUDA as device" vs "CUDA as feature"**: If replacing `"cuda"` with `"mps"`/`"xpu"` still makes logical sense, it's Strategy 2 (CUDA was just the device). If the test uses Category C APIs, it's Strategy 3.

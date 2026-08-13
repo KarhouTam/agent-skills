@@ -227,16 +227,16 @@ The orchestrator loads all artifacts from the workspace and continues from where
 2. **Analyze** — AI agent (analyst): classify every test, identify stale imports, review skip decorators
 3. **Distribute** — deterministic: convert strategy assignments into per-rule coder tasks
 4. **Code + Check** — AI loop: coder applies one rule → checker verifies → next rule (single coder, per-rule iteration, max 3 fix retries)
-5. **Verify** — deterministic: 7 automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, import audit)
+5. **Verify** — deterministic: automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, import audit, lint). A **lint hard gate** runs after verify — if the test linter reports error-severity messages, the flow synthesizes findings and routes them to the coder to fix before the final review (max 3 retries).
 6. **Final Review** — AI agent (checker): **mandatory** full-file quality review; findings → coder fix → re-verify (max 3 retries)
 7. **Finalize** — deterministic: generate `final_summary.md`
 8. **CI Ops** — user creates PR manually, then triggers CI monitoring (via "look after the CI" or `--ci-check`). The state machine cron-monitors CI, classifies failures, spawns a debugger agent to fix regressions, pushes fixes, and marks the PR ready. See CI Automation section above.
 
 ## Key Rules (non-negotiable, from agent/skills/refactor-test-decoupling)
 
-- **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd`
+- **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta` (`@onlyNativeDeviceTypes` / `@onlyNativeDeviceTypesAnd` are redundant — REMOVE)
 - **ENLARGE whitelist**: `@onlyCUDA` → `@onlyAccelerator`, `@onlyOn` → `@onlyAccelerator`
-- **Class naming**: Renaming is OPTIONAL (the future `hw_classification` member handles classification). Recommended names if renaming: `TestFoo` (S1), `TestFooDevice` (S2), `TestFooCUDA` (S3). Agent decides based on external reference impact.
+- **Class naming**: Renaming is OPTIONAL (the future `hw_classification` member handles classification). Recommended names if renaming: `TestFoo` (S1), `TestFooDevice` (S2), S3 keeps the original name — `instantiate_device_type_tests` appends the device suffix. Agent decides based on external reference impact.
 - **Phase 6 is mandatory** — checker always reviews, even if verification passes
 - **External refs after rename**: When classes are renamed, update `common_methods_invocations.py` DecorateInfo entries, and rename stale entries in `test/dynamo_skips/` and `test/dynamo_expected_failures/`. **CRITICAL: dynamo skip/expected-failure files are sentinels (often 0 bytes). Search by FILENAME (`find -name`), NEVER by content (`grep`).** When a device-parametrized class is renamed (TestFoo → TestFooDevice), `instantiate_device_type_tests` renames device variants too (TestFooCUDA → TestFooDeviceCUDA). Files named after old variants must be renamed to match
 
@@ -246,9 +246,9 @@ The orchestrator loads all artifacts from the workspace and continues from where
 |----------|-------------|-----------|------|
 | S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | No device dependency, pure CPU logic. **Also includes tests of device-agnostic utility logic (`rnn_utils`, `pad_sequence`, `pack_sequence`, `F.pad`, etc.) where running on multiple devices adds no meaningful coverage.** This is the DEFAULT for tests that were previously CPU-only with no device decorators. |
 | S2 | `TestFoo` or `TestFooDevice` | `instantiate_device_type_tests()` | Uses `device` parameter AND running on multiple devices provides specific testing value: device transfer semantics, memory format behavior, accelerator-specific error paths, or tests originally gated behind `torch.cuda.is_available()`. **Do NOT classify as S2 just because a test creates tensors.** |
-| S3 | `TestFoo` or `TestFooCUDA` | `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` when using `@dtypes`/`@dtypesIfCUDA`/`@dtypesIfCPU`; otherwise `TestCase` with `setUp` guard and `@instantiate_parametrized_tests` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+| S3 | `TestFoo` (original name — `instantiate_device_type_tests` appends the device) | `instantiate_device_type_tests(TestFoo, globals(), only_for="cuda")` | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
 
-**S3 instantiation rule**: When an S3 class uses `@dtypes`, `@dtypesIfCUDA`, `@dtypesIfCPU`, or other device-type-aware decorators (which are designed for `instantiate_device_type_tests`), use `instantiate_device_type_tests(TestFooCUDA, globals(), only_for="cuda")` instead of `@instantiate_parametrized_tests`. Each test method receives `device` as its first parameter (always `"cuda"`), eliminating the need for per-method `@onlyCUDA` decorators or hardcoded `device = "cuda"` lines. This is the preferred pattern — it keeps mechanism consistency with S2 and lets `instantiate_device_type_tests` inject device-aware dtype resolution.
+**S3 instantiation rule**: S3 classes ALWAYS use `instantiate_device_type_tests(TestFoo, globals(), only_for="cuda")` (or `"mps"`/`"xpu"`). Each test method receives `device` as its first parameter (always the target device), eliminating the need for per-method `@onlyCUDA` decorators or hardcoded `device = "cuda"` lines. Do NOT use a plain `TestCase` with a `setUp` guard — the test linter rejects it. This keeps mechanism consistency with S2 and lets `instantiate_device_type_tests` inject device-aware dtype resolution.
 
 ## Related
 

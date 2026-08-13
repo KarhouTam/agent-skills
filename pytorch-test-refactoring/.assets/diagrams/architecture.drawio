@@ -105,7 +105,7 @@
                 <mxCell id="scripts-title" value="📜 确定性脚本层" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=15;fontColor=#2e7d32;fontStyle=1;" parent="4" vertex="1">
                     <mxGeometry x="8.387096774193548" y="6.117647058823529" width="243.22580645161293" height="22.941176470588232" as="geometry"/>
                 </mxCell>
-                <mxCell id="scripts-desc" value="&lt;b&gt;scripts/assess.py&lt;/b&gt; — Phase 1 文件评估&lt;br&gt;&lt;b&gt;scripts/verify.py&lt;/b&gt; — Phase 5 自动化检查&lt;br&gt;&lt;b&gt;scripts/report.py&lt;/b&gt; — Phase 7 总结报告&lt;br&gt;&lt;b&gt;scripts/ci.py&lt;/b&gt; — Phase 8 CI 操作&lt;br&gt;&lt;b&gt;scripts/logger.py&lt;/b&gt; — 审计日志" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;fontColor=#333;" parent="4" vertex="1">
+                <mxCell id="scripts-desc" value="&lt;b&gt;scripts/assess.py&lt;/b&gt; — Phase 1 文件评估&lt;br&gt;&lt;b&gt;scripts/verify.py&lt;/b&gt; — Phase 5 自动化检查&lt;br&gt;&lt;b&gt;scripts/linter.py&lt;/b&gt; — 测试 linter 门禁&lt;br&gt;&lt;b&gt;scripts/report.py&lt;/b&gt; — Phase 7 总结报告&lt;br&gt;&lt;b&gt;scripts/ci.py&lt;/b&gt; — Phase 8 CI 操作&lt;br&gt;&lt;b&gt;scripts/logger.py&lt;/b&gt; — 审计日志" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;fontColor=#333;" parent="4" vertex="1">
                     <mxGeometry x="12.580645161290324" y="36.705882352941174" width="239.03225806451613" height="87.94117647058823" as="geometry"/>
                 </mxCell>
             </root>

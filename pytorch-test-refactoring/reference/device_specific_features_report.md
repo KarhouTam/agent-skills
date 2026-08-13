@@ -17,7 +17,8 @@
 
 | Decorator | Action |
 |-----------|--------|
-| `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd` | **KEEP** (blacklist) |
+| `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta` | **KEEP** (blacklist) |
+| `@onlyNativeDeviceTypes`, `@onlyNativeDeviceTypesAnd` | **REMOVE** (redundant on device-agnostic classes) |
 | `@onlyCUDA`, `@onlyOn` | **Enlarge** to `@onlyAccelerator` if test uses only Cat A/B APIs |
 
 ## Name Differences (most common mistakes)

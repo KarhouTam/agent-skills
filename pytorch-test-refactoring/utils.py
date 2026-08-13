@@ -33,9 +33,7 @@ REFACTOR_RULES: dict[str, str] = {
     "strategy_3": "Extract accelerator-specific tests (S3) — "
     "move tests using Category C APIs into a class, "
     "give each test a `device` parameter, and register with "
-    "instantiate_device_type_tests(<Class>, globals(), only_for='cuda') "
-    "when @dtypes/@dtypesIfCUDA/@dtypesIfCPU/@parametrize decorators exist; "
-    "fallback to plain TestCase with setUp guard otherwise. "
+    "instantiate_device_type_tests(<Class>, globals(), only_for='cuda'). "
     "Renaming to TestFooCUDA is optional — agent decides based on external refs.",
     "cleanup": "Import cleanup and external reference updates — "
     "remove stale TEST_CUDA/TEST_MPS/TEST_XPU/onlyOn imports, "

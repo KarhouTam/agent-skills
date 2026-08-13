@@ -22,7 +22,7 @@
 
 ## 概述
 
-**TL;DR**：`pytorch-test-refactoring` 是一个 AI 驱动的 8 阶段状态机工作流（7 阶段重构 + 1 阶段 CI 监控），将 PyTorch 测试文件按三种策略拆分为设备无关/设备通用/设备专属类。Flow 发出 `SPAWN_SINGLE`、`RELAY_FINDINGS` 信号由 Claude Code 生成 Agent 执行，中间穿插确定性脚本进行文件评估、7 项自动化验证和总结报告生成。核心原则：黑名单跳过必须保留（有意的已知缺陷）、白名单限制必须扩大（历史遗留的人为限制）、Category A/B API 不是设备专属（Category C 才是）。
+**TL;DR**：`pytorch-test-refactoring` 是一个 AI 驱动的 8 阶段状态机工作流（7 阶段重构 + 1 阶段 CI 监控），将 PyTorch 测试文件按三种策略拆分为设备无关/设备通用/设备专属类。Flow 发出 `SPAWN_SINGLE`、`RELAY_FINDINGS` 信号由 Claude Code 生成 Agent 执行，中间穿插确定性脚本进行文件评估、自动化验证和总结报告生成，并在最终审查前加一道测试 linter 硬门禁。核心原则：黑名单跳过必须保留（有意的已知缺陷）、白名单限制必须扩大（历史遗留的人为限制）、Category A/B API 不是设备专属（Category C 才是）。
 
 本工作流是一个 **AI 驱动的 8 阶段状态机**（7 阶段重构 + 1 阶段 CI 监控），用于将 PyTorch 测试文件按设备依赖度拆分为三类：
 
@@ -43,7 +43,7 @@ orchestrator.py (CLI 桥接层 → JSON 任务规格 ↔ Agent / SendMessage 工
 RefactorFlow (状态机核心)
     │
     ├── Agent 适配层 (agent/)  → AI Prompts: analyst / coder / checker
-    ├── 确定性脚本层 (scripts/) → assess / verify / report / logger
+    ├── 确定性脚本层 (scripts/) → assess / verify / report / logger / linter
     └── Pydantic 状态模型 (state.py)
               │
               └── 参考知识库 (reference/)
@@ -59,7 +59,7 @@ RefactorFlow (状态机核心)
 | **状态机**     | `flow.py`    | 7 阶段编排，信号生成，进度恢复，Agent ID 生命周期管理                    |
 | **CI 监控**    | `ci_ops.py`  | CI 监控状态机：监控 CI 状态、分类失败、生成 debugger agent               |
 | **Agent 适配** | `agent/`     | 为每个阶段生成 Agent 任务，包含专业 Prompt                             |
-| **确定性脚本** | `scripts/`   | 无需 AI 的阶段：评估、验证、CI 操作、报告生成                          |
+| **确定性脚本** | `scripts/`   | 无需 AI 的阶段：评估、验证（含 linter 门禁）、CI 操作、报告生成        |
 | **参考知识**   | `reference/` | API 分类目录、分类指南、设备特性报告                                   |
 | **工具函数**   | `utils.py`   | 路径常量、工作空间、git 工具                                           |
 
@@ -78,7 +78,7 @@ RefactorFlow (状态机核心)
 | --------- | -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------ |
 | **策略1** | `TestFoo`（保持原名） | `@instantiate_parametrized_tests` 或 `TestCase` | `TestBinaryUfuncs`                                                      | 无设备依赖的纯逻辑测试               |
 | **策略2** | `TestFoo` 或 `TestFooDevice` | `instantiate_device_type_tests()`               | `TestBinaryUfuncsDevice` → 生成 `TestBinaryUfuncsDeviceCPU/CUDA/MPS` 等 | 使用 device 参数但仅需通用加速器 API |
-| **策略3** | `TestFoo` 或 `TestFooCUDA`   | `@instantiate_parametrized_tests` 或 `TestCase` | `TestBinaryUfuncsCUDA`                                                  | 需要特定加速器的独特功能             |
+| **策略3** | `TestFoo`（保持原名，`instantiate_device_type_tests` 追加设备后缀） | `instantiate_device_type_tests(only_for="<device>")` | `TestBinaryUfuncsCUDA`（由 `TestBinaryUfuncs` + `only_for="cuda"` 生成） | 需要特定加速器的独特功能             |
 
 ### 设备 API 分类层次
 
@@ -120,7 +120,7 @@ Category C（设备专属） > Category B（通用概念） > Category A（有 a
 
 **做什么**：
 1. 审核所有 `@onlyCUDA` 的使用——是否为真正的 Category C（设备专属）
-2. 审核所有 `@skipXPU` / `@skipCUDAIf` / `@skipMPS` / `@skipMeta` / `@onlyNativeDeviceTypesAnd`——黑名单跳过必须保留
+2. 审核所有 `@skipXPU` / `@skipCUDAIf` / `@skipMPS` / `@skipMeta`——黑名单跳过必须保留；`@onlyNativeDeviceTypes` / `@onlyNativeDeviceTypesAnd` 冗余，应移除
 3. 找出失效导入——`TEST_CUDA`、`TEST_MPS`、`TEST_XPU` 等不再需要的
 4. **将每个测试分类到三种策略**
 5. 验证测试数量——所有原始测试必须被覆盖
@@ -162,7 +162,7 @@ SEND_MESSAGE(agent_id) "修复规则 3" → checker → pass
 
 #### ✅ Phase 5：Verify（验证）
 
-**类型**：确定性脚本，7 项检查
+**类型**：确定性脚本，多项自动化检查（含 lint 门禁）
 
 | #   | 检查项                | 说明                                                                       |
 | --- | --------------------- | -------------------------------------------------------------------------- |
@@ -173,6 +173,9 @@ SEND_MESSAGE(agent_id) "修复规则 3" → checker → pass
 | 5   | **外部引用**          | 类重命名后 `dynamo_skips/` 和 `dynamo_expected_failures/` 中的条目必须更新 |
 | 6   | **残留模式**          | 不应有 `.cuda()`、`device="cuda"`、`onlyOn(` 等新旧模式残留                |
 | 7   | **导入审计**          | 不应有 `TEST_CUDA`、`TEST_MPS`、`TEST_XPU` 等失效导入                      |
+| 8   | **测试 linter**       | `scripts/linter.py` — 无 error 级别 lint 消息（`hw_classification` 结构化契约：device 参数、实例化方式、`only_for`/`except_for`、`@only*` 装饰器） |
+
+> ⚠️ **lint 硬门禁**：Phase 5 之后、Phase 6 最终审查之前，若 linter 报告 error 级别消息，工作流会合成 findings（`category="lint"`、`coder_responsible="coder"`）并转入修复循环（最多重试 3 次），lint 干净后才进入最终审查。
 
 **输出**：`verification.json`
 
@@ -297,7 +300,8 @@ state = flow.run("test/test_ops.py", resume=True)  # 从磁盘加载已有产物
 @skipCUDAIf            黑名单（有意跳过）   保留原样
 @skipMPS               黑名单（有意跳过）   保留原样
 @skipMeta              黑名单（有意跳过）   保留原样
-@onlyNativeDeviceTypesAnd  黑名单模式       保留原样
+@onlyNativeDeviceTypes     冗余（可移除）    移除
+@onlyNativeDeviceTypesAnd  冗余（可移除）    移除
 ─────────────────────────────────────────────────────
 @onlyCUDA              白名单（人为限制）   扩大为 @onlyAccelerator
 @onlyOn(["cuda","xpu"]) 白名单（人为限制）   扩大为 @onlyAccelerator
@@ -408,7 +412,7 @@ agent_space/refactor/test_ops/
 ├── analyst_report.md         # Phase 2：分析报告（可读）
 ├── analyst_report.json       # Phase 2：分析报告（结构化）
 ├── coder_tasks.json           # Phase 3：coder 任务分配（按重构规则）
-├── verification.json         # Phase 5：7 项检查结果
+├── verification.json         # Phase 5：自动化检查结果（含 lint）
 ├── review_findings.json      # Phase 6：审查发现
 ├── final_summary.md          # Phase 7：最终总结
 ├── audit.jsonl               # 审计日志（每行一个事件）
@@ -434,7 +438,8 @@ pytorch-test-refactoring/
 ├── utils.py                     # 常量和工具函数
 ├── scripts/
 │   ├── assess.py                # Phase 1：文件评估（确定性）
-│   ├── verify.py                # Phase 5：7 项自动化验证（确定性）
+│   ├── verify.py                # Phase 5：自动化验证（确定性，含 lint 检查）
+│   ├── linter.py                # 测试用例 linter（hw_classification 结构化契约）
 │   ├── report.py                # Phase 7：生成总结报告（确定性）
 │   ├── ci.py                    # Phase 8：CI 操作（check-run、bot 评论）
 │   └── logger.py                # 审计日志和状态管理
@@ -472,6 +477,7 @@ flow.py
 ├── utils.py          (工具函数)
 ├── scripts/assess.py (Phase 1)
 ├── scripts/verify.py (Phase 5)
+├── scripts/linter.py (测试 linter 门禁)
 ├── scripts/report.py (Phase 7)
 ├── scripts/logger.py (日志)
 └── agent/

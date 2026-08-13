@@ -57,7 +57,7 @@
         <mxCell id="s3-title" value="🔧 TestFooCUDA（策略3）&lt;br&gt;Accelerator-Specific" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=15;fontStyle=1;fontColor=#8b0000;" vertex="1" parent="1">
           <mxGeometry x="970" y="240" width="340" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="s3-desc" value="特定加速器专属 · Cat C API&lt;br&gt;&lt;font style=&quot;font-size:11px;&quot;&gt;@instantiate_parametrized_tests&lt;br&gt;或 plain TestCase + setUp guard&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#555;" vertex="1" parent="1">
+        <mxCell id="s3-desc" value="特定加速器专属 · Cat C API&lt;br&gt;&lt;font style=&quot;font-size:11px;&quot;&gt;instantiate_device_type_tests(only_for=&quot;&lt;device&gt;&quot;)&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontColor=#555;" vertex="1" parent="1">
           <mxGeometry x="970" y="270" width="340" height="90" as="geometry" />
         </mxCell>
 
