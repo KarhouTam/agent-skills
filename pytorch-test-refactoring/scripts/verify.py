@@ -594,10 +594,12 @@ def _check_dtype_integrity(file_path: str) -> VerificationCheck:
 def _check_accelerator_safety(file_path: str) -> VerificationCheck:
     """Check MPS dtype safety (B3) and accelerator type safety (B4).
 
-    B3: If allow_mps=True or @onlyAccelerator is present AND a @dtypes
-    decorator contains torch.double / torch.float64 / torch.complex128 /
-    torch.cdouble, flag as FAIL unless a mitigating decorator
-    (@skipIfMPS / @dtypesIfMPS / @expectedFailureMPS) is also present.
+    B3: If MPS is exposed (allow_mps=True present — MPS variants are only
+    created then) AND a @dtypes decorator contains torch.double /
+    torch.float64 / torch.complex128 / torch.cdouble, flag as FAIL unless a
+    mitigating decorator (@skipIfMPS / @dtypesIfMPS / @expectedFailureMPS)
+    is also present. A bare @onlyAccelerator without allow_mps=True does
+    not expose a test to MPS.
 
     B4: Scan for torch.accelerator.current_device_index() compared with
     string-typed values, and torch.accelerator.set_device_index() called
@@ -607,7 +609,9 @@ def _check_accelerator_safety(file_path: str) -> VerificationCheck:
     finding_details: list[str] = []
 
     # ── B3: MPS dtype safety ────────────────────────────────────────────
-    has_mps_exposure = "allow_mps=True" in content or "@onlyAccelerator" in content
+    # MPS variants are only created when allow_mps=True is passed; a bare
+    # @onlyAccelerator does not expose a test to MPS on its own.
+    has_mps_exposure = "allow_mps=True" in content
 
     if has_mps_exposure:
         problematic_dtypes = [
@@ -938,6 +942,76 @@ def _check_class_split(
 
 # ── P2: @skipIfMPS coverage check ────────────────────────────────────
 
+def _is_class_instantiated_for_mps(content: str, method_name: str) -> bool:
+    """Return True if the class containing ``method_name`` is instantiated for MPS.
+
+    MPS variants are only created by ``instantiate_device_type_tests`` when
+    ``allow_mps=True`` is passed (``only_for``/``except_for`` alone do not
+    enable MPS).  If the containing class has no such call, or the call does
+    not pass ``allow_mps=True`` (and MPS is not explicitly allowed via
+    ``only_for``/``except_for``), the test can never run on MPS and
+    ``@skipIfMPS`` is not required.
+    """
+    lines = content.split("\n")
+
+    # Locate the method definition.
+    method_line = None
+    for i, line in enumerate(lines):
+        if re.match(rf"def\s+{re.escape(method_name)}\b", line.strip()):
+            method_line = i
+            break
+    if method_line is None:
+        return True  # cannot locate method — be conservative
+
+    # Walk up to find the enclosing class.
+    class_name = None
+    for i in range(method_line - 1, -1, -1):
+        m = re.match(r"class\s+(\w+)", lines[i].strip())
+        if m:
+            class_name = m.group(1)
+            break
+    if class_name is None:
+        return True  # not inside a class — be conservative
+
+    # Find this class's instantiate_device_type_tests call.
+    inst_pattern = (
+        rf"instantiate_device_type_tests\(\s*{re.escape(class_name)}\s*,"
+    )
+    inst_match = re.search(inst_pattern, content)
+    if inst_match is None:
+        return True  # no device instantiation detected — be conservative
+
+    # Extract the full call string (balance parens).
+    depth = 0
+    end = inst_match.start()
+    for k in range(inst_match.start(), len(content)):
+        if content[k] == "(":
+            depth += 1
+        elif content[k] == ")":
+            depth -= 1
+            if depth == 0:
+                end = k + 1
+                break
+    call_str = content[inst_match.start():end]
+
+    # only_for that excludes MPS → not instantiated for MPS.
+    only_for_m = re.search(
+        r"only_for\s*=\s*(\[[^\]]*\]|\([^)]*\)|['\"][^'\"]+['\"])", call_str
+    )
+    if only_for_m and "mps" not in only_for_m.group(1):
+        return False
+
+    # except_for that includes MPS → not instantiated for MPS.
+    except_for_m = re.search(
+        r"except_for\s*=\s*(\[[^\]]*\]|\([^)]*\)|['\"][^'\"]+['\"])", call_str
+    )
+    if except_for_m and "mps" in except_for_m.group(1):
+        return False
+
+    # MPS variants are only created when allow_mps=True is passed.
+    return "allow_mps=True" in call_str
+
+
 def _check_skipifmps_coverage(
     file_path: str, workspace: Path | None = None
 ) -> VerificationCheck:
@@ -991,7 +1065,11 @@ def _check_skipifmps_coverage(
             # Check if @skipIfMPS was added
             has_skipmps_now = any("@skipIfMPS" in d for d in curr_decos)
             has_dtypesifmps = any("@dtypesIfMPS" in d for d in curr_decos)
-            if not has_skipmps_now and not has_dtypesifmps:
+            # @skipIfMPS is only required when the test's class is actually
+            # instantiated for MPS — no MPS variant means no MPS exposure.
+            if not has_skipmps_now and not has_dtypesifmps and (
+                _is_class_instantiated_for_mps(current_content, method)
+            ):
                 missing_mps.append(method)
 
     passed = len(missing_mps) == 0

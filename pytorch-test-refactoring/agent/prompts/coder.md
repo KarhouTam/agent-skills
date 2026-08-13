@@ -35,12 +35,14 @@ A checker will verify your work. If issues are found, you will be asked to fix t
 
 - **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipCUDAIfRocm`, `@skipMPS`, `@skipMeta`, `@onlyNativeDeviceTypesAnd` — these document known gaps
 - **ENLARGE whitelist**: `@onlyCUDA` -> `@onlyAccelerator`, `@onlyOn` -> `@onlyAccelerator`
+- **ACCELERATOR related TEST_* flags are LazyVal objects, not real bools**: `TEST_ACCELERATOR`, `TEST_MULTIACCELERATOR`, etc. are lazy-evaluated values, so decorators that type-check their condition argument (e.g. `@serialTest(TEST_ACCELERATOR)`) raise `AssertionError` ("expected condition to be bool, got `<class ...LazyVal>`"). Wrap the flag in `bool(...)` when it must be passed as a condition, or prefer `@onlyAccelerator` / `@unittest.skipIf(not bool(TEST_ACCELERATOR))` patterns instead of passing the raw LazyVal into bool-checked decorators.
 - `@onlyCPU` → REMOVE (make device-agnostic: add `device` param, use `device=device`). Respect analyst's per-test classification — some may be S1.
 - **MPS safety**: Add `@skipIfMPS` to ANY test that was previously scoped OUT of MPS but is now scoped to run on MPS for the first time. This applies to THREE scenarios:
   1. Enlarging `@onlyCUDA` or `@onlyOn(["cuda", "xpu"])` → `@onlyAccelerator` (MPS is newly covered)
   2. Removing `@onlyCPU` from a test to make it device-agnostic (test now runs on MPS for the first time)
   3. Moving a test from an S1 context (CPU-only) to an S2 context (device-parametrized)
   Exception: Do NOT add `@skipIfMPS` if the test already has `@dtypesIfMPS`, `@onlyMPS`, or was already running on MPS (i.e., had no device restriction before).
+  Exception: `@skipIfMPS` is NOT required if the test's class is NOT instantiated for MPS. MPS variants are only created when the class's `instantiate_device_type_tests` call passes `allow_mps=True` — `only_for`/`except_for` alone do not enable MPS. If no MPS variant exists, the test can never run on MPS, so the skip is unnecessary.
 - Only enlarge `@onlyCUDA` → `@onlyAccelerator` when test logic is genuinely device-agnostic. If the test had no prior device restriction or works correctly on CPU, REMOVE the restriction entirely — do NOT add `@onlyAccelerator`. Tests relying on backend-specific behavioral guarantees (NaN handling, determinism, precision characteristics, rounding modes) should keep `@onlyCUDA`.
 - **Class naming**: Renaming is OPTIONAL. The future `hw_classification` member will handle classification. Before renaming, check external references (DecorateInfo, dynamo_skips, dynamo_expected_failures) — if many exist, keep the original name to avoid breaking them. Recommended names if renaming: S1 = keep original (no device suffix), S2 = `TestFooDevice`, S3 = `TestFooOnCUDA`
 - **Category A APIs** (`torch.cuda.empty_cache`, `synchronize`, `CUDAGraph`, `memory_*`) -> replace with `torch.accelerator.*`

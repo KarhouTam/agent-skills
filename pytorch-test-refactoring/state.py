@@ -242,3 +242,45 @@ class RefactorState(BaseModel):
     rule_retry: int = 0  # fix attempts for current rule
     signal: FlowSignal = FlowSignal.DONE
     agent_ids: dict[str, str] = {}  # agent_name → agent_id for SendMessage resume
+
+
+# ── PR feedback ingest models (sidecar module) ──────────────────────
+
+
+class FeedbackComment(BaseModel):
+    """A single harvested reviewer comment (human inline or claude summary)."""
+
+    comment_id: int
+    pr_number: int
+    pr_title: str = ""
+    author: str  # GitHub login, e.g. "can-gaa-hou" or "claude[bot]"
+    body: str
+    html_url: str
+    created_at: str  # ISO-8601 UTC
+    source: str = "inline_review"  # "inline_review" | "claude_summary"
+    is_reply: bool = False  # True if the comment is part of a replied thread
+    in_reply_to_id: int = 0  # 0 for top-level comments
+
+
+class FeedbackFinding(BaseModel):
+    """A draft ruleset change proposed by the analyst, pending human approval."""
+
+    id: str  # f"{pr_number}-{comment_id}"
+    comment_id: int
+    pr_number: int
+    author: str
+    html_url: str
+    tier: str  # "Blocker" | "Major" | "Minor"
+    summary: str
+    target_layers: list[str] = []  # e.g. ["coder.md", "verify.py"]
+    proposed_edits: list[dict] = []  # per-layer intent specs (see Task 4 prompt)
+    status: str = "pending"  # "pending" | "approved" | "rejected" | "modified" | "already_fixed"
+
+
+class IngestState(BaseModel):
+    """Persistent state for the feedback ingest sidecar module."""
+
+    pr_timestamps: dict[str, str] = {}  # str(pr_number) -> last_checked_at ISO-8601 UTC
+    processed_comment_ids: set[int] = set()  # comment IDs already written to a findings file
+    findings: list[FeedbackFinding] = []
+    last_run_at: str = ""

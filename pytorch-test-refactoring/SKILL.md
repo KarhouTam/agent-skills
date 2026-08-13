@@ -69,7 +69,7 @@ The orchestrator outputs a JSON task spec to stdout. Follow this loop:
 
 ## Result JSON Formats
 
-After each agent completes, extract the key result and pipe JSON to the `on_complete.command`.
+After each agent completes, extract the key result and feed it to the `on_complete.command`: save the result JSON to the `feed_file` path from the task spec (use the **Write tool**), then run the command as-is. Prefer this over piping via `echo ... | python ...` — the Bash permission matcher is whole-string prefix matching, so piped/redirected commands don't match `Bash(python *)` allow rules and get blocked in Auto/restricted modes.
 
 **All result JSON objects may include these optional fields:**
 - `agent_id`: The agent ID returned by the `Agent` tool when spawning. **Required after any spawn** — this is how the orchestrator learns the agent's ID for future `SendMessage` calls.
@@ -143,13 +143,13 @@ The orchestrator handles all of this automatically:
 - ❌ Decide whether a checker is per-rule or full-file
 - ❌ Loop through rules manually
 
-Your ONLY job: run the command → follow the JSON → extract result → pipe JSON back.
+Your ONLY job: run the command → follow the JSON → extract result → feed the result JSON back via the `on_complete` command (write it to the `feed_file` path, then run the command).
 
 **Before spawning the analyst**: quickly skim the test file (first ~50 lines and a few test methods). Note whether the original file is a plain `TestCase` with no device parametrization and whether tests primarily exercise utility/library logic (`rnn_utils`, `nn.functional` helpers, padding/packing utilities, etc.). If so, expect most tests to be S1. When the analyst report arrives, question any bulk S2 classification — a test that merely creates tensors is not automatically S2.
 
 **When you see `"done"` with `phase: "finalize"`, the refactoring is complete.** The `next_steps` field tells you how to proceed: create a PR manually (branch, commit, push, draft PR), then say **"look after the CI"** or run `python orchestrator.py <file> --ci-check` to start CI monitoring. Only when you see `"done"` with `phase: "ci_done"` is the entire workflow truly finished — the `next_steps` field will tell you to mark the PR ready for review and delete cron jobs.
 
-**Important: When you spawn a new agent (method=spawn),** capture the `agent_id` from the Agent tool result and include it (along with `agent_name`) in the result JSON you pipe back. This is how the orchestrator learns the agent's identity for future `SendMessage` calls. Without it, `SendMessage` will fail because it needs an agent ID, not a name.
+**Important: When you spawn a new agent (method=spawn),** capture the `agent_id` from the Agent tool result and include it (along with `agent_name`) in the result JSON you feed back. This is how the orchestrator learns the agent's identity for future `SendMessage` calls. Without it, `SendMessage` will fail because it needs an agent ID, not a name.
 
 ## CI Automation (Phase 8)
 
@@ -165,9 +165,38 @@ The orchestrator auto-detects the PR from the current branch. Pass `--pr-number`
 |--------|---------|------------|
 | `"done"` | `"ci_done"` | All CI green. Run `gh pr ready <N>`, then `CronDelete` all CI cron jobs. Truly finished. |
 | `"schedule_cron"` | `"ci_monitor"` | CI still running. `CronCreate(cron_interval, durable=true, prompt=...)` using the `on_complete` fields. Session exits. |
-| `"need_agent"` | `"ci_debug"` | CI failures found. Spawn debugger agent (background, `mode: bypassPermissions`). When done, pipe result back via `--feed debugger`. Loop. |
+| `"need_agent"` | `"ci_debug"` | CI failures found. Spawn debugger agent (background, `mode: bypassPermissions`). When done, feed the result back via `--feed debugger --feed-file <path>` (save JSON with the Write tool, then run the command). Loop. |
 
 The debugger agent's result format and the full CI ops reference: `agent/skills/ci-automation/SKILL.md`.
+
+## Feedback Ingest (sidecar)
+
+Harvest reviewer feedback from KarhouTam's merged `[Test]` PRs and turn it
+into ruleset edits after human approval. Runs independently of the 8-phase
+refactoring workflow.
+
+```bash
+# Harvest + analyze (cron-driven; runs triage then draft agents)
+python orchestrator.py --ingest-feedback
+
+# Apply approved findings (after editing a findings file's checkboxes)
+python orchestrator.py --apply-ingest agent_space/ingest/findings/PR-<n>.md
+```
+
+**Daily cron:** `CronCreate` with a durable prompt:
+
+```
+Run `python orchestrator.py --ingest-feedback`. Read the JSON output.
+If status is `need_agent`, spawn the agent with the provided parameters
+(run_in_background=true). When done, save the result JSON to the
+`feed_file` path from the task spec (Write tool), then run the
+`on_complete.command`. Loop until status is `done`.
+```
+
+Workspace: `agent_space/ingest/` (state in `state.json`, reviewable findings
+in `findings/`). State cursor is per-PR `last_checked_at`; comments already
+processed are skipped. Only merged PRs (the `Merged` label) and replied
+inline threads + `claude[bot]` summaries are harvested.
 
 ## Workspace
 

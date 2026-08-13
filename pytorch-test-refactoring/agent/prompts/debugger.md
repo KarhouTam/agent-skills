@@ -30,6 +30,8 @@ All paths are relative to the workspace: `{workspace}`
    git push
    ```
 
+   > **If `git commit`/`git push` are blocked by Claude Code permissions** (e.g. a deny rule), do NOT retry in a loop and do NOT try workarounds like `--no-verify` or alternate commands. Apply the code fixes, leave them uncommitted, and report clearly in your output that the environment denies pushing fixes — CI automation cannot complete without those permissions.
+
 ## Report Format
 
 Output a structured report with `fixes_applied` and `unrelated` sections.

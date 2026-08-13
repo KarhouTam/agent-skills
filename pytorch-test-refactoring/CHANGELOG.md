@@ -1,5 +1,69 @@
 # Changelog
 
+## 2026-08-13 — Reviewer feedback ingest (applied)
+
+- **Minor** [185798-3615096416](https://github.com/pytorch/pytorch/pull/185798#discussion_r3615096416) — TEST_ACCELERATOR is a LazyVal not a bool, so replacing TEST_* in bool-type-checked decorators like serialTest raises AssertionError -- not yet documented in the ruleset. (target: coder.md)
+
+## 2026-08-13 — MPS 安全规则例外：非 MPS 实例化类不要求 `@skipIfMPS`
+
+`@onlyAccelerator` 只会在类确实被实例化到 MPS 时把测试暴露到 MPS。MPS 变体
+只有在 `instantiate_device_type_tests` 传入 `allow_mps=True` 时才会创建
+（`only_for`/`except_for` 单独设置不会启用 MPS）。若类未实例化到 MPS，测试
+不可能运行在 MPS 上，此时追加 `@skipIfMPS` 无必要。
+
+- **coder.md**：MPS safety 规则新增例外——类未实例化到 MPS（`instantiate_device_type_tests` 未传 `allow_mps=True`）时不要求 `@skipIfMPS`。
+- **review-test-refactoring/SKILL.md**：MPS coverage safety 检查清单同步该例外。
+- **verify.py**：`_check_skipifmps_coverage()` 新增 `_is_class_instantiated_for_mps()`——仅当方法所在类实例化到 MPS（`allow_mps=True` 且 `only_for`/`except_for` 未排除 MPS）才要求 `@skipIfMPS`；B3 dtype 安全检查的 MPS exposure 判定改为 `allow_mps=True` 存在（裸 `@onlyAccelerator` 不再视为 MPS exposure）。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `agent/prompts/coder.md` | MPS safety 规则新增"非 MPS 实例化类不要求 `@skipIfMPS`"例外 |
+| `agent/skills/review-test-refactoring/SKILL.md` | MPS coverage safety 检查清单同步例外 |
+| `scripts/verify.py` | +`_is_class_instantiated_for_mps()`；`_check_skipifmps_coverage()` 与 B3 尊重例外 |
+
+## 2026-08-13 — PR feedback ingest sidecar module
+
+新增独立 sidecar 模块，自动从 @KarhouTam 已合并的 `[Test]` PR 中抓取 reviewer
+反馈，分析并（经人工审批后）落成 ruleset 修改。
+
+- **抓取**：`scripts/ingest.py` 通过 `gh api` 抓取已合并（`Merged` label）PR 的
+  replied inline review comments + `claude[bot]` issue-comment 摘要。
+- **两阶段分析**：triage（相关性 + 目标 layer + 去重）→ analyst（逐层 intent spec）。
+- **审批流**：findings 写入 `agent_space/ingest/findings/PR-<n>.md`，人工勾选
+  Approved/Rejected 后 `--apply-ingest` 落盘并追加 CHANGELOG。
+- **触发**：`--ingest-feedback` 子命令 + 每日 durable cron。
+
+## 2026-08-12 — CI 自动化权限修复（Auto 模式下 git push/commit 被拦截）
+
+在 Claude Code Auto 模式下调用 CI 自动化（Phase 8）时，debugger agent 运行 `git commit` / `git push` 被权限系统拦截，修复循环无法推进。
+
+### 问题回顾
+
+1. **`mode=bypassPermissions` 不生效**：部分 harness 忽略 `Agent` 工具的 `mode` 参数，子 agent 继承父会话的权限模式（Auto），不会获得 bypass；且显式 `permissions.deny` 规则在任何权限模式下都优先于 allow/bypass。
+2. **全局 deny 列表**：`~/.claude/settings.json` 的 `permissions.deny` 含 `Bash(git push *)` / `Bash(git commit *)`（git-guardrails 类技能写入），debugger 无法提交/推送修复。
+3. **回传命令不匹配 allow 规则**：`echo '{json}' | python orchestrator.py --feed debugger` 是复合命令，Bash 权限匹配按整串前缀进行，无法匹配 `Bash(python *)`，在 Auto 模式下被自动拒绝。
+
+### 根因
+
+CI 自动化本质上需要 `git commit` + `git push` 来推送修复，而环境的全局 deny 规则与技能的回传指令（echo 管道）在 Auto 模式下均被权限系统拦截。
+
+### 改进要点
+
+- **orchestrator.py 新增 `--feed-file`**：回传结果改为写文件 + `python orchestrator.py ... --feed X --feed-file <path>`，命令是单一普通前缀，可匹配 `Bash(python *)`，绕开复合命令拦截。
+- **git 权限预检**：`_denied_git_ops()` 读取 settings.json 检测 `git commit`/`git push` 是否被 deny；若被拒，在 spawn debugger 前 fail-fast 输出可操作的修复指引。
+- **SKILL.md / ci-automation SKILL.md / debugger.md**：统一改为 `--feed-file` 回传，并记录权限要求与 deny 冲突的两种解法（移除 deny 或改为手动推送）。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `orchestrator.py` | +`--feed-file` 参数、`_read_feed()`、`_denied_git_ops()` 预检；on_complete 指令改为 --feed-file |
+| `SKILL.md` | 回传指令改为 feed_file；CI 表格与说明更新 |
+| `agent/skills/ci-automation/SKILL.md` | --feed-file 回传 + 权限 caveat + allowlist 说明 |
+| `agent/prompts/debugger.md` | git 被拦截时的处理说明 |
+
 ## 2026-08-10 — S2 过度分类修复 + 导入源纠正 + 分类正确性审查
 
 基于 `test_packed_sequence.py` 重构实战中发现的三类问题，事后复盘并修复。

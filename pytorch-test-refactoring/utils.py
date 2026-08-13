@@ -103,6 +103,25 @@ def get_workspace(file_name: str) -> Path:
     return ws
 
 
+# ── PR feedback ingest sidecar ──────────────────────────────────────
+
+INGEST_WORKSPACE_ROOT = Path("agent_space/ingest")
+INGEST_STATE_FILE = "state.json"
+INGEST_FLOW_STATE_FILE = "flow_state.json"
+INGEST_FINDINGS_DIR = "findings"
+INGEST_RAW_DIR = "raw"
+CLAUDE_BOT_LOGIN = "claude[bot]"
+
+
+def get_ingest_workspace() -> Path:
+    """Return the ingest sidecar workspace dir, creating it if needed."""
+    ws = INGEST_WORKSPACE_ROOT
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / INGEST_FINDINGS_DIR).mkdir(parents=True, exist_ok=True)
+    (ws / INGEST_RAW_DIR).mkdir(parents=True, exist_ok=True)
+    return ws
+
+
 def run_git(repo: Path | str, *args: str) -> str:
     """Run a git command in the given repo and return stdout."""
     result = subprocess.run(

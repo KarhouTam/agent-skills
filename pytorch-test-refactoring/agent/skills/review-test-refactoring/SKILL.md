@@ -144,7 +144,7 @@ signature is: `"Cannot convert a MPS Tensor to float64 dtype"` or similar dtype
 conversion errors on MPS. In diff-based mode, pay special attention to tests
 where `@onlyCUDA` was removed.
 
-**MPS coverage safety**: When MPS coverage is broadened (new `allow_mps=True` or `@onlyAccelerator` replacing CUDA-only restriction), verify `@skipIfMPS` is present unless MPS was already covered via `@dtypesIfMPS` or `@onlyMPS`.
+**MPS coverage safety**: When MPS coverage is broadened (new `allow_mps=True` or `@onlyAccelerator` replacing CUDA-only restriction), verify `@skipIfMPS` is present unless MPS was already covered via `@dtypesIfMPS` or `@onlyMPS`. Exception: `@skipIfMPS` is NOT required when the class is NOT instantiated for MPS — MPS variants are only created when the class's `instantiate_device_type_tests` call passes `allow_mps=True`. If no MPS variant exists, the test cannot run on MPS and the skip is unnecessary.
 
 **@onlyCPU to device-agnostic**: Verify each `@onlyCPU` test was individually evaluated (not bulk-decided). Check that `device` param was added when `@onlyCPU` was removed.
 

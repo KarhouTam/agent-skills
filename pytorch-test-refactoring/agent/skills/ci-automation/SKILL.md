@@ -23,7 +23,12 @@ CI still running. `CronCreate` with the `on_complete` fields (cron_interval, pro
 
 1. Spawn debugger via `Agent` tool: `run_in_background=true`, `mode=bypassPermissions`
 2. Capture `agent_id` from result
-3. Wait for completion, then pipe: `echo '{"agent_id":"...","agent_name":"debugger",...}' | python orchestrator.py <file> --ci-check --feed debugger`
+3. Wait for completion, then save the result JSON to the `feed_file` path from the task spec (use the **Write tool**), and run:
+   `python orchestrator.py <file> --ci-check --feed debugger --feed-file <feed_file>`
+
+> **Why `--feed-file`, not `echo ... | python ...`:** the Bash permission matcher is whole-string prefix matching — `echo '{...}' | python orchestrator.py ...` matches no `Bash(python *)` allow rule and is blocked in Auto/restricted modes. A plain `python ... --feed-file <path>` command matches and is auto-approved.
+
+> **Permission caveat for the debugger spawn:** some harnesses ignore the `Agent` tool's `mode` parameter, so the debugger inherits the parent session's permission mode instead of `bypassPermissions`. And an explicit `permissions.deny` rule for `git commit`/`git push` blocks the debugger **in every mode**. The orchestrator now fails fast with an actionable message if it detects such a deny — if you see that error, allow `git commit`/`git push` (see allowlist below) and re-run.
 
 ## Debugger Result Format
 
@@ -72,6 +77,12 @@ CI still running. `CronCreate` with the `on_complete` fields (cron_interval, pro
   }
 }
 ```
+
+**`git commit` / `git push` must not be denied.** The debugger pushes its fixes, and a `permissions.deny` entry for `Bash(git commit *)` / `Bash(git push *)` blocks the agent in **every** permission mode (deny wins over allow and bypassPermissions). If your setup has git guardrails (e.g. the git-guardrails skill) that deny these, either:
+- remove them from `permissions.deny` (add to `permissions.allow` instead), or
+- expect CI automation to stop at the "fixes ready" stage and push manually.
+
+The orchestrator emits an actionable error at the start of the debug phase if it detects such a deny, so you'll know before spawning a blocked agent.
 
 ## Related
 

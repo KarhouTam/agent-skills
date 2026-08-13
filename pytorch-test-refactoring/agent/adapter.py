@@ -76,6 +76,16 @@ class BaseAdapter(ABC):
         workspace: str,
     ) -> AgentTask: ...
 
+    @abstractmethod
+    def build_feedback_triage_task(
+        self, comments: list
+    ) -> AgentTask: ...
+
+    @abstractmethod
+    def build_feedback_analyst_task(
+        self, comment_and_triage: dict
+    ) -> AgentTask: ...
+
     def build_fix_tasks(
         self,
         file_path: str,

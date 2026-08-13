@@ -173,6 +173,62 @@ class ClaudeCodeAdapter(BaseAdapter):
             mode="bypassPermissions",
         )
 
+    def build_feedback_triage_task(self, comments: list) -> AgentTask:
+        import json
+
+        comments_json = json.dumps(
+            [
+                {
+                    "comment_id": c.comment_id,
+                    "pr_number": c.pr_number,
+                    "author": c.author,
+                    "source": c.source,
+                    "html_url": c.html_url,
+                    "body": c.body[:6000],
+                }
+                for c in comments
+            ],
+            indent=2,
+        )
+        prompt = _load_prompt("feedback_triage").format(comments_json=comments_json)
+        return AgentTask(
+            phase="triage",
+            agent_name="feedback_triage",
+            agent_type="general-purpose",
+            prompt=prompt,
+            run_in_background=True,
+            mode="default",
+        )
+
+    def build_feedback_analyst_task(self, comment_and_triage: dict) -> AgentTask:
+        import json
+
+        comment = comment_and_triage["comment"]
+        triage = comment_and_triage["triage"]
+        payload = json.dumps(
+            {
+                "comment_id": comment.comment_id,
+                "pr_number": comment.pr_number,
+                "author": comment.author,
+                "source": comment.source,
+                "html_url": comment.html_url,
+                "body": comment.body,
+                "target_layers": triage.get("target_layers", []),
+                "triage_summary": triage.get("summary", ""),
+                "tier": triage.get("tier", "Major"),
+            },
+            indent=2,
+        )
+        prompt = _load_prompt("feedback_analyst").format(payload_json=payload)
+        return AgentTask(
+            phase="draft",
+            agent_name="feedback_analyst",
+            agent_type="general-purpose",
+            prompt=prompt,
+            run_in_background=True,
+            mode="default",
+        )
+
     def build_fix_tasks(
         self,
         file_path: str,

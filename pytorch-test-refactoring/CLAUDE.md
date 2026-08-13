@@ -11,21 +11,23 @@ This repo is a **Claude Code skill** that orchestrates refactoring PyTorch test 
 ## Architecture
 
 ```
-orchestrator.py (CLI bridge — JSON task spec ↔ Agent/SendMessage tool calls)
+orchestrator.py (CLI bridge — JSON task spec ↔ Agent/SendMessage tool calls; also --ingest-feedback/--apply-ingest)
 flow.py (RefactorFlow state machine — core orchestrator, phases 1-7)
 ci_ops.py (CIOps state machine — CI monitoring & debug, phase 8)
-├── state.py              Pydantic models for all workflow data (signals, reports, tasks, results, CI)
+ingest_ops.py (IngestOps state machine — PR feedback ingest sidecar)
+├── state.py              Pydantic models for all workflow data (signals, reports, tasks, results, CI, ingest)
 ├── utils.py              Path constants, workspace helpers, refactoring rule definitions
 ├── scripts/
 │   ├── assess.py         Phase 1: deterministic file analysis (class layout, test counts)
 │   ├── verify.py         Phase 5: 7 deterministic verification checks
 │   ├── report.py         Phase 7: final markdown summary generation
 │   ├── ci.py             Phase 8: deterministic CI operations (check-runs, bot comments)
+│   ├── ingest.py         Sidecar: deterministic PR feedback harvest + findings writer
 │   └── logger.py         Structured JSONL audit log + status.json snapshot
 ├── agent/
 │   ├── adapter.py        Abstract BaseAdapter with AgentTask model
 │   ├── claude_code.py    ClaudeCodeAdapter: builds AgentTask objects from prompt templates
-│   ├── prompts/          Markdown prompt templates (analyst.md, coder.md, checker.md, debugger.md)
+│   ├── prompts/          Markdown prompt templates (analyst.md, coder.md, checker.md, debugger.md, feedback_triage.md, feedback_analyst.md)
 │   └── skills/           Sub-skills referenced by agents (classify-test-files, refactor-test-decoupling, review-test-refactoring, ci-automation)
 └── reference/
     ├── device_api_catalog.yaml      Authoritative API classification (Category A/B/C)
@@ -48,6 +50,10 @@ ci_ops.py → state.py (data models)
 ci_ops.py → scripts/ci.py (Phase 8 deterministic ops)
 ci_ops.py → agent/adapter.py (abstract base)
 ci_ops.py → agent/claude_code.py (Claude Code adapter)
+ingest_ops.py → state.py (data models)
+ingest_ops.py → scripts/ingest.py (harvest, finalize, findings writer)
+ingest_ops.py → agent/adapter.py (abstract base)
+ingest_ops.py → agent/claude_code.py (Claude Code adapter)
 ```
 
 ## Core concepts
@@ -93,6 +99,26 @@ The state machine stops on these signals and expects Claude Code to handle them:
 | `RELAY_FINDINGS` | Review found issues | Forward findings to coder via `SendMessage(coder_agent_id)`; call `feed_fix_complete()` |
 | `WAITING` | CI still running | Schedule durable cron via CronCreate; session exits |
 | `DONE` | Phase complete | Call `flow.run()` to continue |
+
+## Feedback Ingest (sidecar)
+
+An independent sidecar that harvests reviewer feedback from @KarhouTam's merged `[Test]` PRs and turns it into ruleset edits after human approval. Runs outside the 8-phase refactoring workflow — mirrors the `CIOps` pattern (deterministic fetch layer + a `*Ops` state machine + AI agent prompts).
+
+**Phases:** `harvest` (deterministic gh fetch + reply-thread filter) → `triage` (AI: relevance + target layer + dedup) → `draft` (AI: per-layer intent specs) → `done` (findings written).
+
+**Commands:**
+- `python orchestrator.py --ingest-feedback` — harvest + triage + draft (cron-driven)
+- `python orchestrator.py --apply-ingest <findings.md>` — apply approved findings after human review
+
+**Harvest sources (two fetches only):**
+- Inline review comments: `GET /repos/pytorch/pytorch/pulls/{pr}/comments` — keep only comments in **replied threads** (the comment has a reply, OR is itself a reply).
+- `claude[bot]` summaries: `GET /repos/pytorch/pytorch/issues/{pr}/comments` — keep only `user.login == "claude[bot]"`. These are detailed CI-failure/coverage analyses (the "Claude finished @X's task" prefix hides a full root-cause body).
+
+**Correctness gate:** only merged-PR comments are harvested. PyTorch's merge bot closes the PR (`state=closed`, `merged=false`) and attaches a `Merged` label, so the discriminator is the **`Merged` label**, not `state=merged`. Discovery uses `gh search prs --json` (the `search/issues` REST endpoint rejects `gh api search/issues -f q=...` with HTTP 404).
+
+**Approval flow:** the analyst drafts findings into `agent_space/ingest/findings/PR-<n>.md`; nothing edits the ruleset until a human marks findings `[x] Approved` and runs `--apply-ingest`, which spawns a `ruleset_editor` agent and appends a CHANGELOG entry.
+
+**State home:** `agent_space/ingest/` (NOT per-refactor `agent_space/refactor/{file}/`). `state.json` holds the per-PR timestamp cursor + processed comment ids; `flow_state.json` holds the transient triage→draft position and is cleared at `done`; reviewable findings live in `findings/`. Comments are marked processed only at `finalize()` (not at harvest) so the triage→draft handoff survives across orchestrator invocations.
 
 ## Changelog
 
