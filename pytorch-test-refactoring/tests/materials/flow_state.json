@@ -1,0 +1,1 @@
+{"current_phase": "review", "rule_index": 3, "rule_sub_phase": "code", "rule_retry": 0, "retry_count": 0, "signal": "spawn_single", "agent_ids": {"coder": "a8f5e1d2742c0dd02", "checker": "a146404c507c7489e"}}

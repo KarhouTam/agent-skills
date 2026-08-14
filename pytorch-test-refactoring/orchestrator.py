@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,7 @@ from state import (
     RefactorState,
 )
 from utils import ANALYST_REPORT_JSON
+from agent.registry import get_adapter
 
 
 # ── argument parsing ──────────────────────────────────────────────
@@ -131,6 +133,15 @@ def _parse_args() -> argparse.Namespace:
         metavar="FINDINGS_FILE",
         help="Apply approved findings from a feedback_findings.md file.",
     )
+    parser.add_argument(
+        "--harness",
+        choices=["claude", "codex"],
+        default=os.environ.get("PYTORCH_TEST_REFACTOR_HARNESS", "claude"),
+        help=(
+            "Agent harness to emit task specs for. Defaults to the "
+            "PYTORCH_TEST_REFACTOR_HARNESS env var, then 'claude'."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -139,20 +150,21 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+    adapter = get_adapter(args.harness)
 
     if args.ingest_feedback:
-        _run_ingest(args)
+        _run_ingest(args, adapter)
         return
 
     if args.apply_ingest:
-        _run_apply_ingest(args)
+        _run_apply_ingest(args, adapter)
         return
 
     if args.ci_check:
-        _run_ci_check(args)
+        _run_ci_check(args, adapter)
         return
 
-    flow = RefactorFlow()
+    flow = RefactorFlow(adapter=adapter)
 
     if args.feed:
         # ── feed path ──────────────────────────────────────────
@@ -468,13 +480,24 @@ def _emit_tasks(
     signal: FlowSignal,
 ) -> None:
     """Emit the 'need_agent' task spec."""
-    task_specs = [_task_to_spec(t, signal, state) for t in tasks]
+    adapter = flow.adapter
+    file_path = state.file_path
+    ws = str(state.workspace) if state.workspace else "."
+    rule_context = _rule_context_for(state)
+    task_specs = [
+        adapter.task_to_spec(
+            t,
+            signal,
+            file_path=file_path,
+            workspace=ws,
+            rule_context=rule_context,
+        )
+        for t in tasks
+    ]
     feed_as = _feed_type_for(state)
 
     # Build the resume command
-    file_path = state.file_path
-    cmd = f"python orchestrator.py {file_path} --feed {feed_as}"
-    ws = str(state.workspace) if state.workspace else "."
+    cmd = _cmd(adapter, file_path, "--feed", feed_as)
     feed_file = f"{ws}/{feed_as}_result.json"
     feed_cmd = f"{cmd} --feed-file {feed_file}"
 
@@ -490,17 +513,11 @@ def _emit_tasks(
                 "feed_as": feed_as,
                 "command": feed_cmd,
                 "feed_file": feed_file,
-                "note": (
-                    "1. Read the agent's output. "
-                    "2. Extract key result into JSON (see formats below). "
-                    "3. If you spawned a NEW agent (method=spawn), include "
-                    '"agent_id" (from the Agent tool result) and '
-                    '"agent_name" (from the task spec) in the JSON. '
-                    "4. Save the result JSON to a file at "
-                    f"`{feed_file}` (use the Write tool), then run:\n"
-                    f"   {feed_cmd}\n"
-                    "   (Feeding via --feed-file, not stdin, so the command "
-                    "matches a Bash allow rule in Auto/restricted modes.)"
+                "note": adapter.completion_note(
+                    "refactor",
+                    feed_file=feed_file,
+                    feed_cmd=feed_cmd,
+                    feed_as=feed_as,
                 ),
             },
         }
@@ -523,14 +540,14 @@ def _emit_error(flow: RefactorFlow, message: str) -> None:
 # -- CI handoff -------------------------------------------------------
 
 
-def _run_ci_check(args) -> None:
+def _run_ci_check(args, adapter) -> None:
     """Handle --ci-check: monitor CI state, possibly spawn debugger."""
     from utils import get_workspace
 
     file_name = Path(args.file_path).stem
     workspace = get_workspace(file_name)
 
-    ci = CIOps()
+    ci = CIOps(adapter=adapter)
 
     if args.feed:
         ci.run(args.file_path, str(workspace), resume=True)
@@ -547,7 +564,7 @@ def _run_ci_check(args) -> None:
         ci.run(
             args.file_path,
             str(workspace),
-            resume=args.resume,
+            resume=True,  # poll-to-poll state lives in ci_state.json
             pr_number=args.pr_number,
         )
 
@@ -560,6 +577,7 @@ def _emit_ci_action(ci: CIOps) -> None:
     signal = ci_state.signal
     ws = str(ci_state.workspace) if ci_state.workspace else ""
     file_path = ci_state.file_path
+    adapter = ci.adapter
 
     if ci_state.ci_phase == "monitor" and signal == FlowSignal.WAITING:
         _write_json(
@@ -571,60 +589,30 @@ def _emit_ci_action(ci: CIOps) -> None:
                 "head_sha": ci_state.head_sha,
                 "ci_phase": ci_state.ci_phase,
                 "fix_round": len(ci_state.fix_history),
-                "on_complete": {
-                    "action": "CronCreate",
-                    "cron_interval": "*/7 * * * *",
-                    "durable": True,
-                    "prompt": (
-                        f"Run `python orchestrator.py {file_path} --ci-check`. "
-                        f"Read the JSON output. If status is `need_agent`, spawn the "
-                        f"debugger agent with the provided parameters "
-                        f"(run_in_background=true, mode=bypassPermissions). "
-                        f"When done, feed the result back: save the JSON to the "
-                        f"`feed_file` path from the task spec (Write tool), then run "
-                        f"the `on_complete.command`. "
-                        f"Loop until status is `schedule_cron` or `done`."
-                    ),
-                    "note": "Use CronCreate with this prompt. Save the job ID for later cleanup.",
-                },
+                "on_complete": adapter.ci_wait_on_complete(file_path),
             }
         )
 
     elif ci_state.ci_phase == "monitor" and signal == FlowSignal.DONE:
-        ci_state2 = ci.run(
-            file_path, str(ci_state.workspace) if ci_state.workspace else ""
-        )
+        ci.run(file_path, str(ci_state.workspace) if ci_state.workspace else "")
         _emit_ci_action(ci)
 
     elif ci_state.ci_phase == "debug" and signal == FlowSignal.SPAWN_SINGLE:
         # Preflight: the debugger applies fixes by committing and pushing.
-        # If Claude Code's permission settings deny `git commit`/`git push`
-        # (e.g. via a git-guardrails deny list), the agent will be blocked
-        # and the fix loop cannot progress. Fail fast with an actionable
-        # message instead of silently spawning a blocked agent.
-        blocked_git = _denied_git_ops()
+        # Fail fast with an actionable message if the harness would block it.
+        blocked_git = adapter.git_preflight()
         if blocked_git:
-            _emit_error_ci(
-                ci,
-                "CI automation cannot push fixes: your Claude Code permission "
-                f"settings deny `{'` and `'.join(blocked_git)}` (found in "
-                "permissions.deny of a settings.json file). The debugger agent "
-                "needs `git commit` and `git push` to apply and push CI fixes. "
-                "Allow them — add `Bash(git commit *)` / `Bash(git push *)` to "
-                "permissions.allow (or remove them from permissions.deny) in "
-                "~/.claude/settings.json or the project settings — then re-run "
-                f"`python orchestrator.py {file_path} --ci-check`.",
-            )
+            _emit_error_ci(ci, adapter.git_preflight_error(blocked_git, file_path))
             return
 
         tasks = ci.get_pending_tasks()
         if not tasks:
             _emit_error_ci(ci, "No debugger task returned")
             return
-        task_specs = [_ci_task_to_spec(t) for t in tasks]
-        cmd = f"python orchestrator.py {file_path} --ci-check --feed debugger"
-        ws = str(ci_state.workspace) if ci_state.workspace else "."
-        feed_file = f"{ws}/debugger_result.json"
+        task_specs = [adapter.ci_task_to_spec(t) for t in tasks]
+        cmd = _cmd(adapter, file_path, "--ci-check", "--feed", "debugger")
+        feed_dir = str(ci_state.workspace) if ci_state.workspace else "."
+        feed_file = f"{feed_dir}/debugger_result.json"
         feed_cmd = f"{cmd} --feed-file {feed_file}"
         _write_json(
             {
@@ -641,16 +629,10 @@ def _emit_ci_action(ci: CIOps) -> None:
                     "feed_as": "debugger",
                     "command": feed_cmd,
                     "feed_file": feed_file,
-                    "note": (
-                        "1. Read the debugger agent's output.\\n"
-                        "2. Extract key result into JSON (see ci-automation SKILL.md).\\n"
-                        '3. Include "agent_id" (from the Agent tool result) and '
-                        '"agent_name": "debugger" in the JSON.\\n'
-                        "4. Save the result JSON to a file at "
-                        f"`{feed_file}` (use the Write tool), then run:\\n"
-                        f"   {feed_cmd}\\n"
-                        "   (Feed via --feed-file, not stdin, so the command "
-                        "matches a Bash allow rule in Auto/restricted modes.)"
+                    "note": adapter.completion_note(
+                        "ci_debugger",
+                        feed_file=feed_file,
+                        feed_cmd=feed_cmd,
                     ),
                 },
             }
@@ -665,11 +647,7 @@ def _emit_ci_action(ci: CIOps) -> None:
                 "pr_number": ci_state.pr_number,
                 "fix_history": ci_state.fix_history,
                 "workspace": ws,
-                "next_steps": (
-                    "All CI checks passed. Mark the draft PR as ready for review:\n"
-                    f"  gh pr ready {ci_state.pr_number}\n"
-                    "Then delete the CI cron jobs (CronDelete). The workflow is truly finished."
-                ),
+                "next_steps": adapter.ci_done_next_steps(ci_state.pr_number),
             }
         )
 
@@ -677,63 +655,6 @@ def _emit_ci_action(ci: CIOps) -> None:
         _emit_error_ci(
             ci, f"Unexpected CI state: phase={ci_state.ci_phase}, signal={signal.value}"
         )
-
-
-def _denied_git_ops() -> list[str]:
-    """Detect git operations that Claude Code's permission settings deny.
-
-    Reads the same settings.json files Claude Code merges (user global +
-    project) and reports which of {`git commit`, `git push`} appear under
-    `permissions.deny`. The CI debugger needs both to apply and push fixes;
-    an explicit deny wins over allow/bypass modes, so detecting it lets the
-    workflow fail fast with an actionable message instead of a blocked agent.
-
-    Best-effort: returns [] if the settings can't be read or nothing is
-    denied. Note: documented precedence is deny > ask > allow, though
-    enforcement has had version-specific quirks (see anthropics/claude-code
-    issues #25345, #39344) — treat a positive as a warning worth surfacing,
-    not a guarantee.
-    """
-    denied: list[str] = []
-    settings_candidates = [
-        Path.home() / ".claude" / "settings.json",
-        Path.home() / ".claude" / "settings.local.json",
-        Path.cwd() / ".claude" / "settings.json",
-        Path.cwd() / ".claude" / "settings.local.json",
-    ]
-    targets = (
-        ("git commit", "Bash(git commit"),
-        ("git push", "Bash(git push"),
-    )
-    for path in settings_candidates:
-        if not path.exists():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        rules = (data.get("permissions") or {}).get("deny") or []
-        if not isinstance(rules, list):
-            continue
-        for rule in rules:
-            if not isinstance(rule, str):
-                continue
-            for op, prefix in targets:
-                if op not in denied and rule.startswith(prefix):
-                    denied.append(op)
-    return denied
-
-
-def _ci_task_to_spec(task: Any) -> dict[str, Any]:
-    """Convert a CI AgentTask into a JSON spec."""
-    return {
-        "method": "spawn",
-        "agent_name": task.agent_name,
-        "agent_type": getattr(task, "agent_type", "general-purpose"),
-        "run_in_background": getattr(task, "run_in_background", False),
-        "mode": getattr(task, "mode", "default"),
-        "prompt": task.prompt,
-    }
 
 
 def _emit_error_ci(ci: CIOps, message: str) -> None:
@@ -756,58 +677,37 @@ def _write_json(obj: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
-# ── task spec builders ────────────────────────────────────────────
+# ── harness-neutral helpers ───────────────────────────────────────
 
 
-def _task_to_spec(
-    task: Any, signal: FlowSignal, state: RefactorState
-) -> dict[str, Any]:
-    """Convert an AgentTask into a JSON spec the LLM can execute directly.
+def _cmd(adapter, *argv) -> str:
+    """Build an orchestrator command with the harness selector included.
 
-    The spec tells the LLM:
-      - method:  "spawn" (new Agent tool call) or "send_message" (to running agent)
-      - All parameters for the operation
-      - A fallback spawn spec for send_message (agent may have died)
+    The harness flag must round-trip on resume/feed invocations so a
+    cross-process continuation re-selects the same adapter. The default
+    harness ("claude") adds no flag, keeping legacy commands unchanged.
     """
-    method = "spawn"
-    if signal in (FlowSignal.SEND_MESSAGE, FlowSignal.RELAY_FINDINGS):
-        method = "send_message"
+    parts = ["python", "orchestrator.py"]
+    if adapter.harness_name and adapter.harness_name != "claude":
+        parts.append(f"--harness {adapter.harness_name}")
+    parts.extend(str(a) for a in argv)
+    return " ".join(parts)
 
-    spec: dict[str, Any] = {
-        "method": method,
-        "agent_name": task.agent_name,
-        "agent_type": getattr(task, "agent_type", "general-purpose"),
-        "run_in_background": getattr(task, "run_in_background", False),
-        "mode": getattr(task, "mode", "default"),
-        "prompt": task.prompt,
+
+def _rule_context_for(state: RefactorState) -> dict | None:
+    """Return the current coder rule context for fallback re-spawn prompts."""
+    tasks = state.coder_tasks or []
+    idx = state.rule_index
+    if idx >= len(tasks):
+        return None
+    ct = tasks[idx]
+    return {
+        "coder_id": ct.coder_id,
+        "rule": ct.rule,
+        "rule_description": ct.rule_description,
+        "instructions": ct.instructions,
+        "total_rules": len(tasks),
     }
-
-    if method == "send_message":
-        # Use the registered agent_id (e.g. "a3fa28753cd227df1") as the
-        # primary target for SendMessage.  Falls back to agent_name if no
-        # ID has been registered yet (triggers the fallback spawn below).
-        target_id = getattr(task, "agent_id", "") or task.context.get(
-            "send_message_to", task.agent_name
-        )
-        spec["send_to"] = target_id
-        # Fallback: if the agent has died (or no ID registered yet),
-        # spawn a replacement.  The LLM MUST include agent_id + agent_name
-        # in the result JSON so the orchestrator can register the new ID.
-        spec["fallback"] = {
-            "method": "spawn",
-            "agent_name": task.agent_name,
-            "agent_type": getattr(task, "agent_type", "general-purpose"),
-            "run_in_background": True,
-            "mode": getattr(task, "mode", "default"),
-            "prompt": task.prompt,
-            "note": (
-                "If you use this fallback, include "
-                '"agent_id" and "agent_name" in the result JSON '
-                "so the orchestrator can register the new agent ID."
-            ),
-        }
-
-    return spec
 
 
 def _feed_type_for(state: RefactorState) -> str:
@@ -843,9 +743,9 @@ def _feed_type_for(state: RefactorState) -> str:
 # ── feedback ingest sidecar ────────────────────────────────────────
 
 
-def _run_ingest(args) -> None:
+def _run_ingest(args, adapter) -> None:
     """Handle --ingest-feedback: harvest + triage + draft, emitting agent tasks."""
-    ops = IngestOps()
+    ops = IngestOps(adapter=adapter)
 
     if args.feed:
         ops.run()
@@ -876,42 +776,32 @@ def _persist_ingest_findings(ops: "IngestOps") -> None:
         ingest_mod.write_findings_md(ops.state.pending_findings, workspace)
 
 
-def _ingest_task_to_spec(task) -> dict[str, Any]:
-    """Convert an ingest AgentTask into a JSON spec."""
-    return {
-        "method": "spawn",
-        "agent_name": task.agent_name,
-        "agent_type": getattr(task, "agent_type", "general-purpose"),
-        "run_in_background": getattr(task, "run_in_background", False),
-        "mode": getattr(task, "mode", "default"),
-        "prompt": task.prompt,
-    }
-
-
 def _emit_ingest_action(ops: "IngestOps") -> None:
     from utils import get_ingest_workspace
 
     sm = ops.state
+    adapter = ops.adapter
     if sm.signal == FlowSignal.SPAWN_SINGLE:
         tasks = ops.get_pending_tasks()
         feed_as = "feedback_triage" if sm.phase == "triage" else "feedback_analyst"
         ws = get_ingest_workspace()
         feed_file = f"{ws}/{feed_as}_result.json"
-        cmd = f"python orchestrator.py --ingest-feedback --feed {feed_as} --feed-file {feed_file}"
+        cmd = _cmd(
+            adapter, "--ingest-feedback", "--feed", feed_as, "--feed-file", feed_file
+        )
         _write_json(
             {
                 "status": "need_agent",
                 "phase": f"ingest_{sm.phase}",
-                "tasks": [_ingest_task_to_spec(t) for t in tasks],
+                "tasks": [adapter.ingest_task_to_spec(t) for t in tasks],
                 "on_complete": {
                     "feed_as": feed_as,
                     "command": cmd,
                     "feed_file": feed_file,
-                    "note": (
-                        "1. Read the agent's output.\\n"
-                        "2. Save the result JSON to a file at "
-                        f"`{feed_file}` (Write tool), then run:\\n"
-                        f"   {cmd}"
+                    "note": adapter.completion_note(
+                        "ingest",
+                        feed_file=feed_file,
+                        feed_cmd=cmd,
                     ),
                 },
             }
@@ -936,7 +826,7 @@ def _emit_ingest_action(ops: "IngestOps") -> None:
         )
 
 
-def _run_apply_ingest(args) -> None:
+def _run_apply_ingest(args, adapter) -> None:
     """Handle --apply-ingest <file>: apply approved findings to the ruleset."""
     if not Path(args.apply_ingest).exists():
         _write_json(
@@ -979,26 +869,28 @@ def _run_apply_ingest(args) -> None:
         return
 
     prompt = _build_apply_prompt(approved)
+    task = adapter.build_ruleset_editor_task(prompt)
+    from utils import get_ingest_workspace
+
+    feed_file = f"{get_ingest_workspace()}/ruleset_editor_result.json"
+    feed_cmd = _cmd(
+        adapter,
+        "--apply-ingest",
+        args.apply_ingest,
+        "--feed",
+        "ruleset_editor",
+        "--feed-file",
+        feed_file,
+    )
     _write_json(
         {
             "status": "need_agent",
             "phase": "ingest_apply",
-            "tasks": [
-                {
-                    "method": "spawn",
-                    "agent_name": "ruleset_editor",
-                    "agent_type": "general-purpose",
-                    "run_in_background": True,
-                    "mode": "acceptEdits",
-                    "prompt": prompt,
-                }
-            ],
+            "tasks": [adapter.ingest_task_to_spec(task)],
             "on_complete": {
                 "feed_as": "ruleset_editor",
-                "command": (
-                    f"python orchestrator.py --apply-ingest {args.apply_ingest} "
-                    f"--feed ruleset_editor --feed-file <path>"
-                ),
+                "command": feed_cmd,
+                "feed_file": feed_file,
                 "note": (
                     "After the agent edits the ruleset files, save a JSON summary "
                     '{"applied": true} to the feed_file and re-run the command '

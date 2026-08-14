@@ -71,7 +71,9 @@ class NewClassSpec(BaseModel):
 
     name: str
     strategy: str  # "Strategy1" | "Strategy2" | "Strategy3"
-    hw_classification: str = ""  # "GENERIC" | "ACCELERATOR" | "CPU" | "CUDA" | "MPS" | "XPU"
+    hw_classification: str = (
+        ""  # "GENERIC" | "ACCELERATOR" | "CPU" | "CUDA" | "MPS" | "XPU"
+    )
     base_class: str = "TestCase"
     instantiation: str = ""  # e.g. "@instantiate_parametrized_tests" or ""
     tests: list[str] = []  # test method names to move
@@ -86,7 +88,9 @@ class AnalystReport(BaseModel):
     findings: list[AnalystFinding]
     class_mapping: dict[str, str] = {}
     strategy_assignments: dict[str, str] = {}
-    hw_classifications: dict[str, str] = {}  # class_name → "GENERIC"|"ACCELERATOR"|"CPU"|"CUDA"|"MPS"|"XPU"
+    hw_classifications: dict[
+        str, str
+    ] = {}  # class_name → "GENERIC"|"ACCELERATOR"|"CPU"|"CUDA"|"MPS"|"XPU"
     new_classes: list[NewClassSpec] = []
     onlycpu_evaluations: list[dict] = []
     summary: str = ""
@@ -238,7 +242,9 @@ class RefactorState(BaseModel):
     current_phase: str = "assess"
     retry_count: int = 0
     lint_gate_pending: bool = False  # True while the lint-gate fix loop is active
-    lint_retry_count: int = 0  # lint-gate fix attempts (independent of review-fix retries)
+    lint_retry_count: int = (
+        0  # lint-gate fix attempts (independent of review-fix retries)
+    )
     rule_index: int = 0  # which rule we're on in the code-check loop
     rule_sub_phase: str = "code"  # "code" | "check" | "fix"
     rule_retry: int = 0  # fix attempts for current rule
@@ -276,13 +282,17 @@ class FeedbackFinding(BaseModel):
     summary: str
     target_layers: list[str] = []  # e.g. ["coder.md", "verify.py"]
     proposed_edits: list[dict] = []  # per-layer intent specs (see Task 4 prompt)
-    status: str = "pending"  # "pending" | "approved" | "rejected" | "modified" | "already_fixed"
+    status: str = (
+        "pending"  # "pending" | "approved" | "rejected" | "modified" | "already_fixed"
+    )
 
 
 class IngestState(BaseModel):
     """Persistent state for the feedback ingest sidecar module."""
 
     pr_timestamps: dict[str, str] = {}  # str(pr_number) -> last_checked_at ISO-8601 UTC
-    processed_comment_ids: set[int] = set()  # comment IDs already written to a findings file
+    processed_comment_ids: set[int] = (
+        set()
+    )  # comment IDs already written to a findings file
     findings: list[FeedbackFinding] = []
     last_run_at: str = ""

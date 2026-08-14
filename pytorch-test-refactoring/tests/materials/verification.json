@@ -1,0 +1,86 @@
+{
+  "all_passed": false,
+  "checks": [
+    {
+      "name": "syntax",
+      "passed": false,
+      "details": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import test.test_expanded_weights\nModuleNotFoundError: No module named 'test.test_expanded_weights'",
+      "command": ""
+    },
+    {
+      "name": "test_count",
+      "passed": true,
+      "details": "29 tests",
+      "command": "grep -c 'def test_' test/test_expanded_weights.py"
+    },
+    {
+      "name": "class_structure",
+      "passed": false,
+      "details": "Missing original classes: ['TestContext', 'ContextManagerTests']",
+      "command": "grep '^class ' test/test_expanded_weights.py"
+    },
+    {
+      "name": "decorateinfo_alignment",
+      "passed": true,
+      "details": "No stale DecorateInfo references",
+      "command": "grep -n 'TestContext|TestExpandedWeightHelperFunction|TestExpandedWeightFunctional|TestExpandedWeightModule|ContextManagerTests' torch/testing/_internal/common_methods_invocations.py | grep -i decorate || true"
+    },
+    {
+      "name": "external_refs",
+      "passed": true,
+      "details": "No stale external references",
+      "command": "find test/dynamo_skips test/dynamo_expected_failures -name \"TestContext*\" 2>/dev/null || true"
+    },
+    {
+      "name": "stale_patterns",
+      "passed": false,
+      "details": "Remaining: 1x torch.cuda.get_device_capability in non-S3 class (should be migrated or moved to S3)",
+      "command": "grep -nE 'onlyOn\\(|(?<!torch)\\.cuda\\(\\)|device\\s*=\\s*\"cuda\"' test/test_expanded_weights.py"
+    },
+    {
+      "name": "import_audit",
+      "passed": false,
+      "details": "Stale imports: TEST_CUDA",
+      "command": "grep -n 'TEST_CUDA\\|TEST_MPS\\|TEST_XPU\\|onlyOn\\|onlyCUDA' test/test_expanded_weights.py"
+    },
+    {
+      "name": "dtype_integrity",
+      "passed": true,
+      "details": "No issues",
+      "command": ""
+    },
+    {
+      "name": "accelerator_safety",
+      "passed": true,
+      "details": "No issues found",
+      "command": ""
+    },
+    {
+      "name": "coverage_preservation",
+      "passed": true,
+      "details": "No scope broadening detected",
+      "command": ""
+    },
+    {
+      "name": "class_split",
+      "passed": true,
+      "details": "No class splits recommended by analyst",
+      "command": ""
+    },
+    {
+      "name": "skipifmps_coverage",
+      "passed": true,
+      "details": "All newly-MPS-exposed tests have @skipIfMPS",
+      "command": ""
+    },
+    {
+      "name": "hw_classification",
+      "passed": true,
+      "details": "All classes correctly tagged",
+      "command": "grep -n 'hw_classification\\|HardwareClassification' test/test_expanded_weights.py"
+    }
+  ],
+  "original_test_count": 29,
+  "current_test_count": 29,
+  "test_count_match": true
+}

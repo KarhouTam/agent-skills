@@ -1,5 +1,56 @@
 # Changelog
 
+## 2026-08-14 — Harness 插件化重构 + Codex 适配器
+
+将工作流的 harness 依赖从"Claude Code 专属"重构为插件化架构：每个 harness（Claude Code、
+Codex）是一个 `BaseAdapter` 实现，`orchestrator.py` 通过注册表按名字选择，所有 harness
+特定逻辑（任务 spec 形态、回传 note、cron 策略、git 预检）都下沉到适配器内，编排层不再
+出现任何 harness 分支。
+
+- **接口扩展**：`agent/adapter.py` 的 `BaseAdapter` 从"仅构造 AgentTask"扩展为完整 harness
+  策略——新增 `task_to_spec`/`ci_task_to_spec`/`ingest_task_to_spec`、`completion_note`、
+  `ci_wait_on_complete`/`ci_done_next_steps`、`git_preflight`/`git_preflight_error`、
+  `build_ruleset_editor_task`；`AgentTask` 新增 `model` 字段。
+- **ClaudeCodeAdapter 行为不变**：原 `orchestrator.py` 中的 spec 发射、Write-tool note、
+  CronCreate 策略、`~/.claude/settings.json` 预检逐字迁入 `agent/claude_code.py`，
+  `--harness claude` 输出与旧版一致。
+- **新增 CodexAdapter**（`agent/codex.py`）：`spawn_agent`/`send_input` spec 形态、
+  `resume_agent` 恢复、每角色 model 默认值（`feedback_triage` 用 `deepseek-v4-flash`，其余
+  `deepseek-v4-pro`）、基于 `sleep` 轮询的 cron 替代（`--ci-check --resume` 幂等）、
+  fallback 重 spawn 重建完整 coder 角色提示词。
+- **注册表 + 选择**：`agent/registry.py` 提供 `HARNESS_ADAPTERS` 与 `get_adapter()`；
+  `orchestrator.py` 新增 `--harness {claude,codex}`（默认取 `PYTORCH_TEST_REFACTOR_HARNESS`，
+  再默认 `claude`）。`_cmd()` 把 `--harness` 写进每个回传/轮询命令，跨进程 resume 自动重选
+  同一 harness。
+- **编排层去分支**：`orchestrator.py` 删除 `_task_to_spec`/`_ci_task_to_spec`/
+  `_ingest_task_to_spec`/`_denied_git_ops`，改为 `flow.adapter`/`ci.adapter`/`ops.adapter`
+  委托；`ingest_ops.py` 接受注入 adapter。
+- **CI cron 重设计（Codex）**：无 CronCreate 时改为 `poll`（`poll_command`/`user_cron_line`），
+  `--ci-check` 恒 `resume=True` 以在轮询间保持 `ci_state.json` 状态。
+- **prompt 中性化**：`analyst.md`（Write/Read 措辞）与 `debugger.md`（Claude Code
+  permissions）改为 harness 中性表述。
+- **入口指引**：`SKILL.md` 增加"先判断自身 harness 再传 `--harness`"步骤，CI/ingest/resume
+  命令示例同步补充 flag。
+- **测试**：新增 `tests/test_harness.py`（14 个，覆盖两套适配器的 spec 形态/model 注入/
+  fallback/note/cron/preflight/命令回传）与 `tests/test_workflow.py`（3 个，基于
+  `tests/materials/` 快照做 schema 校验、跨进程 resume、assess→finalize 全流程回放）；
+  全套 31 个测试通过。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `agent/adapter.py` | `BaseAdapter` 扩展为完整 harness 接口；`AgentTask` +`model` |
+| `agent/claude_code.py` | Claude 策略实现（spec/note/cron/preflight 迁入）；抽取 `_coder_prompt` |
+| `agent/codex.py` | 新增 Codex 适配器（spec 形态、model 默认值、poll cron、respawn 提示词） |
+| `agent/registry.py` | 新增 harness 注册表与 `get_adapter()` |
+| `orchestrator.py` | `--harness` flag；委托化；`_cmd()`；`_rule_context_for()`；CI 恒 `resume=True` |
+| `ingest_ops.py` | 接受注入 adapter |
+| `SKILL.md` | 入口 harness 选择指引 + 命令示例补 flag |
+| `agent/prompts/analyst.md`、`agent/prompts/debugger.md` | harness 中性措辞 |
+| `tests/test_harness.py`、`tests/test_workflow.py`、`tests/materials/` | 契约测试 + 全流程回放测试/快照 |
+| `docs/codex-harness-plan.md` | Codex 兼容性规格与实施计划（adversarial-review 产出） |
+
 ## 2026-08-13 — 确定性测试 linter 门禁（Phase 5）
 
 将新增的 `scripts/linter.py`（AST 测试用例 linter）接入重构工作流，作为

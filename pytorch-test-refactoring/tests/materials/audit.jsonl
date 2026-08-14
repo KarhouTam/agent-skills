@@ -1,0 +1,50 @@
+{"event": "run_start", "file_path": "test/test_expanded_weights.py", "file_name": "test_expanded_weights", "timestamp": "2026-08-13T09:21:35.396622+00:00", "run_id": "20260813-092135-c58c91"}
+{"event": "phase_start", "phase": "assess", "phase_number": 1, "timestamp": "2026-08-13T09:21:35.396941+00:00", "run_id": "20260813-092135-c58c91"}
+{"event": "phase_end", "phase": "assess", "status": "ok", "duration_ms": 17, "file_size": 1167, "coder_count": 2, "class_count": 5, "total_test_count": 29, "git_dirty": false, "timestamp": "2026-08-13T09:21:35.414929+00:00", "run_id": "20260813-092135-c58c91"}
+{"event": "phase_start", "phase": "analyze", "phase_number": 2, "timestamp": "2026-08-13T09:21:35.415199+00:00", "run_id": "20260813-092135-c58c91"}
+{"event": "signal", "phase": "analyze", "signal": "spawn_single", "pending_task_count": 1, "agents": ["analyst"], "timestamp": "2026-08-13T09:21:35.415873+00:00", "run_id": "20260813-092135-c58c91"}
+{"event": "phase_start", "phase": "distribute", "phase_number": 3, "timestamp": "2026-08-13T09:27:43.249511+00:00", "run_id": null}
+{"event": "phase_end", "phase": "distribute", "status": "ok", "duration_ms": 1, "coder_count": 3, "tasks_distributed": 3, "timestamp": "2026-08-13T09:27:43.251147+00:00", "run_id": null}
+{"event": "phase_start", "phase": "code", "phase_number": 4, "timestamp": "2026-08-13T09:27:43.251413+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T09:27:43.252942+00:00", "run_id": null}
+{"event": "run_start", "file_path": "test/test_expanded_weights.py", "file_name": "test_expanded_weights", "timestamp": "2026-08-13T09:28:05.445207+00:00", "run_id": "20260813-092805-e8c4e7"}
+{"event": "phase_start", "phase": "assess", "phase_number": 1, "timestamp": "2026-08-13T09:28:05.445709+00:00", "run_id": "20260813-092805-e8c4e7"}
+{"event": "phase_end", "phase": "assess", "status": "ok", "duration_ms": 31, "file_size": 1167, "coder_count": 2, "class_count": 5, "total_test_count": 29, "git_dirty": false, "timestamp": "2026-08-13T09:28:05.477190+00:00", "run_id": "20260813-092805-e8c4e7"}
+{"event": "phase_start", "phase": "analyze", "phase_number": 2, "timestamp": "2026-08-13T09:28:05.477450+00:00", "run_id": "20260813-092805-e8c4e7"}
+{"event": "signal", "phase": "analyze", "signal": "spawn_single", "pending_task_count": 1, "agents": ["analyst"], "timestamp": "2026-08-13T09:28:05.480347+00:00", "run_id": "20260813-092805-e8c4e7"}
+{"event": "phase_start", "phase": "code", "phase_number": 4, "timestamp": "2026-08-13T09:30:22.942500+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T09:30:22.945053+00:00", "run_id": null}
+{"event": "phase_start", "phase": "code", "phase_number": 4, "timestamp": "2026-08-13T09:35:35.114747+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T09:35:35.117384+00:00", "run_id": null}
+{"event": "agent_completed", "phase": "code", "agent_name": "coder", "success": true, "summary": "0 tests moved", "timestamp": "2026-08-13T09:35:35.118463+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T09:35:35.119294+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T09:42:02.790456+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "send_message", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T09:42:02.792059+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "send_message", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T09:45:55.424455+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T09:45:55.427309+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T09:49:54.453558+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "send_message", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T09:49:54.455437+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "send_message", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T09:50:57.874411+00:00", "run_id": null}
+{"event": "agent_completed", "phase": "code", "agent_name": "coder", "success": true, "summary": "0 tests moved", "timestamp": "2026-08-13T09:50:57.875543+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T09:50:57.876595+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T09:56:13.144013+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "send_message", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T09:56:13.146974+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "send_message", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T09:56:52.226159+00:00", "run_id": null}
+{"event": "agent_completed", "phase": "code", "agent_name": "coder", "success": true, "summary": "0 tests moved", "timestamp": "2026-08-13T09:56:52.227917+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T09:56:52.228406+00:00", "run_id": null}
+{"event": "signal", "phase": "code", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T09:59:49.063190+00:00", "run_id": null}
+{"event": "phase_start", "phase": "verify", "phase_number": 5, "timestamp": "2026-08-13T09:59:49.064592+00:00", "run_id": null}
+{"event": "phase_end", "phase": "verify", "status": "failed", "duration_ms": 327, "all_passed": false, "test_count_match": true, "checks": {"syntax": false, "test_count": true, "class_structure": false, "decorateinfo_alignment": true, "external_refs": true, "stale_patterns": false, "import_audit": false, "dtype_integrity": true, "accelerator_safety": true, "coverage_preservation": true, "class_split": true, "skipifmps_coverage": true, "hw_classification": true}, "timestamp": "2026-08-13T09:59:49.391647+00:00", "run_id": null}
+{"event": "phase_start", "phase": "review", "phase_number": 6, "timestamp": "2026-08-13T09:59:49.392005+00:00", "run_id": null}
+{"event": "signal", "phase": "review", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T09:59:49.392814+00:00", "run_id": null}
+{"event": "signal", "phase": "verify", "signal": "relay_findings", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T10:04:20.942833+00:00", "run_id": null}
+{"event": "signal", "phase": "verify", "signal": "relay_findings", "pending_task_count": 1, "agents": ["coder"], "timestamp": "2026-08-13T10:19:01.728870+00:00", "run_id": null}
+{"event": "phase_start", "phase": "review", "phase_number": 6, "timestamp": "2026-08-13T10:21:51.556748+00:00", "run_id": null}
+{"event": "signal", "phase": "review", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T10:21:51.559222+00:00", "run_id": null}
+{"event": "phase_start", "phase": "review", "phase_number": 6, "timestamp": "2026-08-13T10:25:58.673694+00:00", "run_id": null}
+{"event": "signal", "phase": "review", "signal": "spawn_single", "pending_task_count": 1, "agents": ["checker"], "timestamp": "2026-08-13T10:25:58.675807+00:00", "run_id": null}
+{"event": "agent_completed", "phase": "review", "agent_name": "checker", "success": true, "summary": "all clear", "timestamp": "2026-08-13T10:25:58.676751+00:00", "run_id": null}
+{"event": "phase_end", "phase": "review", "status": "ok", "duration_ms": 3, "all_clear": true, "findings_count": 0, "timestamp": "2026-08-13T10:25:58.677002+00:00", "run_id": null}
+{"event": "phase_start", "phase": "finalize", "phase_number": 7, "timestamp": "2026-08-13T10:25:58.677654+00:00", "run_id": null}
+{"event": "phase_end", "phase": "finalize", "status": "ok", "duration_ms": 0, "summary_length": 1863, "timestamp": "2026-08-13T10:25:58.678258+00:00", "run_id": null}
+{"event": "run_end", "final_phase": "finalize", "total_duration_ms": 0, "timestamp": "2026-08-13T10:25:58.678557+00:00", "run_id": null}

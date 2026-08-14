@@ -51,14 +51,14 @@ HW_CLASSIFICATION_IMPORT = (
 )
 HW_CLASSIFICATION_MAP: dict[str, str] = {
     # S1 — no device dependency
-    "GENERIC": "HardwareClassification.GENERIC",   # plain TestCase or @instantiate_parametrized_tests
-    "CPU": "HardwareClassification.CPU",             # instantiate_device_type_tests(only_for="cpu")
+    "GENERIC": "HardwareClassification.GENERIC",  # plain TestCase or @instantiate_parametrized_tests
+    "CPU": "HardwareClassification.CPU",  # instantiate_device_type_tests(only_for="cpu")
     # S2 — device-agnostic (any accelerator)
     "ACCELERATOR": "HardwareClassification.ACCELERATOR",  # instantiate_device_type_tests(except_for=...)
     # S3 — device-specific
     "CUDA": "HardwareClassification.CUDA",  # Category C CUDA APIs
-    "MPS": "HardwareClassification.MPS",    # Category C MPS APIs
-    "XPU": "HardwareClassification.XPU",    # Category C XPU APIs
+    "MPS": "HardwareClassification.MPS",  # Category C MPS APIs
+    "XPU": "HardwareClassification.XPU",  # Category C XPU APIs
 }
 
 # Mapping from strategy assignment to recommended hw_classification key

@@ -1,0 +1,55 @@
+{
+  "file_path": "test/test_expanded_weights.py",
+  "file_name": "test_expanded_weights",
+  "file_size": 1167,
+  "coder_count": 2,
+  "line_ranges": [
+    {
+      "start": 1,
+      "end": 622
+    },
+    {
+      "start": 623,
+      "end": 1167
+    }
+  ],
+  "class_layout": [
+    {
+      "name": "TestContext",
+      "line_number": 44,
+      "end_line": 47,
+      "base_class": "TestCase",
+      "test_count": 0
+    },
+    {
+      "name": "TestExpandedWeightHelperFunction",
+      "line_number": 48,
+      "end_line": 226,
+      "base_class": "TestCase",
+      "test_count": 10
+    },
+    {
+      "name": "TestExpandedWeightFunctional",
+      "line_number": 227,
+      "end_line": 622,
+      "base_class": "TestCase",
+      "test_count": 13
+    },
+    {
+      "name": "TestExpandedWeightModule",
+      "line_number": 623,
+      "end_line": 695,
+      "base_class": "TestCase",
+      "test_count": 0
+    },
+    {
+      "name": "TestModule",
+      "line_number": 696,
+      "end_line": 1167,
+      "base_class": "TestCase",
+      "test_count": 6
+    }
+  ],
+  "total_test_count": 29,
+  "git_dirty": false
+}

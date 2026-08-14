@@ -62,7 +62,9 @@ def _finding_matches_rule(finding, rule_id: str) -> bool:
             and "XPU" not in tgt
         ) or cat in ("classification",)
     if rule_id == "strategy_2":
-        return cat in ("whitelist", "device_api", "stale_symbol") or (tgt and "Device" in tgt)
+        return cat in ("whitelist", "device_api", "stale_symbol") or (
+            tgt and "Device" in tgt
+        )
     if rule_id == "strategy_3":
         return (
             cat == "classification"
@@ -403,10 +405,7 @@ class RefactorFlow:
         # Phase 5.5: Lint gate (deterministic hard gate before final review).
         # If the refactored file still has error-severity lint messages, enter
         # the fix loop instead of spawning the checker.
-        if (
-            self.state.verification is not None
-            and self.state.review_findings is None
-        ):
+        if self.state.verification is not None and self.state.review_findings is None:
             lint_errors = self._collect_lint_errors()
             if lint_errors:
                 self._enter_lint_fix(lint_errors)
@@ -796,7 +795,11 @@ class RefactorFlow:
 
             # Augment strategy_1 instructions with class extraction plan
             if rule_id == "strategy_1" and new_class_instructions:
-                instructions = new_class_instructions + "\n\n## Per-Finding Actions\n\n" + instructions
+                instructions = (
+                    new_class_instructions
+                    + "\n\n## Per-Finding Actions\n\n"
+                    + instructions
+                )
 
             coder_tasks.append(
                 CoderTask(

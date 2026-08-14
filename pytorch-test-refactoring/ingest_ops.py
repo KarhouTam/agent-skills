@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from state import FlowSignal, FeedbackComment, FeedbackFinding
 from scripts import ingest
 from utils import get_ingest_workspace, INGEST_FLOW_STATE_FILE
-from agent.adapter import AgentTask
+from agent.adapter import AgentTask, BaseAdapter
 from agent.claude_code import ClaudeCodeAdapter
 
 
@@ -40,9 +40,9 @@ class IngestStateMachine(BaseModel):
 class IngestOps:
     """State machine for the feedback ingest sidecar. Same pattern as CIOps."""
 
-    def __init__(self) -> None:
+    def __init__(self, adapter: BaseAdapter | None = None) -> None:
         self.state = IngestStateMachine()
-        self.adapter = ClaudeCodeAdapter()
+        self.adapter = adapter or ClaudeCodeAdapter()
 
     def run(self) -> IngestStateMachine:
         """Advance the state machine through deterministic work until an AI step."""

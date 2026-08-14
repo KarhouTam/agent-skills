@@ -9,9 +9,21 @@ description: Orchestrate PyTorch test file refactoring to decouple tests from sp
 
 ## Usage (one command)
 
+First, determine which harness you are running in, then pass the matching
+`--harness` flag on the first launch:
+
+- **Claude Code** — you have `Agent`, `SendMessage`, `CronCreate`, and
+  `Write`/`Read` tools → `--harness claude`
+- **Codex** — you have `spawn_agent`, `send_input`, `resume_agent`,
+  `wait_agent`, and `close_agent` tools → `--harness codex`
+
 ```bash
-python /root/.claude/skills/pytorch-test-refactoring/orchestrator.py <test_file_path>
+python /root/.claude/skills/pytorch-test-refactoring/orchestrator.py <test_file_path> --harness codex
 ```
+
+The flag is sticky: every resume/feed command the orchestrator emits carries
+the same `--harness`, so you only set it once. Use it on `--ci-check` and
+`--ingest-feedback` launches too. Omitting it defaults to `claude`.
 
 The orchestrator outputs a JSON task spec to stdout. Follow this loop:
 
@@ -156,7 +168,7 @@ Your ONLY job: run the command → follow the JSON → extract result → feed t
 After refactoring completes, the user creates a PR manually. To start CI monitoring, say **"look after the CI"** or run:
 
 ```bash
-python orchestrator.py <test_file_path> --ci-check [--pr-number N]
+python orchestrator.py <test_file_path> --harness <claude|codex> --ci-check [--pr-number N]
 ```
 
 The orchestrator auto-detects the PR from the current branch. Pass `--pr-number` to skip detection.
@@ -177,10 +189,10 @@ refactoring workflow.
 
 ```bash
 # Harvest + analyze (cron-driven; runs triage then draft agents)
-python orchestrator.py --ingest-feedback
+python orchestrator.py --harness <claude|codex> --ingest-feedback
 
 # Apply approved findings (after editing a findings file's checkboxes)
-python orchestrator.py --apply-ingest agent_space/ingest/findings/PR-<n>.md
+python orchestrator.py --harness <claude|codex> --apply-ingest agent_space/ingest/findings/PR-<n>.md
 ```
 
 **Daily cron:** `CronCreate` with a durable prompt:
@@ -216,7 +228,7 @@ agent_space/refactor/{file_name}/
 ## Resuming After Interruption
 
 ```bash
-python orchestrator.py test/test_ops.py --resume
+python orchestrator.py test/test_ops.py --harness <claude|codex> --resume
 ```
 
 The orchestrator loads all artifacts from the workspace and continues from where it left off.

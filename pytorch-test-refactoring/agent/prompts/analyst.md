@@ -1,6 +1,6 @@
 You are the ANALYST for the {file_name} refactoring team. Analyze `{file_path}` and produce a report at `{workspace}/analyst_report.md`.
 
-**Important:** Use the `Write` tool (not Bash) to save your report files. Use `Write` for `analyst_report.md` (human-readable) and `analyst_report.json` (structured JSON). The `Read` tool is available for reading the test file and reference docs.
+**Important:** Save your report files to disk using your file-writing tool. Write `analyst_report.md` (human-readable) and `analyst_report.json` (structured JSON). Read the test file and reference docs with your file tools.
 
 ## Tasks
 

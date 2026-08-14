@@ -1,0 +1,134 @@
+[
+  {
+    "coder_id": "coder-1",
+    "rule": "strategy_1",
+    "rule_description": "Extract accelerator-unrelated tests (S1) \u2014 move CPU-only tests into the original-named class with @instantiate_parametrized_tests or plain TestCase",
+    "action_items": [
+      {
+        "line_number": 482,
+        "category": "device_api",
+        "severity": "warning",
+        "description": "Helper _compute_tolerances (lines 481-485) calls torch.cuda.get_device_capability(0) to loosen tolerances on CUDA SM86. The catalog lists get_device_capability under category_a.same_name (replaceable) but ALSO under category_c.cuda.device_properties, and the return type differs per backend (tuple[int,int] on CUDA/MTIA vs dict[str,Any] on accelerator/XPU), so a naive torch.accelerator.get_device_capability replacement would break the `== (8, 6)` comparison.",
+        "recommendation": "Make _compute_tolerances accelerator-agnostic: guard the SM86 branch with a device_type=='cuda' check before comparing the capability tuple (device-type-aware comparison). The 5 calling tests (test_cnn_model_sum, test_cnn_model_mean, test_instance_norm_model, test_group_norm_model, test_layer_norm_model) stay Strategy2 - the tolerance tweak is a precision nicety, not the subject of the tests.",
+        "original_class": "TestExpandedWeightFunctional",
+        "target_class": "TestExpandedWeightFunctional"
+      },
+      {
+        "line_number": 383,
+        "category": "classification",
+        "severity": "info",
+        "description": "test_expanded_weight_forward contains an in-body device conditional `if \"cuda\" in device and \"max_norm\" in sample_input.kwargs and \"padding_idx\" in sample_input.kwargs: self.skipTest(...)` for non-deterministic CUDA embedding (issue #74679). Per the classification guide, a device conditional in the test body does NOT make a test Strategy3.",
+        "recommendation": "Keep as-is (Strategy2). The embedding skip is also mirrored by a DecorateInfo in common_methods_invocations.py (line 21822), so leave the in-body skip untouched.",
+        "original_class": "TestExpandedWeightFunctional",
+        "target_class": "TestExpandedWeightFunctional"
+      },
+      {
+        "line_number": 1022,
+        "category": "classification",
+        "severity": "warning",
+        "description": "Legacy module-level nn-tests harness (lines 1022-1055) dynamically attaches CPU and CUDA-named tests (<name>, <name>_multiple_inputs, <name>_cuda_double) to TestExpandedWeightModule via setattr, hardcoding the device strings 'cpu'/'cuda' and gating the CUDA variants on TEST_CUDA. The comment at line 1017 says these should become ModuleInfo tests. This is the ONLY consumer of the TEST_CUDA import and the source of hardcoded 'cuda' test names.",
+        "recommendation": "Out of scope for the S1/S2/S3 strategy conversion (the dynamic tests are not static `def test_` methods), but flag for follow-up: modernizing this harness to ModuleInfo-based tests would remove the hardcoded device strings, the CUDA-named variants, and the TEST_CUDA dependency. Keep the loop and the TEST_CUDA import for now.",
+        "original_class": "TestExpandedWeightModule",
+        "target_class": "TestExpandedWeightModule"
+      },
+      {
+        "line_number": 20,
+        "category": "device_api",
+        "severity": "info",
+        "description": "tf32_off() decorator from common_cuda is applied to 6 Strategy2 tests (test_cnn_model_sum, test_cnn_model_mean, test_instance_norm_model, test_group_norm_model, test_layer_norm_model, test_module) as a CUDA TF32 precision control. It is a test decorator, not a Category C API call in the test bodies, so it does NOT make these tests Strategy3 and does not require keeping @onlyCUDA (none exists).",
+        "recommendation": "Retain the tf32_off import and all 6 @tf32_off() decorators unchanged. Do not flag these tests as Category C.",
+        "original_class": "TestExpandedWeightFunctional",
+        "target_class": "TestExpandedWeightFunctional"
+      },
+      {
+        "line_number": 21822,
+        "category": "classification",
+        "severity": "info",
+        "description": "External reference: TestExpandedWeightFunctional is referenced by a DecorateInfo entry in torch/testing/_internal/common_methods_invocations.py (line 21822) that skips test_expanded_weight_forward for the nn.functional.embedding OpInfo. DecorateInfo matches against the generic class name, so any rename of TestExpandedWeightFunctional would break this skip unless the DecorateInfo is updated.",
+        "recommendation": "Keep the original class names for all classes (no renaming). Renaming is optional per the workflow, and here it would create external-reference churn in common_methods_invocations.py with no benefit since the file is already uniformly Strategy2.",
+        "original_class": "TestExpandedWeightFunctional",
+        "target_class": "TestExpandedWeightFunctional"
+      }
+    ],
+    "instructions": "- L482: [warning] Helper _compute_tolerances (lines 481-485) calls torch.cuda.get_device_capability(0) to loosen tolerances on CUDA SM86. The catalog lists get_device_capability under category_a.same_name (replaceable) but ALSO under category_c.cuda.device_properties, and the return type differs per backend (tuple[int,int] on CUDA/MTIA vs dict[str,Any] on accelerator/XPU), so a naive torch.accelerator.get_device_capability replacement would break the `== (8, 6)` comparison. -> Make _compute_tolerances accelerator-agnostic: guard the SM86 branch with a device_type=='cuda' check before comparing the capability tuple (device-type-aware comparison). The 5 calling tests (test_cnn_model_sum, test_cnn_model_mean, test_instance_norm_model, test_group_norm_model, test_layer_norm_model) stay Strategy2 - the tolerance tweak is a precision nicety, not the subject of the tests.\n- L383: [info] test_expanded_weight_forward contains an in-body device conditional `if \"cuda\" in device and \"max_norm\" in sample_input.kwargs and \"padding_idx\" in sample_input.kwargs: self.skipTest(...)` for non-deterministic CUDA embedding (issue #74679). Per the classification guide, a device conditional in the test body does NOT make a test Strategy3. -> Keep as-is (Strategy2). The embedding skip is also mirrored by a DecorateInfo in common_methods_invocations.py (line 21822), so leave the in-body skip untouched.\n- L1022: [warning] Legacy module-level nn-tests harness (lines 1022-1055) dynamically attaches CPU and CUDA-named tests (<name>, <name>_multiple_inputs, <name>_cuda_double) to TestExpandedWeightModule via setattr, hardcoding the device strings 'cpu'/'cuda' and gating the CUDA variants on TEST_CUDA. The comment at line 1017 says these should become ModuleInfo tests. This is the ONLY consumer of the TEST_CUDA import and the source of hardcoded 'cuda' test names. -> Out of scope for the S1/S2/S3 strategy conversion (the dynamic tests are not static `def test_` methods), but flag for follow-up: modernizing this harness to ModuleInfo-based tests would remove the hardcoded device strings, the CUDA-named variants, and the TEST_CUDA dependency. Keep the loop and the TEST_CUDA import for now.\n- L20: [info] tf32_off() decorator from common_cuda is applied to 6 Strategy2 tests (test_cnn_model_sum, test_cnn_model_mean, test_instance_norm_model, test_group_norm_model, test_layer_norm_model, test_module) as a CUDA TF32 precision control. It is a test decorator, not a Category C API call in the test bodies, so it does NOT make these tests Strategy3 and does not require keeping @onlyCUDA (none exists). -> Retain the tf32_off import and all 6 @tf32_off() decorators unchanged. Do not flag these tests as Category C.\n- L21822: [info] External reference: TestExpandedWeightFunctional is referenced by a DecorateInfo entry in torch/testing/_internal/common_methods_invocations.py (line 21822) that skips test_expanded_weight_forward for the nn.functional.embedding OpInfo. DecorateInfo matches against the generic class name, so any rename of TestExpandedWeightFunctional would break this skip unless the DecorateInfo is updated. -> Keep the original class names for all classes (no renaming). Renaming is optional per the workflow, and here it would create external-reference churn in common_methods_invocations.py with no benefit since the file is already uniformly Strategy2."
+  },
+  {
+    "coder_id": "coder-2",
+    "rule": "strategy_2",
+    "rule_description": "Convert to device-agnostic tests (S2) \u2014 enlarge @onlyCUDA/@onlyOn to @onlyAccelerator, replace .cuda()/.to('cuda') with .to(device), replace Category A/B APIs with accelerator equivalents, create class with instantiate_device_type_tests(). Renaming to TestFooDevice is optional \u2014 agent decides based on external refs.",
+    "action_items": [
+      {
+        "line_number": 482,
+        "category": "device_api",
+        "severity": "warning",
+        "description": "Helper _compute_tolerances (lines 481-485) calls torch.cuda.get_device_capability(0) to loosen tolerances on CUDA SM86. The catalog lists get_device_capability under category_a.same_name (replaceable) but ALSO under category_c.cuda.device_properties, and the return type differs per backend (tuple[int,int] on CUDA/MTIA vs dict[str,Any] on accelerator/XPU), so a naive torch.accelerator.get_device_capability replacement would break the `== (8, 6)` comparison.",
+        "recommendation": "Make _compute_tolerances accelerator-agnostic: guard the SM86 branch with a device_type=='cuda' check before comparing the capability tuple (device-type-aware comparison). The 5 calling tests (test_cnn_model_sum, test_cnn_model_mean, test_instance_norm_model, test_group_norm_model, test_layer_norm_model) stay Strategy2 - the tolerance tweak is a precision nicety, not the subject of the tests.",
+        "original_class": "TestExpandedWeightFunctional",
+        "target_class": "TestExpandedWeightFunctional"
+      },
+      {
+        "line_number": 44,
+        "category": "stale_symbol",
+        "severity": "info",
+        "description": "class TestContext: pass (lines 44-45) is an empty placeholder with no tests. It is never instantiated, never referenced, and is not part of instantiate_device_type_tests. Assessment phase counted it as a class (test_count 0).",
+        "recommendation": "Remove the dead TestContext class as part of the refactoring.",
+        "original_class": "TestContext",
+        "target_class": ""
+      },
+      {
+        "line_number": 20,
+        "category": "stale_symbol",
+        "severity": "info",
+        "description": "TEST_CUDA is imported from common_cuda and used at exactly one site: line 1049 in the legacy module-level test generation loop (`if TEST_CUDA and test.test_cuda:`). No test is being converted from S1 to S2 in this file (all tests are already device-parametrized in instantiate_device_type_tests classes), so TEST_CUDA does NOT become stale as a result of the strategy conversion.",
+        "recommendation": "Keep the TEST_CUDA import while the legacy loop is retained (do NOT remove it in this refactor). It becomes removable only if the legacy harness is modernized (see finding at line 1022).",
+        "original_class": "",
+        "target_class": ""
+      },
+      {
+        "line_number": 20,
+        "category": "device_api",
+        "severity": "info",
+        "description": "tf32_off() decorator from common_cuda is applied to 6 Strategy2 tests (test_cnn_model_sum, test_cnn_model_mean, test_instance_norm_model, test_group_norm_model, test_layer_norm_model, test_module) as a CUDA TF32 precision control. It is a test decorator, not a Category C API call in the test bodies, so it does NOT make these tests Strategy3 and does not require keeping @onlyCUDA (none exists).",
+        "recommendation": "Retain the tf32_off import and all 6 @tf32_off() decorators unchanged. Do not flag these tests as Category C.",
+        "original_class": "TestExpandedWeightFunctional",
+        "target_class": "TestExpandedWeightFunctional"
+      },
+      {
+        "line_number": 0,
+        "category": "whitelist",
+        "severity": "info",
+        "description": "@onlyCUDA / @onlyOn audit: no @onlyCUDA or @onlyOn decorators exist anywhere in this file, so there is nothing to enlarge to @onlyAccelerator. All device-scoped tests are already plain `device`-parametrized methods in instantiate_device_type_tests classes.",
+        "recommendation": "None - no whitelist decorators to change.",
+        "original_class": "",
+        "target_class": ""
+      }
+    ],
+    "instructions": "- L482: [warning] Helper _compute_tolerances (lines 481-485) calls torch.cuda.get_device_capability(0) to loosen tolerances on CUDA SM86. The catalog lists get_device_capability under category_a.same_name (replaceable) but ALSO under category_c.cuda.device_properties, and the return type differs per backend (tuple[int,int] on CUDA/MTIA vs dict[str,Any] on accelerator/XPU), so a naive torch.accelerator.get_device_capability replacement would break the `== (8, 6)` comparison. -> Make _compute_tolerances accelerator-agnostic: guard the SM86 branch with a device_type=='cuda' check before comparing the capability tuple (device-type-aware comparison). The 5 calling tests (test_cnn_model_sum, test_cnn_model_mean, test_instance_norm_model, test_group_norm_model, test_layer_norm_model) stay Strategy2 - the tolerance tweak is a precision nicety, not the subject of the tests.\n- L44: [info] class TestContext: pass (lines 44-45) is an empty placeholder with no tests. It is never instantiated, never referenced, and is not part of instantiate_device_type_tests. Assessment phase counted it as a class (test_count 0). -> Remove the dead TestContext class as part of the refactoring.\n- L20: [info] TEST_CUDA is imported from common_cuda and used at exactly one site: line 1049 in the legacy module-level test generation loop (`if TEST_CUDA and test.test_cuda:`). No test is being converted from S1 to S2 in this file (all tests are already device-parametrized in instantiate_device_type_tests classes), so TEST_CUDA does NOT become stale as a result of the strategy conversion. -> Keep the TEST_CUDA import while the legacy loop is retained (do NOT remove it in this refactor). It becomes removable only if the legacy harness is modernized (see finding at line 1022).\n- L20: [info] tf32_off() decorator from common_cuda is applied to 6 Strategy2 tests (test_cnn_model_sum, test_cnn_model_mean, test_instance_norm_model, test_group_norm_model, test_layer_norm_model, test_module) as a CUDA TF32 precision control. It is a test decorator, not a Category C API call in the test bodies, so it does NOT make these tests Strategy3 and does not require keeping @onlyCUDA (none exists). -> Retain the tf32_off import and all 6 @tf32_off() decorators unchanged. Do not flag these tests as Category C.\n- L0: [info] @onlyCUDA / @onlyOn audit: no @onlyCUDA or @onlyOn decorators exist anywhere in this file, so there is nothing to enlarge to @onlyAccelerator. All device-scoped tests are already plain `device`-parametrized methods in instantiate_device_type_tests classes. -> None - no whitelist decorators to change."
+  },
+  {
+    "coder_id": "coder-3",
+    "rule": "cleanup",
+    "rule_description": "Import cleanup and external reference updates \u2014 remove stale TEST_CUDA/TEST_MPS/TEST_XPU/onlyOn imports, update DecorateInfo references in common_methods_invocations.py, rename stale entries in test/dynamo_skips/ and test/dynamo_expected_failures/",
+    "action_items": [
+      {
+        "line_number": 44,
+        "category": "stale_symbol",
+        "severity": "info",
+        "description": "class TestContext: pass (lines 44-45) is an empty placeholder with no tests. It is never instantiated, never referenced, and is not part of instantiate_device_type_tests. Assessment phase counted it as a class (test_count 0).",
+        "recommendation": "Remove the dead TestContext class as part of the refactoring.",
+        "original_class": "TestContext",
+        "target_class": ""
+      },
+      {
+        "line_number": 20,
+        "category": "stale_symbol",
+        "severity": "info",
+        "description": "TEST_CUDA is imported from common_cuda and used at exactly one site: line 1049 in the legacy module-level test generation loop (`if TEST_CUDA and test.test_cuda:`). No test is being converted from S1 to S2 in this file (all tests are already device-parametrized in instantiate_device_type_tests classes), so TEST_CUDA does NOT become stale as a result of the strategy conversion.",
+        "recommendation": "Keep the TEST_CUDA import while the legacy loop is retained (do NOT remove it in this refactor). It becomes removable only if the legacy harness is modernized (see finding at line 1022).",
+        "original_class": "",
+        "target_class": ""
+      }
+    ],
+    "instructions": "- L44: [info] class TestContext: pass (lines 44-45) is an empty placeholder with no tests. It is never instantiated, never referenced, and is not part of instantiate_device_type_tests. Assessment phase counted it as a class (test_count 0). -> Remove the dead TestContext class as part of the refactoring.\n- L20: [info] TEST_CUDA is imported from common_cuda and used at exactly one site: line 1049 in the legacy module-level test generation loop (`if TEST_CUDA and test.test_cuda:`). No test is being converted from S1 to S2 in this file (all tests are already device-parametrized in instantiate_device_type_tests classes), so TEST_CUDA does NOT become stale as a result of the strategy conversion. -> Keep the TEST_CUDA import while the legacy loop is retained (do NOT remove it in this refactor). It becomes removable only if the legacy harness is modernized (see finding at line 1022)."
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "agent_id": "a146404c507c7489e",
+  "agent_name": "checker",
+  "all_clear": true,
+  "findings": [],
+  "summary": "All 4 verify FAILs are false positives; lint-gate fixes verified correct and complete. No real defects remain."
+}

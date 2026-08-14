@@ -1,17 +1,27 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI agents (Claude Code / Codex) working in this repository.
 
 ## Overview
 
-This repo is a **Claude Code skill** that orchestrates refactoring PyTorch test files to decouple them from specific hardware accelerators (CUDA, MPS, XPU). Tests are split into three categories across an 8-phase workflow (7 refactoring + 1 CI automation) driven by AI agents.
+This repo is a **harness-pluggable skill** that orchestrates refactoring PyTorch test files to decouple them from specific hardware accelerators (CUDA, MPS, XPU). Tests are split into three categories across an 8-phase workflow (7 refactoring + 1 CI automation) driven by AI agents.
 
-**This skill is invoked by Claude Code, not run standalone.** The SKILL.md entry point triggers the workflow; `flow.py` is the state machine core; Claude Code spawns AI agents when the flow emits `FlowSignal` values.
+The skill is not run standalone: it is invoked by the host harness (Claude Code or Codex). `SKILL.md` is the entry point; `flow.py` is the state machine core; the host spawns AI agents from the JSON task spec emitted by `orchestrator.py`, selecting the adapter via `--harness {claude,codex}`.
+
+## Harness Adapter Layer (Pluggable)
+
+Harness differences are isolated in a set of adapters under `agent/`. `orchestrator.py` and the state machines (`flow.py`, `ci_ops.py`, `ingest_ops.py`) never branch on the harness name; they delegate through the `BaseAdapter` interface only.
+
+- **`agent/adapter.py`** — `BaseAdapter` abstract interface + `AgentTask` (with a `model` field). Besides the task builders (`build_analyst_task`/`build_coder_tasks`/`build_checker_task`/`build_debugger_task`/`build_feedback_*`/`build_fix_tasks`/`build_ruleset_editor_task`), it defines the harness-specific emission interface: `task_to_spec`/`ci_task_to_spec`/`ingest_task_to_spec`, `completion_note`, `ci_wait_on_complete`/`ci_done_next_steps`, `git_preflight`/`git_preflight_error`.
+- **`agent/claude_code.py`** — `ClaudeCodeAdapter` (`harness_name="claude"`). Preserves the legacy behavior: `Agent`/`SendMessage`/`CronCreate`/`Write` semantics, the `~/.claude/settings.json` preflight, and the Write-tool notes all moved in verbatim.
+- **`agent/codex.py`** — `CodexAdapter` (`harness_name="codex"`). Maps tasks to `spawn_agent`/`send_input`/`resume_agent`/`wait_agent`/`close_agent`, injects `deepseek-v4-pro`/`deepseek-v4-flash` per role, replaces `CronCreate` with a `sleep` poll, and rebuilds the full coder role prompt on fallback re-spawn.
+- **`agent/registry.py`** — `HARNESS_ADAPTERS` registry + `get_adapter(name)`. Adding a harness = one new adapter module + one registry entry.
+- **Selection & round-trip** — `orchestrator.py`'s `--harness` (or `PYTORCH_TEST_REFACTOR_HARNESS`, default `claude`) is resolved once via `get_adapter()` and injected into the state machines; `_cmd()` writes `--harness` into every `on_complete.command`/`poll_command` so cross-process resume re-selects the same harness.
 
 ## Architecture
 
 ```
-orchestrator.py (CLI bridge — JSON task spec ↔ Agent/SendMessage tool calls; also --ingest-feedback/--apply-ingest)
+orchestrator.py (CLI bridge — emits JSON task specs and accepts feed-back; --harness selects the adapter; --ci-check/--ingest-feedback/--apply-ingest)
 flow.py (RefactorFlow state machine — core orchestrator, phases 1-7)
 ci_ops.py (CIOps state machine — CI monitoring & debug, phase 8)
 ingest_ops.py (IngestOps state machine — PR feedback ingest sidecar)
@@ -26,8 +36,10 @@ ingest_ops.py (IngestOps state machine — PR feedback ingest sidecar)
 │   ├── ingest.py         Sidecar: deterministic PR feedback harvest + findings writer
 │   └── logger.py         Structured JSONL audit log + status.json snapshot
 ├── agent/
-│   ├── adapter.py        Abstract BaseAdapter with AgentTask model
-│   ├── claude_code.py    ClaudeCodeAdapter: builds AgentTask objects from prompt templates
+│   ├── adapter.py        Abstract BaseAdapter harness interface + AgentTask model
+│   ├── claude_code.py    ClaudeCodeAdapter (Claude task building + spec/note/cron/preflight emission)
+│   ├── codex.py          CodexAdapter (Codex tool mapping + per-role model + poll cron)
+│   ├── registry.py       HARNESS_ADAPTERS registry + get_adapter()
 │   ├── prompts/          Markdown prompt templates (analyst.md, coder.md, checker.md, debugger.md, feedback_triage.md, feedback_analyst.md)
 │   └── skills/           Sub-skills referenced by agents (classify-test-files, refactor-test-decoupling, review-test-refactoring, ci-automation)
 └── reference/
@@ -47,15 +59,15 @@ flow.py → scripts/linter.py (test-case lint gate)
 flow.py → scripts/report.py (Phase 7)
 flow.py → scripts/logger.py (audit logging)
 flow.py → agent/adapter.py (abstract base)
-flow.py → agent/claude_code.py (Claude Code adapter)
+flow.py → agent/registry.py → agent/{claude_code,codex}.py (harness adapter, selected via --harness)
 ci_ops.py → state.py (data models)
 ci_ops.py → scripts/ci.py (Phase 8 deterministic ops)
 ci_ops.py → agent/adapter.py (abstract base)
-ci_ops.py → agent/claude_code.py (Claude Code adapter)
+ci_ops.py → agent/registry.py → agent/{claude_code,codex}.py (harness adapter)
 ingest_ops.py → state.py (data models)
 ingest_ops.py → scripts/ingest.py (harvest, finalize, findings writer)
 ingest_ops.py → agent/adapter.py (abstract base)
-ingest_ops.py → agent/claude_code.py (Claude Code adapter)
+ingest_ops.py → agent/registry.py → agent/{claude_code,codex}.py (harness adapter)
 ```
 
 ## Core concepts
@@ -92,7 +104,7 @@ ingest_ops.py → agent/claude_code.py (Claude Code adapter)
 
 ### FlowSignal mechanism
 
-The state machine stops on these signals and expects Claude Code to handle them:
+The state machine stops on these signals and lets the selected harness adapter handle them (the action column below shows Claude Code; Codex maps the same signals to `spawn_agent`/`send_input`/`resume_agent`/`wait_agent` via `CodexAdapter`, following the spec's `tool`/`recovery`/`fallback` fields):
 
 | Signal | When | Claude Code action |
 |--------|------|-------------------|
@@ -162,22 +174,20 @@ ci_state.json         # CI automation state (PR number, branch, fix history, cro
 
 ## Usage pattern
 
+The preferred entry point is the CLI: `python orchestrator.py <file> --harness <claude|codex>` (emits the JSON task spec and accepts feed-back; see SKILL.md). To drive the state machine directly, select the adapter by harness:
+
 ```python
-import sys
-from pathlib import Path
-skill_dir = str(Path(__file__).parent)
-if skill_dir not in sys.path:
-    sys.path.insert(0, skill_dir)
+from agent.registry import get_adapter
 from flow import RefactorFlow
 
-flow = RefactorFlow()
+flow = RefactorFlow(adapter=get_adapter("codex"))  # or get_adapter("claude")
 state = flow.run("test/test_ops.py")
 
 while state.signal.value != "done":
     tasks = flow.get_pending_tasks()
     if state.signal.value == "spawn_single":
-        agent_id, result = ...  # spawn agent via Agent tool, capture agent_id
-        flow.feed_agent_spawned(task.agent_name, agent_id)  # register ID for future SendMessage
+        # flow.adapter.task_to_spec(...) yields the harness-executable spec; run it, then:
+        flow.feed_agent_spawned(task.agent_name, agent_id)  # register ID for later resume
         if state.current_phase == "analyze":
             flow.feed_analyst_result(result)
         elif state.current_phase == "code":
@@ -185,12 +195,12 @@ while state.signal.value != "done":
         elif state.current_phase == "review":
             flow.feed_review_findings(result)
     elif state.signal.value == "send_message":
-        result = ...  # SendMessage(to=task.agent_id), or fallback-spawn + capture new ID
+        result = ...  # message task.agent_id, or fallback re-spawn + register the new ID
         flow.feed_coder_result("coder", result)
     elif state.signal.value == "relay_findings":
-        send_findings_via_SendMessage(coder_agent_id)
+        send_findings_to_coder(coder_agent_id)
         flow.feed_fix_complete()
     state = flow.run(state.file_path)
 ```
 
-Cross-process resume: `flow.run("test_ops.py", resume=True)` loads artifacts from workspace.
+Cross-process resume: `flow.run("test_ops.py", resume=True)` loads artifacts from the workspace; the equivalent CLI is `python orchestrator.py test_ops.py --harness codex --resume`.
