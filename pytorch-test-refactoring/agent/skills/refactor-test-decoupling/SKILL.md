@@ -342,7 +342,3 @@ ls test/dynamo_expected_failures/TestFoo.* 2>/dev/null
 | **Derive device type from existing data — never add new parameters** | The `device` parameter from `instantiate_device_type_tests` or `tensor.device.type` from any tensor in scope already provides the device type. Adding explicit `device_type`/`device` parameters to functions that already receive tensors or have access to the test's `device` kwarg is redundant and breaks conventions (especially `autograd.Function.forward()`). |
 | **Mixed-device tests** | When a test deliberately creates tensors on different devices (CPU + accelerator) for cross-device error handling: keep CPU tensors as explicit CPU, use `device` param for accelerator tensors, scope with `@onlyAccelerator`. Do NOT move to S1 or blindly convert all tensors to `device`. |
 | **Missing `hw_classification` attribute** | Every refactored test class must have `hw_classification = HardwareClassification.XXX` as the first class attribute. Import `HardwareClassification` from `torch.testing._internal.common_utils` (merge alphabetically). S1→GENERIC (or CPU for `only_for="cpu"`), S2→ACCELERATOR, S3→CUDA/MPS/XPU per device. |
-
-## Related Skills
-
-- `agent/skills/classify-test-files` — Scan and classify test files before refactoring
