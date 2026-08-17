@@ -172,7 +172,8 @@ def test_full_flow_replay_to_finalize(tmp_path, monkeypatch):
     first = emitted[-1]
     assert first["status"] == "need_agent"
     assert first["tasks"][0]["tool"] == "spawn_agent"
-    assert first["tasks"][0]["model"] == "deepseek-v4-pro"
+    assert "model" not in first["tasks"][0]
+    assert first["tasks"][0]["fork_turns"] == "all"
 
     # The analyst feed loads analyst_report.json from the workspace.
     _install_materials(flow.state.workspace, "analyst_report.json")

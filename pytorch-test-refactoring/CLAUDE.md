@@ -14,7 +14,7 @@ Harness differences are isolated in a set of adapters under `agent/`. `orchestra
 
 - **`agent/adapter.py`** — `BaseAdapter` abstract interface + `AgentTask` (with a `model` field). Besides the task builders (`build_analyst_task`/`build_coder_tasks`/`build_checker_task`/`build_debugger_task`/`build_feedback_*`/`build_fix_tasks`/`build_ruleset_editor_task`), it defines the harness-specific emission interface: `task_to_spec`/`ci_task_to_spec`/`ingest_task_to_spec`, `completion_note`, `ci_wait_on_complete`/`ci_done_next_steps`, `git_preflight`/`git_preflight_error`.
 - **`agent/claude_code.py`** — `ClaudeCodeAdapter` (`harness_name="claude"`). Preserves the legacy behavior: `Agent`/`SendMessage`/`CronCreate`/`Write` semantics, the `~/.claude/settings.json` preflight, and the Write-tool notes all moved in verbatim.
-- **`agent/codex.py`** — `CodexAdapter` (`harness_name="codex"`). Maps tasks to `spawn_agent`/`send_input`/`resume_agent`/`wait_agent`/`close_agent`, injects `deepseek-v4-pro`/`deepseek-v4-flash` per role, replaces `CronCreate` with a `sleep` poll, and rebuilds the full coder role prompt on fallback re-spawn.
+- **`agent/codex.py`** — `CodexAdapter` (`harness_name="codex"`). Maps tasks to `spawn_agent`/`followup_task`/`wait_agent`, emits full-history forks so subagents inherit the parent model and context, replaces `CronCreate` with a `sleep` poll, and rebuilds the full coder role prompt on fallback re-spawn.
 - **`agent/registry.py`** — `HARNESS_ADAPTERS` registry + `get_adapter(name)`. Adding a harness = one new adapter module + one registry entry.
 - **Selection & round-trip** — `orchestrator.py`'s `--harness` (or `PYTORCH_TEST_REFACTOR_HARNESS`, default `claude`) is resolved once via `get_adapter()` and injected into the state machines; `_cmd()` writes `--harness` into every `on_complete.command`/`poll_command` so cross-process resume re-selects the same harness.
 
@@ -38,7 +38,7 @@ ingest_ops.py (IngestOps state machine — PR feedback ingest sidecar)
 ├── agent/
 │   ├── adapter.py        Abstract BaseAdapter harness interface + AgentTask model
 │   ├── claude_code.py    ClaudeCodeAdapter (Claude task building + spec/note/cron/preflight emission)
-│   ├── codex.py          CodexAdapter (Codex tool mapping + per-role model + poll cron)
+│   ├── codex.py          CodexAdapter (Codex tool mapping + full-history forks + poll cron)
 │   ├── registry.py       HARNESS_ADAPTERS registry + get_adapter()
 │   ├── prompts/          Markdown prompt templates (analyst.md, coder.md, checker.md, debugger.md, feedback_triage.md, feedback_analyst.md)
 │   └── skills/           Sub-skills referenced by agents (classify-test-files, refactor-test-decoupling, review-test-refactoring, ci-automation)
@@ -104,13 +104,13 @@ ingest_ops.py → agent/registry.py → agent/{claude_code,codex}.py (harness ad
 
 ### FlowSignal mechanism
 
-The state machine stops on these signals and lets the selected harness adapter handle them (the action column below shows Claude Code; Codex maps the same signals to `spawn_agent`/`send_input`/`resume_agent`/`wait_agent` via `CodexAdapter`, following the spec's `tool`/`recovery`/`fallback` fields):
+The state machine stops on these signals and lets the selected harness adapter handle them (the action column below shows Claude Code; Codex maps the same signals to `spawn_agent`/`followup_task`/`wait_agent` via `CodexAdapter`, following the spec's `tool`/`recovery`/`fallback` fields):
 
 | Signal | When | Claude Code action |
 |--------|------|-------------------|
 | `SPAWN_SINGLE` | Need 1 new AI agent | Spawn analyst/coder/checker via Agent tool; **capture agent_id from result**; include `agent_id` + `agent_name` in the JSON piped to `--feed`; call `feed_*_result()` |
-| `SEND_MESSAGE` | Follow-up to existing agent | `SendMessage(to=agent_id)` to resume the stopped agent (uses registered agent ID, not name); if agent unreachable → fallback spawn + register new ID; call `feed_coder_result()` |
-| `RELAY_FINDINGS` | Review found issues | Forward findings to coder via `SendMessage(coder_agent_id)`; call `feed_fix_complete()` |
+| `SEND_MESSAGE` | Follow-up to existing agent | `followup_task(target=agent_id)` to resume the stopped agent (uses registered agent ID, not name); if agent unreachable → fallback spawn + register new ID; call `feed_coder_result()` |
+| `RELAY_FINDINGS` | Review found issues | Forward findings to coder via `followup_task(target=coder_agent_id)`; call `feed_fix_complete()` |
 | `WAITING` | CI still running | Schedule durable cron via CronCreate; session exits |
 | `DONE` | Phase complete | Call `flow.run()` to continue |
 

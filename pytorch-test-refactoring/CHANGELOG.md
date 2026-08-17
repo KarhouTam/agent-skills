@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-08-16 — Codex 适配器修复：恢复子 agent 上下文传递
+
+修复 Codex 运行环境下子 agent 收不到任务上下文的问题。旧的 Codex spec 使用
+`send_input`/`resume_agent` 工具名，并同时为每个角色注入 `model` 覆盖值；当前
+Codex 协作运行时改用 `spawn_agent`/`followup_task`/`wait_agent`，且全历史 fork
+（`fork_turns: "all"`）不能接受 `model` 覆盖。两者叠加导致 spawn 出的 analyst 等
+子 agent 缺少父上下文，返回"没有任务"。
+
+- **spawn spec 重写**：改为 `task_name`/`message`/`fork_turns: "all"`，把超时移入
+  `wait.timeout_ms`，不再输出 `prompt`/`timeout_ms`/`model`。
+- **follow-up spec 重写**：`send_input`/`resume_agent` 改为 `followup_task`
+  （`target`/`message`），fallback 重 spawn 同样使用全历史 fork 且不输出 `model`。
+- **移除 Codex 每角色模型注入**：`_model_for`/`_with_model` 及 `DEFAULT_MODELS` 删除，
+  `CodexAdapter` 继承父模型，`AgentTask.model` 仅保留给 Claude 路径。
+- **回传说明与文档**：`completion_note` 和 `SKILL.md` 改为描述真实的 Codex 协作工具，
+  并明确 `agent_id` 来自 `spawn_agent` 返回的 canonical task name（如 `/root/analyst`）。
+- **测试**：更新 `tests/test_harness.py`/`tests/test_workflow.py` 断言，31 个测试通过。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `agent/codex.py` | Codex spec 形态改为当前协作工具；移除每角色 model 注入 |
+| `agent/adapter.py` | `model` 字段注释更新为可选覆盖 |
+| `SKILL.md`、`CLAUDE.md` | Codex 工具名/循环/`agent_id` 说明更新 |
+| `tests/test_harness.py`、`tests/test_workflow.py` | 更新 Codex spec 契约测试 |
+
 ## 2026-08-14 — Harness 插件化重构 + Codex 适配器
 
 将工作流的 harness 依赖从"Claude Code 专属"重构为插件化架构：每个 harness（Claude Code、

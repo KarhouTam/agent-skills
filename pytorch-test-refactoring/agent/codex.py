@@ -1,9 +1,10 @@
 """Codex adapter - the Codex harness implementation of BaseAdapter.
 
-Codex exposes spawn_agent / send_input / resume_agent / wait_agent /
-close_agent instead of Claude Code's Agent / SendMessage / CronCreate.
-This adapter owns the Codex-specific task-spec shape, completion notes,
-poll-based cron policy, per-role model selection, and git preflight.
+Codex exposes spawn_agent / followup_task / wait_agent instead of Claude
+Code's Agent / SendMessage / CronCreate. This adapter owns the
+Codex-specific task-spec shape, completion notes, poll-based cron policy,
+and git preflight. Codex full-history forks inherit the parent model, so
+spawn specs do not emit model overrides.
 """
 
 from __future__ import annotations
@@ -15,18 +16,6 @@ from agent.claude_code import ClaudeCodeAdapter, _coder_prompt
 from state import FlowSignal
 
 
-ALLOWED_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
-
-DEFAULT_MODELS = {
-    "analyst": "deepseek-v4-pro",
-    "coder": "deepseek-v4-pro",
-    "checker": "deepseek-v4-pro",
-    "debugger": "deepseek-v4-pro",
-    "feedback_triage": "deepseek-v4-flash",
-    "feedback_analyst": "deepseek-v4-pro",
-    "ruleset_editor": "deepseek-v4-pro",
-}
-
 DEFAULT_TIMEOUT_MS = 1_800_000
 TIMEOUTS = {
     "checker": 900_000,
@@ -36,103 +25,8 @@ TIMEOUTS = {
 class CodexAdapter(ClaudeCodeAdapter):
     harness_name = "codex"
 
-    def _model_for(self, agent_name: str) -> str:
-        return DEFAULT_MODELS.get(agent_name, "deepseek-v4-pro")
-
     def _timeout_for(self, agent_name: str) -> int:
         return TIMEOUTS.get(agent_name, DEFAULT_TIMEOUT_MS)
-
-    def _with_model(self, task: AgentTask) -> AgentTask:
-        task.model = self._model_for(task.agent_name)
-        return task
-
-    # ── task builders: inherit from Claude, inject the per-role model ──
-
-    def build_analyst_task(self, file_path, workspace, ref_dir):
-        return self._with_model(
-            super().build_analyst_task(file_path, workspace, ref_dir)
-        )
-
-    def build_coder_tasks(
-        self,
-        file_path,
-        workspace,
-        coder_tasks,
-        strategy_assignments=None,
-        first_spawn=False,
-        total_rules=1,
-    ):
-        return [
-            self._with_model(t)
-            for t in super().build_coder_tasks(
-                file_path,
-                workspace,
-                coder_tasks,
-                strategy_assignments,
-                first_spawn,
-                total_rules,
-            )
-        ]
-
-    def build_send_message(
-        self,
-        to,
-        message_type,
-        rule="",
-        rule_description="",
-        instructions="",
-        agent_id="",
-    ):
-        return self._with_model(
-            super().build_send_message(
-                to, message_type, rule, rule_description, instructions, agent_id
-            )
-        )
-
-    def build_checker_task(
-        self,
-        file_path,
-        workspace,
-        ref_dir,
-        original_test_count,
-        verification_summary,
-        scope="file",
-        rule_context=None,
-    ):
-        return self._with_model(
-            super().build_checker_task(
-                file_path,
-                workspace,
-                ref_dir,
-                original_test_count,
-                verification_summary,
-                scope,
-                rule_context,
-            )
-        )
-
-    def build_debugger_task(self, file_path, workspace):
-        return self._with_model(super().build_debugger_task(file_path, workspace))
-
-    def build_feedback_triage_task(self, comments):
-        return self._with_model(super().build_feedback_triage_task(comments))
-
-    def build_feedback_analyst_task(self, comment_and_triage):
-        return self._with_model(super().build_feedback_analyst_task(comment_and_triage))
-
-    def build_fix_tasks(self, file_path, workspace, findings, agent_ids=None):
-        return [
-            self._with_model(t)
-            for t in super().build_fix_tasks(file_path, workspace, findings, agent_ids)
-        ]
-
-    def build_ruleset_editor_task(self, prompt: str) -> AgentTask:
-        return AgentTask(
-            phase="apply",
-            agent_name="ruleset_editor",
-            prompt=prompt,
-            model=self._model_for("ruleset_editor"),
-        )
 
     def build_respawn_task(
         self,
@@ -157,19 +51,23 @@ class CodexAdapter(ClaudeCodeAdapter):
             phase="code",
             agent_name="coder",
             prompt=prompt,
-            model=self._model_for("coder"),
         )
 
     # ── harness-specific emission ───────────────────────────────
 
     def _spawn_spec(self, task: AgentTask) -> dict[str, Any]:
+        agent_name = task.agent_name
         return {
             "method": "spawn",
             "tool": "spawn_agent",
-            "agent_name": task.agent_name,
-            "model": task.model or self._model_for(task.agent_name),
-            "timeout_ms": self._timeout_for(task.agent_name),
-            "prompt": task.prompt,
+            "agent_name": agent_name,
+            "task_name": agent_name,
+            "message": task.prompt,
+            "fork_turns": "all",
+            "wait": {
+                "tool": "wait_agent",
+                "timeout_ms": self._timeout_for(agent_name),
+            },
         }
 
     def task_to_spec(
@@ -198,20 +96,22 @@ class CodexAdapter(ClaudeCodeAdapter):
         )
         return {
             "method": "send_message",
-            "tool": "send_input",
+            "tool": "followup_task",
             "agent_name": task.agent_name,
-            "send_to": target_id,
-            "prompt": task.prompt,
+            "target": target_id,
+            "message": task.prompt,
             "recovery": {
-                "tool": "resume_agent",
-                "then": "retry send_input",
-                "else": "spawn_agent with fallback.prompt",
+                "tool": "followup_task",
+                "target": target_id,
+                "note": "Retry followup_task after wait_agent if the target is busy.",
             },
             "fallback": {
                 "method": "spawn",
                 "tool": "spawn_agent",
-                "model": self._model_for(task.agent_name),
-                "prompt": respawn.prompt if respawn else task.prompt,
+                "agent_name": task.agent_name,
+                "task_name": task.agent_name,
+                "message": respawn.prompt if respawn else task.prompt,
+                "fork_turns": "all",
                 "note": "register the new agent_id in the result JSON",
             },
         }
@@ -232,23 +132,35 @@ class CodexAdapter(ClaudeCodeAdapter):
     ) -> str:
         if kind == "refactor":
             return (
-                "1. Read the agent's final message. "
-                "2. Extract the key result into JSON from it. "
-                "3. If you spawned a NEW agent (method=spawn), include "
-                '"agent_id" (from the spawn_agent result object) and '
+                "1. For each task, call the named collaboration tool with the "
+                "exact fields in the task spec (`task_name`, `message`, "
+                "`fork_turns` for spawns; `target`, `message` for "
+                "follow-ups). "
+                "2. After a spawn or follow-up, wait for the agent's final "
+                "message (use "
+                "`wait_agent` with the task's `wait.timeout_ms`, or read the "
+                "final answer when it is delivered). "
+                "3. Extract the key result into JSON from it. "
+                "4. If you spawned a NEW agent (method=spawn), include "
+                '"agent_id" (the canonical task name returned by '
+                "`spawn_agent`, e.g. `/root/analyst`) and "
                 '"agent_name" (from the task spec) in the JSON. '
-                "4. Write the result JSON to a file at "
-                f"`{feed_file}` (heredoc), then run:\n"
+                "5. Write the result JSON to a file at "
+                f"`{feed_file}` (use apply_patch or a shell heredoc), then run:\n"
                 f"   {feed_cmd}"
             )
         if kind == "ci_debugger":
             return (
-                "1. Read the debugger agent's final message. "
-                "2. Extract the key result into JSON (see ci-automation SKILL.md). "
-                '3. Include "agent_id" (from the spawn_agent result object) '
+                "1. Spawn the debugger with the exact fields in the task spec, "
+                "then wait for its final message (via `wait_agent` with "
+                "`wait.timeout_ms`, or the delivered final answer). "
+                "2. Read the debugger agent's final message and extract the key "
+                "result into JSON (see ci-automation SKILL.md). "
+                '3. Include "agent_id" (the canonical task name returned by '
+                "`spawn_agent`) "
                 'and "agent_name": "debugger" in the JSON. '
                 "4. Write the result JSON to a file at "
-                f"`{feed_file}` (heredoc), then run:\n"
+                f"`{feed_file}` (use apply_patch or a shell heredoc), then run:\n"
                 f"   {feed_cmd}\n"
                 "Note: the debugger needs `git commit`/`git push`. If sandbox "
                 "escalation denies them, it reports `fixes_pending`; push "
@@ -258,7 +170,7 @@ class CodexAdapter(ClaudeCodeAdapter):
             return (
                 "1. Read the agent's final message. "
                 "2. Write the result JSON to a file at "
-                f"`{feed_file}` (heredoc), then run:\n"
+                f"`{feed_file}` (use apply_patch or a shell heredoc), then run:\n"
                 f"   {feed_cmd}"
             )
         return ""

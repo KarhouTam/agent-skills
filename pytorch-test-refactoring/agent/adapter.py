@@ -33,7 +33,7 @@ class AgentTask(BaseModel):
     mode: str = "default"  # Permission mode: "dontAsk" | "acceptEdits" | "bypassPermissions" | "default"
     context: dict = {}
     agent_id: str = ""
-    model: str = ""  # Harness model override (e.g. Codex); empty means inherit
+    model: str = ""  # Optional harness model override; empty means inherit
 
 
 class BaseAdapter(ABC):

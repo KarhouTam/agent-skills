@@ -70,8 +70,12 @@ def test_codex_spawn_spec_shape():
     spec = CodexAdapter().task_to_spec(_spawn_task(), FlowSignal.SPAWN_SINGLE)
     assert spec["method"] == "spawn"
     assert spec["tool"] == "spawn_agent"
-    assert spec["model"] == "deepseek-v4-pro"
-    assert spec["timeout_ms"] == 1_800_000
+    assert spec["task_name"] == "analyst"
+    assert spec["message"] == "do the thing"
+    assert "model" not in spec
+    assert spec["fork_turns"] == "all"
+    assert spec["wait"]["tool"] == "wait_agent"
+    assert spec["wait"]["timeout_ms"] == 1_800_000
     assert "mode" not in spec
     assert "agent_type" not in spec
     assert "run_in_background" not in spec
@@ -92,18 +96,26 @@ def test_codex_send_message_rebuilds_role_prompt():
         workspace="agent_space/refactor/test_ops",
         rule_context=rc,
     )
-    assert spec["tool"] == "send_input"
-    assert spec["recovery"]["tool"] == "resume_agent"
-    assert "Refactoring Standards" in spec["fallback"]["prompt"]
-    assert "Apply the next rule" in spec["fallback"]["prompt"]
-    assert spec["fallback"]["model"] == "deepseek-v4-pro"
+    assert spec["tool"] == "followup_task"
+    assert spec["target"] == "agent_123"
+    assert spec["message"] == "Apply the next rule"
+    assert spec["recovery"]["tool"] == "followup_task"
+    assert spec["fallback"]["tool"] == "spawn_agent"
+    assert spec["fallback"]["task_name"] == "coder"
+    assert spec["fallback"]["message"].startswith(
+        "You are the CODER for the test_ops refactoring team."
+    )
+    assert "Refactoring Standards" in spec["fallback"]["message"]
+    assert "Apply the next rule" in spec["fallback"]["message"]
+    assert "model" not in spec["fallback"]
+    assert spec["fallback"]["fork_turns"] == "all"
 
 
-def test_codex_model_injection():
+def test_codex_builders_leave_model_unset():
     a = CodexAdapter()
-    assert a.build_analyst_task("t.py", "ws", "ref").model == "deepseek-v4-pro"
-    assert a.build_feedback_triage_task([]).model == "deepseek-v4-flash"
-    assert a.build_debugger_task("t.py", "ws").model == "deepseek-v4-pro"
+    assert a.build_analyst_task("t.py", "ws", "ref").model == ""
+    assert a.build_feedback_triage_task([]).model == ""
+    assert a.build_debugger_task("t.py", "ws").model == ""
     comment = types.SimpleNamespace(
         comment_id=1,
         pr_number=1,
@@ -114,7 +126,7 @@ def test_codex_model_injection():
     )
     assert (
         a.build_feedback_analyst_task({"comment": comment, "triage": {}}).model
-        == "deepseek-v4-pro"
+        == ""
     )
 
 
@@ -156,7 +168,7 @@ def test_build_ruleset_editor_task():
     assert claude.mode == "acceptEdits"
     assert claude.run_in_background is True
     assert claude.model == ""
-    assert codex.model == "deepseek-v4-pro"
+    assert codex.model == ""
 
 
 def test_ci_and_ingest_spec_shapes():
@@ -164,9 +176,11 @@ def test_ci_and_ingest_spec_shapes():
     ci = codex.ci_task_to_spec(_spawn_task("debugger"))
     ing = codex.ingest_task_to_spec(_spawn_task("feedback_triage"))
     assert ci["tool"] == "spawn_agent"
-    assert ci["model"] == "deepseek-v4-pro"
+    assert "model" not in ci
+    assert ci["fork_turns"] == "all"
     assert ing["tool"] == "spawn_agent"
-    assert ing["model"] == "deepseek-v4-flash"
+    assert "model" not in ing
+    assert ing["fork_turns"] == "all"
 
 
 def test_cmd_roundtrips_harness():

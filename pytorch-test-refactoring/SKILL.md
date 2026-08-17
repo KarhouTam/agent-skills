@@ -14,8 +14,8 @@ First, determine which harness you are running in, then pass the matching
 
 - **Claude Code** — you have `Agent`, `SendMessage`, `CronCreate`, and
   `Write`/`Read` tools → `--harness claude`
-- **Codex** — you have `spawn_agent`, `send_input`, `resume_agent`,
-  `wait_agent`, and `close_agent` tools → `--harness codex`
+- **Codex** — you have `spawn_agent`, `followup_task`, and
+  `wait_agent` collaboration tools → `--harness codex`
 
 ```bash
 python /root/.claude/skills/pytorch-test-refactoring/orchestrator.py <test_file_path> --harness codex
@@ -56,14 +56,15 @@ The orchestrator outputs a JSON task spec to stdout. Follow this loop:
          │            ▼
          │    ┌────────────────────────────────┐
          │    │ For each task in tasks[]:      │
-         │    │  method=spawn → Agent tool     │
-         │    │    → capture agent_id from     │
-         │    │      Agent tool result         │
+         │    │  method=spawn → spawn_agent    │
+         │    │    task_name/message/          │
+         │    │    fork_turns from task spec   │
+         │    │  → wait_agent(timeout_ms)      │
          │    │  method=send_message →         │
-         │    │    SendMessage(to=send_to);    │
+         │    │    followup_task(target=       │
+         │    │    task.target, message=...)   │
          │    │    if agent dead/unreachable   │
-         │    │    → use fallback.spawn        │
-         │    │      → capture new agent_id    │
+         │    │    → use fallback (spawn_agent)│
          │    └────────────┬───────────────────┘
          │                 │ agent completes
          │                 ▼
@@ -81,10 +82,10 @@ The orchestrator outputs a JSON task spec to stdout. Follow this loop:
 
 ## Result JSON Formats
 
-After each agent completes, extract the key result and feed it to the `on_complete.command`: save the result JSON to the `feed_file` path from the task spec (use the **Write tool**), then run the command as-is. Prefer this over piping via `echo ... | python ...` — the Bash permission matcher is whole-string prefix matching, so piped/redirected commands don't match `Bash(python *)` allow rules and get blocked in Auto/restricted modes.
+After each agent completes, extract the key result and feed it to the `on_complete.command`: save the result JSON to the `feed_file` path from the task spec (use `apply_patch` in Codex or the Write tool in Claude Code), then run the command as-is. Prefer this over piping via `echo ... | python ...` — the Bash permission matcher is whole-string prefix matching, so piped/redirected commands don't match `Bash(python *)` allow rules and get blocked in Auto/restricted modes.
 
 **All result JSON objects may include these optional fields:**
-- `agent_id`: The agent ID returned by the `Agent` tool when spawning. **Required after any spawn** — this is how the orchestrator learns the agent's ID for future `SendMessage` calls.
+- `agent_id`: The canonical task name returned by `spawn_agent` (for example `/root/analyst`) when spawning. **Required after any spawn** — this is how the orchestrator learns the agent's identity for future `followup_task` calls.
 - `agent_name`: The `agent_name` from the task spec (e.g. `"coder"`, `"checker"`, `"analyst"`). Include alongside `agent_id`.
 
 ### Coder (`--feed coder`)
@@ -100,7 +101,7 @@ After each agent completes, extract the key result and feed it to the `on_comple
 }
 ```
 
-- `agent_id` / `agent_name`: **Include after spawn** so the orchestrator can target this agent for future `SendMessage` calls
+- `agent_id` / `agent_name`: **Include after spawn** so the orchestrator can target this agent for future `followup_task` calls
 - `success`: did the coder apply the rule without errors?
 - `tests_moved`: list of "test_name: OldClass -> NewClass"
 - `errors`: any error messages (empty if success)
@@ -161,7 +162,7 @@ Your ONLY job: run the command → follow the JSON → extract result → feed t
 
 **When you see `"done"` with `phase: "finalize"`, the refactoring is complete.** The `next_steps` field tells you how to proceed: create a PR manually (branch, commit, push, draft PR), then say **"look after the CI"** or run `python orchestrator.py <file> --ci-check` to start CI monitoring. Only when you see `"done"` with `phase: "ci_done"` is the entire workflow truly finished — the `next_steps` field will tell you to mark the PR ready for review and delete cron jobs.
 
-**Important: When you spawn a new agent (method=spawn),** capture the `agent_id` from the Agent tool result and include it (along with `agent_name`) in the result JSON you feed back. This is how the orchestrator learns the agent's identity for future `SendMessage` calls. Without it, `SendMessage` will fail because it needs an agent ID, not a name.
+**Important: When you spawn a new agent (method=spawn),** capture the canonical task name from the `spawn_agent` result (for example `/root/analyst`) and include it as `agent_id` (along with `agent_name`) in the result JSON you feed back. This is how the orchestrator learns the agent's identity for future `followup_task` calls. Without it, `followup_task` will fail because it needs that canonical target, not a name.
 
 ## CI Automation (Phase 8)
 
