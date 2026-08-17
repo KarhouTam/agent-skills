@@ -282,6 +282,50 @@ class ClaudeCodeAdapter(BaseAdapter):
             )
         ]
 
+    def build_test_fix_task(
+        self,
+        file_path: str,
+        workspace: str,
+        failures: list,
+        deferred_failures: list,
+        agent_ids: dict[str, str] | None = None,
+    ) -> AgentTask:
+        items = "\n".join(
+            f"- `{f.test_name}` [{f.outcome}] ({f.device_type or '?'}): "
+            f"{f.message[:500]}"
+            for f in failures
+        )
+        deferred_text = "\n".join(
+            f"- `{d.test_name}` — {d.defer_reason or 'deferred'}"
+            for d in deferred_failures
+        ) or "_(none)_"
+        prompt = (
+            "The local test gate found failing tests in the refactored file "
+            f"`{file_path}`. For EACH failure below, decide whether it is caused "
+            "by this refactoring (fix it) or pre-existing/environmental "
+            "(defer it — do NOT fix). Fix only refactor-caused failures.\n\n"
+            "## Failing tests\n\n"
+            f"{items or '_(none)_'}\n\n"
+            "## Already deferred (do not re-judge)\n\n"
+            f"{deferred_text}\n\n"
+            "## What to do\n\n"
+            "1. For refactor-caused failures, edit the file to fix them. "
+            "Keep changes minimal and surgical.\n"
+            "2. For pre-existing/environmental failures, leave the file as-is "
+            "and mark them `deferred`.\n"
+            "3. Report one verdict per failing test: `fixed` or `deferred`."
+        )
+        coder_id = (agent_ids or {}).get("coder", "")
+        return AgentTask(
+            phase="test",
+            agent_name="coder",
+            agent_type="general-purpose",
+            prompt=prompt,
+            run_in_background=False,
+            context={"send_message_to": coder_id, "message_type": "test_failures"},
+            agent_id=coder_id,
+        )
+
     # ── new builders ────────────────────────────────────────────
 
     def build_ruleset_editor_task(self, prompt: str) -> AgentTask:

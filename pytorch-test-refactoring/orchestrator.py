@@ -56,6 +56,7 @@ from state import (
     CoderResult,
     ReviewFindings,
     RefactorState,
+    LocalTestFailure,
 )
 from utils import ANALYST_REPORT_JSON
 from agent.registry import get_adapter
@@ -293,7 +294,10 @@ def _dispatch_feed(
         if feed_type == "coder":
             result = _build_coder_result(data)
 
-            if state.current_phase == "fix":
+            if state.current_phase == "test":
+                # Local test gate — coder judged/fixed failures.
+                flow.feed_local_test_fix_result(_build_local_test_fix_result(data))
+            elif state.current_phase == "fix":
                 # Review fix round complete — verify and maybe re-review
                 flow.feed_fix_complete()
             elif state.rule_sub_phase == "fix":
@@ -384,6 +388,26 @@ def _build_review_findings(data: dict[str, Any]) -> ReviewFindings:
             findings=data.get("findings", []),
             summary=data.get("summary", ""),
         )
+
+
+def _build_local_test_fix_result(data: dict[str, Any]) -> list[LocalTestFailure]:
+    """Build the coder's per-failure verdicts from the local test fix result."""
+    verdicts = data.get("verdicts", []) if isinstance(data, dict) else []
+    built: list[LocalTestFailure] = []
+    for item in verdicts:
+        if not isinstance(item, dict):
+            continue
+        built.append(
+            LocalTestFailure(
+                test_name=item.get("test_name", ""),
+                outcome=item.get("outcome", ""),
+                device_type=item.get("device_type", ""),
+                verdict=item.get("verdict", ""),
+                fix_applied=item.get("fix_applied", ""),
+                defer_reason=item.get("defer_reason", ""),
+            )
+        )
+    return built
 
 
 # ── output emitters ───────────────────────────────────────────────

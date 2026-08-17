@@ -6,201 +6,80 @@ This file provides guidance to AI agents (Claude Code / Codex) working in this r
 
 This repo is a **harness-pluggable skill** that orchestrates refactoring PyTorch test files to decouple them from specific hardware accelerators (CUDA, MPS, XPU). Tests are split into three categories across an 8-phase workflow (7 refactoring + 1 CI automation) driven by AI agents.
 
-The skill is not run standalone: it is invoked by the host harness (Claude Code or Codex). `SKILL.md` is the entry point; `flow.py` is the state machine core; the host spawns AI agents from the JSON task spec emitted by `orchestrator.py`, selecting the adapter via `--harness {claude,codex}`.
-
-## Harness Adapter Layer (Pluggable)
-
-Harness differences are isolated in a set of adapters under `agent/`. `orchestrator.py` and the state machines (`flow.py`, `ci_ops.py`, `ingest_ops.py`) never branch on the harness name; they delegate through the `BaseAdapter` interface only.
-
-- **`agent/adapter.py`** — `BaseAdapter` abstract interface + `AgentTask` (with a `model` field). Besides the task builders (`build_analyst_task`/`build_coder_tasks`/`build_checker_task`/`build_debugger_task`/`build_feedback_*`/`build_fix_tasks`/`build_ruleset_editor_task`), it defines the harness-specific emission interface: `task_to_spec`/`ci_task_to_spec`/`ingest_task_to_spec`, `completion_note`, `ci_wait_on_complete`/`ci_done_next_steps`, `git_preflight`/`git_preflight_error`.
-- **`agent/claude_code.py`** — `ClaudeCodeAdapter` (`harness_name="claude"`). Preserves the legacy behavior: `Agent`/`SendMessage`/`CronCreate`/`Write` semantics, the `~/.claude/settings.json` preflight, and the Write-tool notes all moved in verbatim.
-- **`agent/codex.py`** — `CodexAdapter` (`harness_name="codex"`). Maps tasks to `spawn_agent`/`followup_task`/`wait_agent`, emits full-history forks so subagents inherit the parent model and context, replaces `CronCreate` with a `sleep` poll, and rebuilds the full coder role prompt on fallback re-spawn.
-- **`agent/registry.py`** — `HARNESS_ADAPTERS` registry + `get_adapter(name)`. Adding a harness = one new adapter module + one registry entry.
-- **Selection & round-trip** — `orchestrator.py`'s `--harness` (or `PYTORCH_TEST_REFACTOR_HARNESS`, default `claude`) is resolved once via `get_adapter()` and injected into the state machines; `_cmd()` writes `--harness` into every `on_complete.command`/`poll_command` so cross-process resume re-selects the same harness.
+The skill is not run standalone: it is invoked by the host harness (Claude Code or Codex). `SKILL.md` is the operational entry point; `flow.py` is the state machine core; the host spawns AI agents from the JSON task spec emitted by `orchestrator.py`, selecting the adapter via `--harness {claude,codex}`.
 
 ## Architecture
 
 ```
-orchestrator.py (CLI bridge — emits JSON task specs and accepts feed-back; --harness selects the adapter; --ci-check/--ingest-feedback/--apply-ingest)
-flow.py (RefactorFlow state machine — core orchestrator, phases 1-7)
-ci_ops.py (CIOps state machine — CI monitoring & debug, phase 8)
-ingest_ops.py (IngestOps state machine — PR feedback ingest sidecar)
-├── state.py              Pydantic models for all workflow data (signals, reports, tasks, results, CI, ingest)
-├── utils.py              Path constants, workspace helpers, refactoring rule definitions
-├── scripts/
-│   ├── assess.py         Phase 1: deterministic file analysis (class layout, test counts)
-│   ├── verify.py         Phase 5: deterministic verification checks (incl. lint check)
-│   ├── linter.py         Test-case linter: enforces hw_classification structural contracts
-│   ├── report.py         Phase 7: final markdown summary generation
-│   ├── ci.py             Phase 8: deterministic CI operations (check-runs, bot comments)
-│   ├── ingest.py         Sidecar: deterministic PR feedback harvest + findings writer
-│   └── logger.py         Structured JSONL audit log + status.json snapshot
-├── agent/
-│   ├── adapter.py        Abstract BaseAdapter harness interface + AgentTask model
-│   ├── claude_code.py    ClaudeCodeAdapter (Claude task building + spec/note/cron/preflight emission)
-│   ├── codex.py          CodexAdapter (Codex tool mapping + full-history forks + poll cron)
-│   ├── registry.py       HARNESS_ADAPTERS registry + get_adapter()
-│   ├── prompts/          Markdown prompt templates (analyst.md, coder.md, checker.md, debugger.md, feedback_triage.md, feedback_analyst.md)
-│   └── skills/           Sub-skills referenced by agents (classify-test-files, refactor-test-decoupling, review-test-refactoring, ci-automation)
-└── reference/
-    ├── device_api_catalog.yaml      Authoritative API classification (Category A/B/C)
-    ├── classification_guide.md      How to look up API categories
-    └── device_specific_features_report.md
+orchestrator.py  CLI bridge — emits JSON task specs, accepts feed-back; --harness selects the adapter; --ci-check / --ingest-feedback / --apply-ingest
+flow.py          RefactorFlow state machine — core orchestrator, phases 1-7
+ci_ops.py        CIOps state machine — CI monitoring & debug, phase 8
+ingest_ops.py    IngestOps state machine — PR feedback ingest sidecar
+├── state.py     Pydantic models for all workflow data (signals, reports, tasks, results, CI, ingest)
+├── utils.py     Path constants, workspace helpers, refactoring rule definitions
+├── scripts/     Deterministic steps (assess, verify, linter, report, ci, ingest, local_test, logger)
+├── agent/       Harness adapters, AI agent prompt templates (prompts/), sub-skills (skills/)
+└── reference/   Authoritative API classification (device_api_catalog.yaml, classification_guide.md)
 ```
 
-### Dependency flow
+The three state machines share one pattern: deterministic `scripts/*` steps do the mechanical work (analysis, verification, CI, harvesting); AI agents do the judgment (classification, coding, review, debugging). Each machine stops on a **flow signal** (`spawn_single` / `send_message` / `relay_findings` / `waiting` / `done`) and lets the selected harness adapter translate that signal into harness-specific actions.
 
-```
-flow.py → state.py (data models)
-flow.py → utils.py (constants, workspace paths)
-flow.py → scripts/assess.py (Phase 1)
-flow.py → scripts/verify.py (Phase 5)
-flow.py → scripts/linter.py (test-case lint gate)
-flow.py → scripts/report.py (Phase 7)
-flow.py → scripts/logger.py (audit logging)
-flow.py → agent/adapter.py (abstract base)
-flow.py → agent/registry.py → agent/{claude_code,codex}.py (harness adapter, selected via --harness)
-ci_ops.py → state.py (data models)
-ci_ops.py → scripts/ci.py (Phase 8 deterministic ops)
-ci_ops.py → agent/adapter.py (abstract base)
-ci_ops.py → agent/registry.py → agent/{claude_code,codex}.py (harness adapter)
-ingest_ops.py → state.py (data models)
-ingest_ops.py → scripts/ingest.py (harvest, finalize, findings writer)
-ingest_ops.py → agent/adapter.py (abstract base)
-ingest_ops.py → agent/registry.py → agent/{claude_code,codex}.py (harness adapter)
-```
+### Harness adapter layer
+
+Harness differences are isolated in `agent/`. `orchestrator.py` and the state machines never branch on the harness name — they delegate through the `BaseAdapter` interface only.
+
+- `agent/adapter.py` — `BaseAdapter` interface + `AgentTask`; task builders and the harness-specific emission interface (`task_to_spec`/`ci_task_to_spec`/`ingest_task_to_spec`, `completion_note`, `ci_wait_on_complete`/`ci_done_next_steps`, `git_preflight`/`git_preflight_error`).
+- `agent/claude_code.py` — `ClaudeCodeAdapter` (`harness_name="claude"`): `Agent`/`SendMessage`/`CronCreate`/`Write` semantics.
+- `agent/codex.py` — `CodexAdapter` (`harness_name="codex"`): `spawn_agent`/`followup_task`/`wait_agent`, full-history forks, `sleep` poll instead of cron.
+- `agent/registry.py` — `HARNESS_ADAPTERS` registry + `get_adapter(name)`. Adding a harness = one adapter module + one registry entry.
+
+Harness selection (`--harness` or `PYTORCH_TEST_REFACTOR_HARNESS`, default `claude`) is resolved once via `get_adapter()` and injected into the state machines; `_cmd()` writes `--harness` into every `on_complete.command`/`poll_command` so cross-process resume re-selects the same harness.
 
 ## Core concepts
 
-### Three strategies
+Tests are split into three strategies (full decision framework in `agent/skills/refactor-test-decoupling/SKILL.md`):
 
-| Strategy | Class naming | Mechanism | hw_classification | When |
-|----------|-------------|-----------|-------------------|------|
-| S1 | `TestFoo` (original name) | `@instantiate_parametrized_tests` or `TestCase` | `HardwareClassification.GENERIC` (or `CPU` if `instantiate_device_type_tests(only_for="cpu")` for `@ops`) | No device dependency, pure CPU logic |
-| S2 | `TestFoo` or `TestFooDevice` | `instantiate_device_type_tests()` | `HardwareClassification.ACCELERATOR` | Uses `device` parameter with generic accelerator APIs |
-| S3 | `TestFoo` (original name — `instantiate_device_type_tests` appends the device) | `instantiate_device_type_tests(only_for="<device>")` | `HardwareClassification.CUDA` / `MPS` / `XPU` per device | Requires truly device-specific APIs (NCCL, cuDNN, etc.) |
+| Strategy | Mechanism | hw_classification | When |
+|----------|-----------|-------------------|------|
+| S1 | `@instantiate_parametrized_tests` or `TestCase` | `GENERIC` (or `CPU`) | No device dependency, pure CPU logic |
+| S2 | `instantiate_device_type_tests()` | `ACCELERATOR` | Uses `device` param with generic accelerator APIs |
+| S3 | `instantiate_device_type_tests(only_for="<device>")` | `CUDA`/`MPS`/`XPU` | Truly device-specific APIs (Category C) |
 
-**Import:** `from torch.testing._internal.common_utils import HardwareClassification`
-
-**Class renaming is OPTIONAL.** The future `hw_classification` member on TestCase (not yet landed) will drive classification, so class names are not the primary discriminator. The agent decides whether to rename based on external reference impact: if the class has many DecorateInfo/dynamo_skip references, keep the original name to avoid breaking them. See `agent/skills/refactor-test-decoupling/SKILL.md` for the full decision framework.
-
+**Import:** `from torch.testing._internal.common_utils import HardwareClassification`. Class renaming is OPTIONAL — the future `hw_classification` member drives classification; rename only when external reference impact (DecorateInfo, dynamo skips) is low.
 
 ### Device API classification (first match wins)
 
-- **Category A**: Has `torch.accelerator.*` equivalent → Strategy 2 (replace with accelerator API)
-- **Category B**: Cross-backend concept, no wrapper yet (Stream, Event) → Strategy 2 (keep as-is)
-- **Category C**: Truly device-specific (NCCL, NVTX, cuDNN, GDS, Jiterator, Metal shaders) → Strategy 3
+- **Category A** — has `torch.accelerator.*` equivalent → S2
+- **Category B** — cross-backend concept, no wrapper yet (Stream, Event) → S2
+- **Category C** — truly device-specific (NCCL, NVTX, cuDNN, GDS, Jiterator, Metal shaders) → S3
 
-### Seven phases
+The authoritative catalog is `reference/device_api_catalog.yaml` (lookup guide: `reference/classification_guide.md`).
 
-1. **Assess** — deterministic: file stats, class layout, coder count estimate
-2. **Analyze** — AI agent (analyst): classify every test, identify stale imports, review skip decorators
-3. **Distribute** — deterministic: convert strategy assignments into per-rule coder tasks
-4. **Code + Check** — AI loop: coder applies one rule → checker verifies → next rule (single coder, per-rule iteration)
-5. **Verify** — deterministic: automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, import audit, lint). A **lint hard gate** runs after verify — error-severity linter messages are synthesized into findings and routed to the coder to fix before the final review (max 3 retries).
-6. **Final Review** — AI agent (checker): mandatory full-file quality review; findings → coder fix → re-verify (max 3 retries)
-7. **Finalize** — deterministic: generate `final_summary.md`
-8. **CI Ops** — user creates PR manually, then triggers CI monitoring (via "look after the CI" or --ci-check). The state machine cron-monitors CI, classifies failures, spawns a debugger agent to fix regressions, pushes fixes, and marks the PR ready (see `agent/skills/ci-automation/SKILL.md`)
+### Phases
 
-### FlowSignal mechanism
+1. **Assess** — deterministic file analysis (stats, class layout, coder count)
+2. **Analyze** — AI analyst classifies every test, flags stale imports/skips
+3. **Distribute** — deterministic: strategy assignments → per-rule coder tasks
+4. **Code + Check** — AI loop: coder applies one rule → checker verifies → next rule
+5. **Verify** — deterministic checks (syntax, test count, class structure, refs, lint hard gate)
+6. **Final Review** — AI checker full-file review (mandatory) → findings → fix
+6.5 **Local test gate** — run the refactored file, relay failures to coder (fix-or-defer)
+7. **Finalize** — generate `final_summary.md`
+8. **CI Ops** — cron-monitor CI, debugger fixes regressions, marks PR ready
 
-The state machine stops on these signals and lets the selected harness adapter handle them (the action column below shows Claude Code; Codex maps the same signals to `spawn_agent`/`followup_task`/`wait_agent` via `CodexAdapter`, following the spec's `tool`/`recovery`/`fallback` fields):
+## Usage
 
-| Signal | When | Claude Code action |
-|--------|------|-------------------|
-| `SPAWN_SINGLE` | Need 1 new AI agent | Spawn analyst/coder/checker via Agent tool; **capture agent_id from result**; include `agent_id` + `agent_name` in the JSON piped to `--feed`; call `feed_*_result()` |
-| `SEND_MESSAGE` | Follow-up to existing agent | `followup_task(target=agent_id)` to resume the stopped agent (uses registered agent ID, not name); if agent unreachable → fallback spawn + register new ID; call `feed_coder_result()` |
-| `RELAY_FINDINGS` | Review found issues | Forward findings to coder via `followup_task(target=coder_agent_id)`; call `feed_fix_complete()` |
-| `WAITING` | CI still running | Schedule durable cron via CronCreate; session exits |
-| `DONE` | Phase complete | Call `flow.run()` to continue |
+The operational loop, JSON feed formats, CI automation, and feedback ingest are documented in `SKILL.md`. Entry points:
 
-## Feedback Ingest (sidecar)
+```bash
+python orchestrator.py <file> --harness <claude|codex>              # refactor a test file (phases 1-7)
+python orchestrator.py <file> --harness <claude|codex> --ci-check   # CI monitoring (phase 8)
+python orchestrator.py --harness <claude|codex> --ingest-feedback   # harvest PR feedback (sidecar)
+python orchestrator.py <file> --harness <claude|codex> --resume     # resume after interruption
+```
 
-An independent sidecar that harvests reviewer feedback from @KarhouTam's merged `[Test]` PRs and turns it into ruleset edits after human approval. Runs outside the 8-phase refactoring workflow — mirrors the `CIOps` pattern (deterministic fetch layer + a `*Ops` state machine + AI agent prompts).
-
-**Phases:** `harvest` (deterministic gh fetch + reply-thread filter) → `triage` (AI: relevance + target layer + dedup) → `draft` (AI: per-layer intent specs) → `done` (findings written).
-
-**Commands:**
-- `python orchestrator.py --ingest-feedback` — harvest + triage + draft (cron-driven)
-- `python orchestrator.py --apply-ingest <findings.md>` — apply approved findings after human review
-
-**Harvest sources (two fetches only):**
-- Inline review comments: `GET /repos/pytorch/pytorch/pulls/{pr}/comments` — keep only comments in **replied threads** (the comment has a reply, OR is itself a reply).
-- `claude[bot]` summaries: `GET /repos/pytorch/pytorch/issues/{pr}/comments` — keep only `user.login == "claude[bot]"`. These are detailed CI-failure/coverage analyses (the "Claude finished @X's task" prefix hides a full root-cause body).
-
-**Correctness gate:** only merged-PR comments are harvested. PyTorch's merge bot closes the PR (`state=closed`, `merged=false`) and attaches a `Merged` label, so the discriminator is the **`Merged` label**, not `state=merged`. Discovery uses `gh search prs --json` (the `search/issues` REST endpoint rejects `gh api search/issues -f q=...` with HTTP 404).
-
-**Approval flow:** the analyst drafts findings into `agent_space/ingest/findings/PR-<n>.md`; nothing edits the ruleset until a human marks findings `[x] Approved` and runs `--apply-ingest`, which spawns a `ruleset_editor` agent and appends a CHANGELOG entry.
-
-**State home:** `agent_space/ingest/` (NOT per-refactor `agent_space/refactor/{file}/`). `state.json` holds the per-PR timestamp cursor + processed comment ids; `flow_state.json` holds the transient triage→draft position and is cleared at `done`; reviewable findings live in `findings/`. Comments are marked processed only at `finalize()` (not at harvest) so the triage→draft handoff survives across orchestrator invocations.
+Each refactoring writes its workspace to `agent_space/refactor/{file_name}/` (assessment, reports, tasks, verification, findings, `final_summary.md`, audit/status/flow-state files); the ingest sidecar uses `agent_space/ingest/`.
 
 ## Changelog
 
-Workflow evolution and evaluation history are documented in [CHANGELOG.md](CHANGELOG.md). Before modifying agent prompts or verification logic, read the latest entries — they record classification accuracy trends, known gaps, and the rationale behind each heuristic iteration.
-
-Key evaluation runs:
-- **2026-08-03**: 80.0% classification accuracy on `test_reductions.py` (G6: `apply_` carve-out still needed)
-- **2026-07-31**: Heuristic precision fixes dropped error rate from 23% → estimated <5%
-- **2026-07-31**: Class split support added (previously 0% coverage)
-- **2026-07-28**: 17 improvements from 10 PR reviewer feedback rounds
-
-## Key rules (non-negotiable)
-
-- **KEEP blacklist skips**: `@skipXPU`, `@skipCUDAIf`, `@skipMPS`, `@skipMeta` — these are intentional and must be preserved. `@onlyNativeDeviceTypes` / `@onlyNativeDeviceTypesAnd` are redundant and are REMOVED.
-- **ENLARGE whitelist**: `@onlyCUDA` → `@onlyAccelerator`; `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator`; `@unittest.skipIf(not TEST_CUDA)` → `@onlyAccelerator`
-- **`@onlyAccelerator` is a METHOD decorator only**, never a class decorator — using it on a class breaks `instantiate_device_type_tests`
-- **"CUDA as device" vs "CUDA as feature"**: If replacing `"cuda"` with `"mps"`/`"xpu"` still makes logical sense, it's Strategy 2 (CUDA was just the device). If the test uses Category C APIs, it's Strategy 3.
-- **Classification note**: An `if device_type == "<backend>"` conditional does NOT make a test S3 — classify based on Category C API calls only.
-- **Phase 6 is mandatory** — the checker always does a full-file review even if per-rule checks passed
-- **Test count must be preserved** — verification check #2 fails on mismatch
-
-## Workspace
-
-Each refactoring creates `agent_space/refactor/{file_name}/`:
-
-```
-assessment.json       # Phase 1 output
-analyst_report.md     # Phase 2 human-readable
-analyst_report.json   # Phase 2 structured
-coder_tasks.json      # Phase 3 task allocation
-verification.json     # Phase 5 results
-review_findings.json  # Phase 6 findings
-final_summary.md      # Phase 7 report
-audit.jsonl           # Append-only event log
-status.json           # Current state snapshot (for team coordination)
-flow_state.json       # Transient state-machine position (phase, rule_index, agent_ids, etc.)
-ci_state.json         # CI automation state (PR number, branch, fix history, cron job ID)
-```
-
-## Usage pattern
-
-The preferred entry point is the CLI: `python orchestrator.py <file> --harness <claude|codex>` (emits the JSON task spec and accepts feed-back; see SKILL.md). To drive the state machine directly, select the adapter by harness:
-
-```python
-from agent.registry import get_adapter
-from flow import RefactorFlow
-
-flow = RefactorFlow(adapter=get_adapter("codex"))  # or get_adapter("claude")
-state = flow.run("test/test_ops.py")
-
-while state.signal.value != "done":
-    tasks = flow.get_pending_tasks()
-    if state.signal.value == "spawn_single":
-        # flow.adapter.task_to_spec(...) yields the harness-executable spec; run it, then:
-        flow.feed_agent_spawned(task.agent_name, agent_id)  # register ID for later resume
-        if state.current_phase == "analyze":
-            flow.feed_analyst_result(result)
-        elif state.current_phase == "code":
-            flow.feed_coder_result("coder", result)
-        elif state.current_phase == "review":
-            flow.feed_review_findings(result)
-    elif state.signal.value == "send_message":
-        result = ...  # message task.agent_id, or fallback re-spawn + register the new ID
-        flow.feed_coder_result("coder", result)
-    elif state.signal.value == "relay_findings":
-        send_findings_to_coder(coder_agent_id)
-        flow.feed_fix_complete()
-    state = flow.run(state.file_path)
-```
-
-Cross-process resume: `flow.run("test_ops.py", resume=True)` loads artifacts from the workspace; the equivalent CLI is `python orchestrator.py test_ops.py --harness codex --resume`.
+Workflow evolution and evaluation history live in [CHANGELOG.md](CHANGELOG.md). Read the latest entries before modifying agent prompts or verification logic; update it (in Chinese) after new features, fixes, or workflow improvements.

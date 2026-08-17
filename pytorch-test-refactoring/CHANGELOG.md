@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-08-17 — 本地测试门禁（Phase 6.5）
+
+在 Phase 6 最终评审之后、Phase 7 finalize 之前新增确定性本地测试门禁：默认在 CPU 上
+运行整个重构后的测试文件（CUDA 可用时同一整文件运行自动覆盖 CUDA），解析 JUnit XML，
+把 FAIL/ERROR 交给 coder 判断 `fixed`（refactor 导致）或 `deferred`（pre-existing/
+environmental），重跑直到没有非预期失败（有界软失败）。
+
+- **解释器解析**：`scripts/local_test.py` 先解析可用解释器——conda env（如
+  `pytorch-dev-cpu`）、仓库内 venv，最后 `sys.executable`；可用
+  `PYTORCH_TEST_REFACTOR_PYTHON` 覆盖，并用 `import torch` 验证候选。
+- **整文件运行 + 解析**：`python test/<file> --use-pytest --junitxml=...` 单次运行即
+  覆盖 CPU/CUDA；解析 JUnit XML 后 FAIL/ERROR 驱动修复，SKIP/xfail 记录，
+  XPASS 记为 unexpected-success 不阻塞；整次运行 timeout/OOM/segfault/import 归为
+  environmental，重试一次后继续。
+- **修复循环**：`flow.py` 新增 Phase 6.5，运行 → 把失败转发给 coder 判断
+  `fixed`/`deferred` → 重跑；`deferred_failures` 持久化并在后续轮次中排除；
+  `MAX_RETRIES=3` 软失败。
+- **状态与产物**：`state.py` 新增 `LocalTestResult`/`LocalTestFailure` 及
+  `local_test`/`deferred_failures`/`test_sub_phase`/`test_retry_count`；工作区新增
+  `local_test.json`。
+- **适配器/编排**：`BaseAdapter.build_test_fix_task` + `claude_code.py` 实现；
+  `orchestrator.py` 在 `--feed coder` 的 test 阶段解析 `verdicts` 并路由到
+  `feed_local_test_fix_result`。
+- **报告/文档/测试**：`report.py` 增加 Local Test 段落；`SKILL.md`/`CLAUDE.md` 更新
+  phase 列表、工作区产物与 coder 回传格式；新增 `tests/test_local_test.py`（6 个），
+  全套 37 个测试通过。实测 `test_tensor_creation_ops.py`：681 用例、587 通过、
+  94 跳过、0 失败。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `scripts/local_test.py` | 新增确定性 runner（解释器解析、pytest+JUnit 运行、XML 解析） |
+| `flow.py` | 新增 Phase 6.5 门禁与 coder 修复循环、`local_test` 持久化 |
+| `state.py` | 新增 `LocalTestResult`/`LocalTestFailure` 及 `RefactorState` 字段 |
+| `utils.py` | 新增 `LOCAL_TEST_FILE` 常量 |
+| `agent/adapter.py`、`agent/claude_code.py` | 新增 `build_test_fix_task` |
+| `orchestrator.py` | test 阶段 coder 回传路由 + verdicts 构建 |
+| `scripts/report.py` | 新增 Local Test 摘要段落 |
+| `SKILL.md`、`CLAUDE.md` | phase 列表、工作区产物、coder 回传格式文档 |
+| `tests/test_local_test.py` | 门禁解析与修复循环测试 |
+
 ## 2026-08-16 — Codex 适配器修复：恢复子 agent 上下文传递
 
 修复 Codex 运行环境下子 agent 收不到任务上下文的问题。旧的 Codex spec 使用

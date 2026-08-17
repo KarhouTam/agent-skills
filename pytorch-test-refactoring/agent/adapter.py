@@ -84,6 +84,17 @@ class BaseAdapter(ABC):
     ) -> AgentTask: ...
 
     @abstractmethod
+    def build_test_fix_task(
+        self,
+        file_path: str,
+        workspace: str,
+        failures: list,
+        deferred_failures: list,
+        agent_ids: dict[str, str] | None = None,
+    ) -> AgentTask:
+        """Build a follow-up to the coder to judge/fix local test failures."""
+
+    @abstractmethod
     def build_debugger_task(
         self,
         file_path: str,

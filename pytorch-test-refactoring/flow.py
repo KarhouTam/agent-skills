@@ -24,6 +24,8 @@ from state import (
     CoderResult,
     VerificationResult,
     ReviewFinding,
+    LocalTestResult,
+    LocalTestFailure,
 )
 from utils import (
     get_workspace,
@@ -32,6 +34,7 @@ from utils import (
     ASSESSMENT_FILE,
     VERIFICATION_FILE,
     REVIEW_FINDINGS_FILE,
+    LOCAL_TEST_FILE,
     REFACTOR_RULES,
     compute_applicable_rules,
 )
@@ -40,6 +43,7 @@ from scripts.verify import verify
 from scripts.report import generate_report
 from scripts.logger import RefactorLogger
 from scripts.linter import check_file, LintSeverity
+from scripts.local_test import run_local_tests
 from agent.adapter import BaseAdapter
 from agent.claude_code import ClaudeCodeAdapter
 
@@ -74,6 +78,11 @@ def _finding_matches_rule(finding, rule_id: str) -> bool:
     if rule_id == "cleanup":
         return cat in ("stale_import", "stale_symbol")
     return False
+
+
+def _is_deferred(failure: LocalTestFailure, deferred: list[LocalTestFailure]) -> bool:
+    """Return True if a failure has already been deferred by the coder."""
+    return any(d.test_name == failure.test_name for d in deferred)
 
 
 class RefactorFlow:
@@ -172,6 +181,11 @@ class RefactorFlow:
             "retry_count": self.state.retry_count,
             "signal": self.state.signal.value,
             "agent_ids": self.state.agent_ids,
+            "test_sub_phase": self.state.test_sub_phase,
+            "test_retry_count": self.state.test_retry_count,
+            "deferred_failures": [
+                f.model_dump() for f in self.state.deferred_failures
+            ],
         }
         try:
             (ws / self._FLOW_STATE_FILE).write_text(
@@ -209,6 +223,14 @@ class RefactorFlow:
             self.state.retry_count = data.get("retry_count", 0)
         if not self.state.agent_ids:
             self.state.agent_ids = data.get("agent_ids", {})
+        if self.state.test_sub_phase == "run":
+            self.state.test_sub_phase = data.get("test_sub_phase", "run")
+        if self.state.test_retry_count == 0:
+            self.state.test_retry_count = data.get("test_retry_count", 0)
+        if not self.state.deferred_failures:
+            self.state.deferred_failures = [
+                LocalTestFailure(**f) for f in data.get("deferred_failures", [])
+            ]
 
     # ── End flow state persistence ─────────────────────────────────
 
@@ -284,6 +306,17 @@ class RefactorFlow:
                 try:
                     self.state.review_findings = ReviewFindings.model_validate_json(
                         review_path.read_text()
+                    )
+                except Exception:
+                    pass
+
+        # Local test result
+        if self.state.local_test is None:
+            local_test_path = ws / LOCAL_TEST_FILE
+            if local_test_path.exists():
+                try:
+                    self.state.local_test = LocalTestResult.model_validate_json(
+                        local_test_path.read_text()
                     )
                 except Exception:
                     pass
@@ -426,6 +459,28 @@ class RefactorFlow:
                 status="ok" if self.state.review_findings.all_clear else "issues_found",
                 all_clear=self.state.review_findings.all_clear,
                 findings_count=len(self.state.review_findings.findings),
+            )
+
+        # Phase 6.5: Local test gate (after review, before finalize)
+        if (
+            self.state.review_findings is not None
+            and self.state.current_phase != "fix"
+            and self.state.test_sub_phase != "done"
+        ):
+            self.log.phase_start("test")
+            self._phase_local_test()
+            if self.state.signal != FlowSignal.DONE:
+                tasks = self.get_pending_tasks()
+                self.log.signal(self.state.signal.value, "test", tasks)
+                return
+            local_test = self.state.local_test
+            self.log.phase_end(
+                "test",
+                status=self._local_test_status(),
+                total=getattr(local_test, "total", 0),
+                failures=(getattr(local_test, "failed", 0) + getattr(local_test, "errored", 0)),
+                skipped=getattr(local_test, "skipped", 0),
+                whole_run_failure=getattr(local_test, "whole_run_failure", ""),
             )
 
         # Phase 7: Finalize (no AI)
@@ -650,6 +705,45 @@ class RefactorFlow:
                 )
             self.state.signal = FlowSignal.DONE
 
+    def feed_local_test_fix_result(self, verdicts: list[LocalTestFailure]):
+        """Called after the coder judges/fixes the local test failures."""
+        self._validate_phase(
+            "test", self.state.current_phase, "feed_local_test_fix_result"
+        )
+        self._validate_sub_phase(
+            "fix", self.state.test_sub_phase, "feed_local_test_fix_result"
+        )
+
+        deferred_names = {d.test_name for d in self.state.deferred_failures}
+        for verdict in verdicts:
+            if verdict.verdict == "deferred" and verdict.test_name not in deferred_names:
+                self.state.deferred_failures.append(verdict)
+                deferred_names.add(verdict.test_name)
+
+            # Merge the verdict into the latest run for reporting.
+            if self.state.local_test:
+                for failure in self.state.local_test.failures:
+                    if failure.test_name == verdict.test_name:
+                        failure.verdict = verdict.verdict
+                        failure.fix_applied = verdict.fix_applied
+                        failure.defer_reason = verdict.defer_reason
+
+        self.state.test_retry_count += 1
+        self.state.test_sub_phase = "run"
+        self.state.signal = FlowSignal.DONE
+
+        if self.log:
+            deferred_count = sum(
+                1 for v in verdicts if v.verdict == "deferred"
+            )
+            fixed_count = len(verdicts) - deferred_count
+            self.log.agent_completed(
+                "test",
+                "coder",
+                success=True,
+                summary=f"{fixed_count} fixed, {deferred_count} deferred",
+            )
+
     # --- Lint gate helpers ---
 
     def _collect_lint_errors(self) -> list:
@@ -864,6 +958,70 @@ class RefactorFlow:
         )
         self.state.signal = FlowSignal.SPAWN_SINGLE
 
+    def _phase_local_test(self):
+        """Run the post-review local test gate (deterministic + coder fix loop)."""
+        self.state.current_phase = "test"
+        if self.state.test_sub_phase == "run":
+            self._run_local_test_once()
+        elif self.state.test_sub_phase == "fix":
+            # Re-emit the coder relay on resume / re-entry.
+            self.state.signal = FlowSignal.SEND_MESSAGE
+
+    def _run_local_test_once(self):
+        result = run_local_tests(self.state.file_path, self.state.workspace)
+        self.state.local_test = result
+        self._persist_local_test()
+
+        # Whole-run failure (timeout/oom/segfault/import) is environmental:
+        # record it and continue — there is nothing the coder can fix.
+        if result.whole_run_failure:
+            self.state.test_sub_phase = "done"
+            self.state.signal = FlowSignal.DONE
+            return
+
+        actionable = [
+            f
+            for f in result.failures
+            if not _is_deferred(f, self.state.deferred_failures)
+        ]
+        if not actionable:
+            self.state.test_sub_phase = "done"
+            self.state.signal = FlowSignal.DONE
+            return
+
+        if self.state.test_retry_count >= self.MAX_RETRIES:
+            # Soft-fail: budget exhausted with unresolved refactor-caused
+            # failures. Record them and let finalize/summary surface them.
+            self.state.test_sub_phase = "done"
+            self.state.signal = FlowSignal.DONE
+            return
+
+        self.state.test_sub_phase = "fix"
+        self.state.signal = FlowSignal.SEND_MESSAGE
+
+    def _persist_local_test(self):
+        if self.state.workspace is None or self.state.local_test is None:
+            return
+        try:
+            (self.state.workspace / LOCAL_TEST_FILE).write_text(
+                self.state.local_test.model_dump_json(indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def _local_test_status(self) -> str:
+        local_test = self.state.local_test
+        if not local_test:
+            return "skipped"
+        if local_test.whole_run_failure:
+            return "environmental"
+        actionable = [
+            f
+            for f in local_test.failures
+            if not _is_deferred(f, self.state.deferred_failures)
+        ]
+        return "ok" if not actionable else "failed"
+
     def _phase_finalize(self):
         self.state.current_phase = "finalize"
         self.state.final_summary = generate_report(self.state)
@@ -991,6 +1149,24 @@ class RefactorFlow:
                     self.state.review_findings.findings,
                     agent_ids=self.state.agent_ids,
                 )
+            return []
+
+        elif self.state.current_phase == "test":
+            if self.state.test_sub_phase == "fix" and self.state.local_test:
+                actionable = [
+                    f
+                    for f in self.state.local_test.failures
+                    if not _is_deferred(f, self.state.deferred_failures)
+                ]
+                return [
+                    self.adapter.build_test_fix_task(
+                        file_path,
+                        workspace,
+                        actionable,
+                        self.state.deferred_failures,
+                        agent_ids=self.state.agent_ids,
+                    )
+                ]
             return []
 
         return []

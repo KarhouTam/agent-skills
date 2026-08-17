@@ -107,6 +107,33 @@ After each agent completes, extract the key result and feed it to the `on_comple
 - `errors`: any error messages (empty if success)
 - Parse the coder's output: look for "error"/"success" indicators, test movement summary
 
+### Coder — local test fix (`--feed coder` when phase=test)
+
+The coder receives the local test failures and returns one verdict per failure
+— `fixed` (refactor-caused, fixed) or `deferred` (pre-existing/environmental):
+
+```json
+{
+  "agent_name": "coder",
+  "verdicts": [
+    {
+      "test_name": "test_foreach.TestFooDeviceCPU.test_foo",
+      "verdict": "fixed",
+      "fix_applied": "removed incorrect @onlyAccelerator"
+    },
+    {
+      "test_name": "test_foreach.TestOther.test_bar",
+      "verdict": "deferred",
+      "defer_reason": "pre-existing CPU failure unrelated to the refactor"
+    }
+  ]
+}
+```
+
+- `test_name` / `outcome` / `device_type` come from the failure list the coder received
+- `verdict`: exactly `"fixed"` or `"deferred"` per failure
+- `fix_applied` (for `fixed`) and `defer_reason` (for `deferred`) are free text
+
 ### Checker — per-rule (`--feed checker` when phase=code)
 
 ```json
@@ -220,6 +247,7 @@ agent_space/refactor/{file_name}/
 ├── coder_tasks.json
 ├── verification.json
 ├── review_findings.json
+├── local_test.json
 ├── final_summary.md
 ├── audit.jsonl
 ├── status.json
@@ -242,6 +270,7 @@ The orchestrator loads all artifacts from the workspace and continues from where
 4. **Code + Check** — AI loop: coder applies one rule → checker verifies → next rule (single coder, per-rule iteration, max 3 fix retries)
 5. **Verify** — deterministic: automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, import audit, lint). A **lint hard gate** runs after verify — if the test linter reports error-severity messages, the flow synthesizes findings and routes them to the coder to fix before the final review (max 3 retries).
 6. **Final Review** — AI agent (checker): **mandatory** full-file quality review; findings → coder fix → re-verify (max 3 retries)
+6.5 **Local test gate** — deterministic: run the whole refactored file on CPU (and CUDA when available) via `--use-pytest --junitxml`, parse JUnit XML, relay `FAIL`/`ERROR` to the coder to fix-or-defer (pre-existing/environmental), re-run, bounded soft-fail at 3 rounds
 7. **Finalize** — deterministic: generate `final_summary.md`
 8. **CI Ops** — user creates PR manually, then triggers CI monitoring (via "look after the CI" or `--ci-check`). The state machine cron-monitors CI, classifies failures, spawns a debugger agent to fix regressions, pushes fixes, and marks the PR ready. See CI Automation section above.
 

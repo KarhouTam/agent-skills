@@ -157,6 +157,39 @@ class ReviewFindings(BaseModel):
     summary: str = ""
 
 
+class LocalTestFailure(BaseModel):
+    """A single FAIL/ERROR from a local test run."""
+
+    test_name: str  # pytest node id, e.g. test_foreach.TestFooDeviceCPU.test_x
+    outcome: str = "FAIL"  # "FAIL" | "ERROR"
+    message: str = ""  # traceback excerpt
+    device_type: str = ""  # best-effort: cpu | cuda | mps | xpu
+    verdict: str = ""  # "fixed" | "deferred" (set by coder during the fix loop)
+    fix_applied: str = ""  # description when verdict=fixed
+    defer_reason: str = ""  # reason when verdict=deferred
+
+
+class LocalTestResult(BaseModel):
+    """Result of one whole-file local test run."""
+
+    file_path: str = ""
+    command: str = ""
+    interpreter: str = ""
+    timeout: int = 0
+    duration: float = 0
+    exit_code: int = 0
+    whole_run_failure: str = ""  # timeout | import | oom | segfault | no_report
+    accelerator_available: bool = False
+    total: int = 0
+    passed: int = 0
+    failed: int = 0
+    errored: int = 0
+    skipped: int = 0
+    expected_failures: int = 0
+    unexpected_successes: int = 0
+    failures: list[LocalTestFailure] = []
+
+
 # ── CI Automation models (Phase 8) ──────────────────────────────────
 
 
@@ -238,6 +271,10 @@ class RefactorState(BaseModel):
     review_findings: Optional[ReviewFindings] = None
     final_summary: Optional[str] = None
     ci_state: Optional[CIState] = None
+    local_test: Optional[LocalTestResult] = None
+    deferred_failures: list[LocalTestFailure] = []
+    test_sub_phase: str = "run"  # "run" | "fix" | "done"
+    test_retry_count: int = 0  # refactor-caused fix attempts (independent of review)
 
     current_phase: str = "assess"
     retry_count: int = 0
