@@ -91,7 +91,7 @@ def test_feed_type_for_test_phase():
 
 def test_local_test_fix_loop(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    workspace = tmp_path / "agent_space" / "refactor" / "test_foo"
+    workspace = tmp_path / "agent_space" / "refactor" / "core" / "test_foo"
     workspace.mkdir(parents=True)
 
     runs = {"count": 0}

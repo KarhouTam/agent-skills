@@ -5,6 +5,11 @@ from pathlib import Path
 
 REFACTOR_WORKSPACE_ROOT = Path("agent_space/refactor")
 
+REFERENCE_ROOT = Path(__file__).resolve().parent / "reference"
+SUPPORTED_FIELDS = ("core", "distributed", "graph")
+NON_CORE_FIELDS = ("distributed", "graph")
+FIELD_TEST_LIST_FILE = "test_list.txt"
+
 ASSESSMENT_FILE = "assessment.json"
 ANALYST_REPORT_MD = "analyst_report.md"
 ANALYST_REPORT_JSON = "analyst_report.json"
@@ -70,12 +75,20 @@ STRATEGY_TO_HW_CLASSIFICATION: dict[str, str] = {
 }
 
 
-def compute_applicable_rules(strategy_assignments: dict[str, str]) -> list[str]:
+def compute_applicable_rules(
+    strategy_assignments: dict[str, str], field: str = "core"
+) -> list[str]:
     """Return list of rule IDs that apply based on strategy assignments.
 
     Always includes 'cleanup' (import/external-ref hygiene is always needed).
     Includes strategy_N when at least one test is assigned to that strategy.
+
+    Non-core fields use the field-agnostic baseline: cleanup only, until a
+    field-specific refactoring profile is added.
     """
+    if field != "core":
+        return ["cleanup"]
+
     rules: list[str] = []
     strategies = set(strategy_assignments.values())
     if "Strategy1" in strategies:
@@ -88,16 +101,79 @@ def compute_applicable_rules(strategy_assignments: dict[str, str]) -> list[str]:
     return rules
 
 
-def get_workspace(file_name: str) -> Path:
+def normalize_test_path(file_path: str) -> str:
+    """Normalize a test path to the repo-relative form used by field lists."""
+    path = Path(file_path)
+    if not path.is_absolute():
+        return path.as_posix()
+
+    try:
+        git_root = Path(run_git(path.parent, "rev-parse", "--show-toplevel").strip())
+        return path.relative_to(git_root).as_posix()
+    except Exception:
+        pass
+
+    try:
+        return path.relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _read_field_test_paths(field: str) -> set[str]:
+    """Read and normalize one field's detection manifest."""
+    list_path = REFERENCE_ROOT / field / FIELD_TEST_LIST_FILE
+    if not list_path.exists():
+        return set()
+
+    paths: set[str] = set()
+    for raw in list_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        paths.add(normalize_test_path(line))
+    return paths
+
+
+def resolve_field(file_path: str) -> str:
+    """Resolve the refactoring field for a test file.
+
+    Field membership is exact path membership in each non-core field's
+    ``test_list.txt``. Unmatched files default to ``core``. If a path appears
+    in more than one non-core list, the ambiguity is reported as an error.
+    """
+    normalized = normalize_test_path(file_path)
+    matches = [
+        field for field in NON_CORE_FIELDS if normalized in _read_field_test_paths(field)
+    ]
+    if len(matches) > 1:
+        raise ValueError(
+            f"Ambiguous field for {normalized}: matched {', '.join(matches)}"
+        )
+    return matches[0] if matches else "core"
+
+
+def get_reference_dir(field: str = "core") -> str:
+    """Return the reference directory for a field.
+
+    Core keeps the historical root reference directory; non-core fields use
+    ``reference/<field>/``.
+    """
+    if field == "core":
+        return str(REFERENCE_ROOT)
+    return str(REFERENCE_ROOT / field)
+
+
+def get_workspace(file_name: str, field: str = "core") -> Path:
     """Return the workspace directory for a given test file name.
 
     Args:
         file_name: e.g. "test_ops" (without .py extension)
+        field: refactoring field, e.g. "core", "distributed", or "graph"
 
     Returns:
-        Path like agent_space/refactor/test_ops/
+        Path like agent_space/refactor/core/test_ops/
     """
-    ws = REFACTOR_WORKSPACE_ROOT / file_name
+    ws = REFACTOR_WORKSPACE_ROOT / field / file_name
     ws.mkdir(parents=True, exist_ok=True)
     return ws
 

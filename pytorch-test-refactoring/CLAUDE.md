@@ -19,7 +19,7 @@ ingest_ops.py    IngestOps state machine — PR feedback ingest sidecar
 ├── utils.py     Path constants, workspace helpers, refactoring rule definitions
 ├── scripts/     Deterministic steps (assess, verify, linter, report, ci, ingest, local_test, logger)
 ├── agent/       Harness adapters, AI agent prompt templates (prompts/), sub-skills (skills/)
-└── reference/   Authoritative API classification (device_api_catalog.yaml, classification_guide.md)
+└── reference/   Core reference base (default); non-core fields live under reference/<field>/
 ```
 
 The three state machines share one pattern: deterministic `scripts/*` steps do the mechanical work (analysis, verification, CI, harvesting); AI agents do the judgment (classification, coding, review, debugging). Each machine stops on a **flow signal** (`spawn_single` / `send_message` / `relay_findings` / `waiting` / `done`) and lets the selected harness adapter translate that signal into harness-specific actions.
@@ -55,6 +55,17 @@ Tests are split into three strategies (full decision framework in `agent/skills/
 
 The authoritative catalog is `reference/device_api_catalog.yaml` (lookup guide: `reference/classification_guide.md`).
 
+### Test fields
+
+Files resolve to `core` (default), `distributed`, or `graph` by exact
+membership in `reference/distributed/test_list.txt` or
+`reference/graph/test_list.txt`. Ambiguous membership is an error.
+
+`core` keeps the historical root reference directory and full S1/S2/S3
+workflow. Non-core fields use `reference/<field>/`, fall back to core
+references for missing content, and currently run a field-agnostic baseline:
+cleanup only, generic verification/review, and no local-test gate.
+
 ### Phases
 
 1. **Assess** — deterministic file analysis (stats, class layout, coder count)
@@ -78,7 +89,7 @@ python orchestrator.py --harness <claude|codex> --ingest-feedback   # harvest PR
 python orchestrator.py <file> --harness <claude|codex> --resume     # resume after interruption
 ```
 
-Each refactoring writes its workspace to `agent_space/refactor/{file_name}/` (assessment, reports, tasks, verification, findings, `final_summary.md`, audit/status/flow-state files); the ingest sidecar uses `agent_space/ingest/`.
+Each refactoring writes its workspace to `agent_space/refactor/{field}/{file_name}/` (assessment, reports, tasks, verification, findings, `final_summary.md`, audit/status/flow-state files); the ingest sidecar uses `agent_space/ingest/`.
 
 ## Changelog
 

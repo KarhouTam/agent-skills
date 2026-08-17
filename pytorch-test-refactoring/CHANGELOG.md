@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-08-17 — 测试字段分类与字段化引用知识库
+
+为工作流引入 `core` / `distributed` / `graph` 三个测试字段，使引用知识与运行行为
+可以按测试文件类型分域扩展。`core` 保持为默认字段，并继续使用根目录 `reference/`
+作为默认知识库。
+
+- **字段解析**：`utils.resolve_field()` 通过 `reference/distributed/test_list.txt` 与
+  `reference/graph/test_list.txt` 精确路径匹配判定字段；未命中默认 `core`，同时命中
+  多个非 core 列表时报歧义错误。
+- **字段化工作区**：所有重构工作区改为 `agent_space/refactor/{field}/{file_name}/`；
+  `RefactorState` / `AssessmentResult` 新增 `field` 并随 flow state 持久化。
+- **非 core 基线**：非 core 字段暂无专属重构 profile，当前只执行
+  import/符号清理，不进行 S1/S2/S3 分类、类拆分或设备改写；验证只跑
+  syntax/test_count/class_structure/import/lint，最终评审为通用基线，
+  本地测试门禁跳过。
+- **Prompt 分域**：新增 `analyst_baseline.md` / `coder_baseline.md` /
+  `checker_baseline.md`；`claude_code.py` 根据 ref_dir/workspace 自动选择 core
+  或 baseline 模板，并在非 core prompt 中注入字段与 core 回退路径。
+- **CI 工作区**：`orchestrator.py` 的 CI 检查路径同步使用字段化工作区。
+- **测试**：新增 `tests/test_fields.py`（解析、重叠、字段化路径、规则、prompt、
+  本地测试跳过），全套 46 个测试通过。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `utils.py` | 新增字段解析、字段化 reference/workspace 路径与 non-core 规则基线 |
+| `state.py` | `AssessmentResult` / `RefactorState` 新增 `field` |
+| `flow.py` | 字段解析、字段化 workspace、field-aware distribute/verify/local-test |
+| `scripts/assess.py`、`scripts/verify.py`、`scripts/report.py` | 字段化 workspace、non-core 验证子集与报告字段 |
+| `agent/claude_code.py` | field-aware analyst/coder/checker prompt 选择 |
+| `agent/prompts/*_baseline.md` | 新增非 core 字段的 field-agnostic 基线 prompt |
+| `orchestrator.py` | CI 工作区使用字段化路径 |
+| `reference/distributed/test_list.txt`、`reference/graph/test_list.txt` | 字段路径清单迁移到字段目录 |
+| `SKILL.md`、`CLAUDE.md`、`README.md` | 字段概念、目录布局、工作区与基线行为文档 |
+| `tests/test_fields.py` | 新字段测试；同步更新旧工作区路径断言 |
+
 ## 2026-08-17 — 本地测试门禁（Phase 6.5）
 
 在 Phase 6 最终评审之后、Phase 7 finalize 之前新增确定性本地测试门禁：默认在 CPU 上

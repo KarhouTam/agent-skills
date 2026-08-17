@@ -31,6 +31,18 @@
 
 **工作流由 `RefactorFlow` 状态机驱动**，通过 `orchestrator.py` 作为 CLI 桥接层输出 JSON 任务规格，Claude Code 作为 AI 运行时——Flow 返回 `FlowSignal` 信号来指示何时需要生成 AI Agent 或向已有 Agent 发送后续指令。Agent ID 在首次生成时注册并被持久化，后续指令通过 `SendMessage(agent_id)` 自动恢复已终止的 Agent（保留完整上下文）。
 
+### 测试字段
+
+每个测试文件自动归入 `core`（默认）、`distributed` 或 `graph` 三个字段之一：
+
+- 字段检测基于 `reference/distributed/test_list.txt` 与
+  `reference/graph/test_list.txt` 的精确路径匹配；未命中默认 `core`，
+  同时命中两个非 core 列表则报错。
+- `core` 继续使用根目录 `reference/`，执行完整 S1/S2/S3 加速器解耦工作流。
+- 非 core 字段使用 `reference/<field>/`，缺少字段专属内容时回退 core 参考；
+  当前先执行安全基线：仅清理 import/符号，运行通用验证与审查，暂不启动
+  本地测试门禁。
+
 ---
 
 ## 架构设计
@@ -47,7 +59,7 @@ RefactorFlow (状态机核心)
     └── Pydantic 状态模型 (state.py)
               │
               └── 参考知识库 (reference/)
-                  device_api_catalog.yaml / classification_guide.md
+                  core 默认知识库 + distributed/ / graph/ 字段清单
 ```
 
 ### 各层角色
@@ -404,10 +416,10 @@ while state.signal.value != "done":
 
 ## 工作空间
 
-每次重构会在 `agent_space/refactor/{file_name}/` 下创建工作空间：
+每次重构会在 `agent_space/refactor/{field}/{file_name}/` 下创建工作空间：
 
 ```
-agent_space/refactor/test_ops/
+agent_space/refactor/core/test_ops/
 ├── assessment.json           # Phase 1：文件评估结果
 ├── analyst_report.md         # Phase 2：分析报告（可读）
 ├── analyst_report.json       # Phase 2：分析报告（结构化）
@@ -465,7 +477,11 @@ pytorch-test-refactoring/
 └── reference/
     ├── device_api_catalog.yaml           # 权威 API 分类（A/B/C 类）
     ├── classification_guide.md           # API 分类查询指南
-    └── device_specific_features_report.md # 设备专属特性详细报告
+    ├── device_specific_features_report.md # 设备专属特性详细报告
+    ├── distributed/
+    │   └── test_list.txt                 # distributed 字段路径清单
+    └── graph/
+        └── test_list.txt                 # graph 字段路径清单
 ```
 
 ### 依赖关系

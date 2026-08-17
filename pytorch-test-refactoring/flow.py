@@ -29,6 +29,8 @@ from state import (
 )
 from utils import (
     get_workspace,
+    get_reference_dir,
+    resolve_field,
     ANALYST_REPORT_JSON,
     CODER_TASKS_FILE,
     ASSESSMENT_FILE,
@@ -46,9 +48,6 @@ from scripts.linter import check_file, LintSeverity
 from scripts.local_test import run_local_tests
 from agent.adapter import BaseAdapter
 from agent.claude_code import ClaudeCodeAdapter
-
-
-_REF_DIR = str(Path(__file__).parent / "reference")
 
 
 def _finding_matches_rule(finding, rule_id: str) -> bool:
@@ -128,7 +127,8 @@ class RefactorFlow:
         """
         self.state.file_path = file_path
         self.state.file_name = Path(file_path).stem
-        self.state.workspace = get_workspace(self.state.file_name)
+        self.state.field = resolve_field(file_path)
+        self.state.workspace = get_workspace(self.state.file_name, self.state.field)
         self.log = RefactorLogger(self.state.workspace)
 
         # Load artifacts from disk for cross-process resume
@@ -174,6 +174,7 @@ class RefactorFlow:
         if ws is None:
             return
         payload = {
+            "field": self.state.field,
             "current_phase": self.state.current_phase,
             "rule_index": self.state.rule_index,
             "rule_sub_phase": self.state.rule_sub_phase,
@@ -231,7 +232,6 @@ class RefactorFlow:
             self.state.deferred_failures = [
                 LocalTestFailure(**f) for f in data.get("deferred_failures", [])
             ]
-
     # ── End flow state persistence ─────────────────────────────────
 
     def _load_existing_artifacts(self):
@@ -809,7 +809,7 @@ class RefactorFlow:
 
     def _phase_assess(self):
         self.state.current_phase = "assess"
-        result = assess_file(self.state.file_path)
+        result = assess_file(self.state.file_path, field=self.state.field)
         self.state.file_size = result.file_size
         self.state.coder_count = result.coder_count
         self.state.total_test_count = result.total_test_count
@@ -844,7 +844,7 @@ class RefactorFlow:
             raise RuntimeError("Analyst report not available for distribute phase")
 
         report = self.state.analyst_report
-        rules = compute_applicable_rules(report.strategy_assignments)
+        rules = compute_applicable_rules(report.strategy_assignments, self.state.field)
         self.state.coder_count = len(rules)
 
         # Build extraction instructions from new_classes for strategy_1
@@ -947,7 +947,12 @@ class RefactorFlow:
             else []
         )
 
-        result = verify(self.state.file_path, original_count, original_classes)
+        result = verify(
+            self.state.file_path,
+            original_count,
+            original_classes,
+            field=self.state.field,
+        )
         self.state.verification = result
         self.state.signal = FlowSignal.DONE
 
@@ -961,6 +966,13 @@ class RefactorFlow:
     def _phase_local_test(self):
         """Run the post-review local test gate (deterministic + coder fix loop)."""
         self.state.current_phase = "test"
+        if self.state.field != "core":
+            # No field-specific local-test command exists yet. Preserve the
+            # generic review gate but do not run an inappropriate CPU pytest
+            # command against distributed or graph files.
+            self.state.test_sub_phase = "done"
+            self.state.signal = FlowSignal.DONE
+            return
         if self.state.test_sub_phase == "run":
             self._run_local_test_once()
         elif self.state.test_sub_phase == "fix":
@@ -1043,7 +1055,7 @@ class RefactorFlow:
                 self.adapter.build_analyst_task(
                     file_path,
                     workspace,
-                    _REF_DIR,
+                    get_reference_dir(self.state.field),
                 )
             ]
 
@@ -1092,7 +1104,7 @@ class RefactorFlow:
                     self.adapter.build_checker_task(
                         file_path,
                         workspace,
-                        _REF_DIR,
+                        get_reference_dir(self.state.field),
                         self.state.analyst_report.original_test_count
                         if self.state.analyst_report
                         else 0,
@@ -1135,7 +1147,7 @@ class RefactorFlow:
                 self.adapter.build_checker_task(
                     file_path,
                     workspace,
-                    _REF_DIR,
+                    get_reference_dir(self.state.field),
                     original_count,
                     verification_summary,
                 )

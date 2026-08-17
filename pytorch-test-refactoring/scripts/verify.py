@@ -22,30 +22,40 @@ def verify(
     file_path: str,
     original_test_count: int,
     original_classes: list[str],
+    field: str = "core",
 ) -> VerificationResult:
     """Run all verification checks against the refactored file."""
     checks: list[VerificationCheck] = []
 
     # Derive workspace and load assessment for checks that need them
     file_name = Path(file_path).stem
-    workspace = get_workspace(file_name)
+    workspace = get_workspace(file_name, field)
     assessment = _load_assessment(workspace)
 
-    checks.append(_check_syntax(file_path))
-    checks.append(_check_test_count(file_path, original_test_count))
-    checks.append(_check_class_structure(file_path, original_classes))
-    checks.append(_check_decorateinfo(file_path, original_classes))
-    checks.append(_check_external_refs(file_path, original_classes, workspace))
-    checks.append(_check_stale_patterns(file_path, workspace, assessment))
-    checks.append(_check_imports(file_path))
+    if field == "core":
+        checks.append(_check_syntax(file_path))
+        checks.append(_check_test_count(file_path, original_test_count))
+        checks.append(_check_class_structure(file_path, original_classes))
+        checks.append(_check_decorateinfo(file_path, original_classes))
+        checks.append(_check_external_refs(file_path, original_classes, workspace))
+        checks.append(_check_stale_patterns(file_path, workspace, assessment))
+        checks.append(_check_imports(file_path))
 
-    # New Phase-5 checks
-    checks.append(_check_dtype_integrity(file_path))
-    checks.append(_check_accelerator_safety(file_path))
-    checks.append(_check_coverage_preservation(file_path, workspace))
-    checks.append(_check_class_split(file_path, original_classes, workspace))
-    checks.append(_check_skipifmps_coverage(file_path, workspace))
-    checks.append(_check_lint(file_path))
+        # New Phase-5 checks
+        checks.append(_check_dtype_integrity(file_path))
+        checks.append(_check_accelerator_safety(file_path))
+        checks.append(_check_coverage_preservation(file_path, workspace))
+        checks.append(_check_class_split(file_path, original_classes, workspace))
+        checks.append(_check_skipifmps_coverage(file_path, workspace))
+        checks.append(_check_lint(file_path))
+    else:
+        # Non-core fields use only the field-agnostic safety net until a
+        # field-specific verification profile is defined.
+        checks.append(_check_syntax(file_path))
+        checks.append(_check_test_count(file_path, original_test_count))
+        checks.append(_check_class_structure(file_path, original_classes))
+        checks.append(_check_imports(file_path))
+        checks.append(_check_lint(file_path))
 
     all_passed = all(c.passed for c in checks)
 

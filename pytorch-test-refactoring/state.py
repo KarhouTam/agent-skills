@@ -40,6 +40,7 @@ class AssessmentResult(BaseModel):
 
     file_path: str
     file_name: str
+    field: str = "core"
     file_size: int
     coder_count: int
     line_ranges: list[BoundedRange]
@@ -257,6 +258,7 @@ class RefactorState(BaseModel):
 
     file_path: str = ""
     file_name: str = ""
+    field: str = "core"
     file_size: int = 0
     coder_count: int = 0
     total_test_count: int = 0

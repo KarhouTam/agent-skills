@@ -13,7 +13,7 @@ from utils import (
 from state import AssessmentResult, ClassInfo, BoundedRange
 
 
-def assess_file(file_path: str) -> AssessmentResult:
+def assess_file(file_path: str, field: str = "core") -> AssessmentResult:
     """Analyze a test file and return structured assessment.
 
     coder_count and line_ranges are pre-distribution estimates based on
@@ -40,6 +40,7 @@ def assess_file(file_path: str) -> AssessmentResult:
     result = AssessmentResult(
         file_path=str(file_path),
         file_name=file_name,
+        field=field,
         file_size=line_count,
         coder_count=coder_count,
         line_ranges=line_ranges,
@@ -48,7 +49,7 @@ def assess_file(file_path: str) -> AssessmentResult:
         git_dirty=git_dirty,
     )
 
-    workspace = get_workspace(file_name)
+    workspace = get_workspace(file_name, field)
     (workspace / ASSESSMENT_FILE).write_text(
         result.model_dump_json(indent=2), encoding="utf-8"
     )

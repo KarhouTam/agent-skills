@@ -120,7 +120,7 @@ def test_materials_parse_into_models():
 def test_flow_resumes_from_materials(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _write_synthetic_file(Path("test/test_expanded_weights.py"))
-    workspace = Path("agent_space/refactor/test_expanded_weights")
+    workspace = Path("agent_space/refactor/core/test_expanded_weights")
     _install_materials(
         workspace,
         "assessment.json",

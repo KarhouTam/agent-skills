@@ -17,10 +17,36 @@ from state import FlowSignal
 
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
+_SKILL_DIR = _PROMPT_DIR.parent.parent
+_CORE_REF_DIR = str(_SKILL_DIR / "reference")
+_NON_CORE_FIELDS = {"distributed", "graph"}
 
 
 def _load_prompt(name: str) -> str:
     return (_PROMPT_DIR / f"{name}.md").read_text()
+
+
+def _field_from_ref_dir(ref_dir: str) -> str:
+    """Derive the workflow field from a reference directory path."""
+    name = Path(ref_dir).name
+    return name if name in _NON_CORE_FIELDS else "core"
+
+
+def _field_from_workspace(workspace: str) -> str:
+    """Derive the workflow field from a fielded workspace path."""
+    parts = Path(workspace).parts
+    if "refactor" not in parts:
+        return "core"
+    idx = parts.index("refactor")
+    if idx + 1 >= len(parts):
+        return "core"
+    candidate = parts[idx + 1]
+    return candidate if candidate in _NON_CORE_FIELDS or candidate == "core" else "core"
+
+
+def _core_ref_dir(field: str, ref_dir: str) -> str:
+    """Return the core fallback reference directory."""
+    return ref_dir if field == "core" else _CORE_REF_DIR
 
 
 def _coder_prompt(
@@ -33,6 +59,19 @@ def _coder_prompt(
     total_rules: int,
 ) -> str:
     """Format coder.md; shared by build_coder_tasks and Codex build_respawn_task."""
+    field = _field_from_workspace(workspace)
+    if field != "core":
+        return _load_prompt("coder_baseline").format(
+            coder_id=coder_id,
+            file_name=Path(file_path).stem,
+            file_path=file_path,
+            workspace=workspace,
+            rule=rule,
+            rule_description=rule_description,
+            action_items=instructions,
+            total_rules=str(total_rules),
+            field=field,
+        )
     return _load_prompt("coder").format(
         coder_id=coder_id,
         file_name=Path(file_path).stem,
@@ -58,12 +97,23 @@ class ClaudeCodeAdapter(BaseAdapter):
         self, file_path: str, workspace: str, ref_dir: str
     ) -> AgentTask:
         file_name = Path(file_path).stem
-        prompt = _load_prompt("analyst").format(
-            file_name=file_name,
-            file_path=file_path,
-            workspace=workspace,
-            ref_dir=ref_dir,
-        )
+        field = _field_from_ref_dir(ref_dir)
+        if field == "core":
+            prompt = _load_prompt("analyst").format(
+                file_name=file_name,
+                file_path=file_path,
+                workspace=workspace,
+                ref_dir=ref_dir,
+            )
+        else:
+            prompt = _load_prompt("analyst_baseline").format(
+                file_name=file_name,
+                file_path=file_path,
+                workspace=workspace,
+                ref_dir=ref_dir,
+                core_ref_dir=_core_ref_dir(field, ref_dir),
+                field=field,
+            )
         return AgentTask(
             phase="analyze",
             agent_name="analyst",
@@ -149,14 +199,21 @@ class ClaudeCodeAdapter(BaseAdapter):
         scope: str = "file",
         rule_context: dict | None = None,
     ) -> AgentTask:
+        field = _field_from_ref_dir(ref_dir)
+        template = "checker" if field == "core" else "checker_baseline"
+        format_kwargs = {
+            "file_name": Path(file_path).stem,
+            "file_path": file_path,
+            "workspace": workspace,
+            "ref_dir": ref_dir,
+            "original_test_count": original_test_count,
+            "verification_summary": verification_summary,
+            "field": field,
+            "core_ref_dir": _core_ref_dir(field, ref_dir),
+        }
         if scope == "rule" and rule_context:
-            prompt = _load_prompt("checker").format(
-                file_name=Path(file_path).stem,
-                file_path=file_path,
-                workspace=workspace,
-                ref_dir=ref_dir,
-                original_test_count=original_test_count,
-                verification_summary=verification_summary,
+            prompt = _load_prompt(template).format(
+                **format_kwargs,
                 scope="PER-RULE",
                 scope_detail=(
                     f"Only check rule **{rule_context.get('rule', '?')}**: "
@@ -166,13 +223,8 @@ class ClaudeCodeAdapter(BaseAdapter):
                 ),
             )
         else:
-            prompt = _load_prompt("checker").format(
-                file_name=Path(file_path).stem,
-                file_path=file_path,
-                workspace=workspace,
-                ref_dir=ref_dir,
-                original_test_count=original_test_count,
-                verification_summary=verification_summary,
+            prompt = _load_prompt(template).format(
+                **format_kwargs,
                 scope="FULL FILE",
                 scope_detail="Review the entire file against all decoupling standards.",
             )

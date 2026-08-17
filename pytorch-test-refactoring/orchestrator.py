@@ -566,10 +566,11 @@ def _emit_error(flow: RefactorFlow, message: str) -> None:
 
 def _run_ci_check(args, adapter) -> None:
     """Handle --ci-check: monitor CI state, possibly spawn debugger."""
-    from utils import get_workspace
+    from utils import get_workspace, resolve_field
 
     file_name = Path(args.file_path).stem
-    workspace = get_workspace(file_name)
+    field = resolve_field(args.file_path)
+    workspace = get_workspace(file_name, field)
 
     ci = CIOps(adapter=adapter)
 

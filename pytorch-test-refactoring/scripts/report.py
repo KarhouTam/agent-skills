@@ -10,6 +10,7 @@ def generate_report(state: RefactorState) -> str:
         f"# Refactoring Summary: {state.file_name}",
         "",
         f"**File:** `{state.file_path}`",
+        f"**Field:** `{state.field}`",
         f"**Lines:** {state.file_size}",
         f"**Coders used:** {state.coder_count}",
         "",
@@ -77,6 +78,13 @@ def generate_report(state: RefactorState) -> str:
                 for deferred in state.deferred_failures:
                     reason = deferred.defer_reason or "deferred"
                     lines.append(f"  - `{deferred.test_name}` — {reason}")
+    elif state.field != "core":
+        lines.append("")
+        lines.append("## Local Test")
+        lines.append(
+            ":information_source: Skipped — no local-test profile is defined "
+            f"for field `{state.field}`."
+        )
 
     if state.analyst_report:
         lines.append("")
@@ -88,7 +96,7 @@ def generate_report(state: RefactorState) -> str:
 
     report = "\n".join(lines)
 
-    workspace = get_workspace(state.file_name)
+    workspace = get_workspace(state.file_name, state.field)
     (workspace / FINAL_SUMMARY_FILE).write_text(report, encoding="utf-8")
 
     return report

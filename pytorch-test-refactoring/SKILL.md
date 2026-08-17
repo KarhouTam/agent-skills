@@ -25,6 +25,20 @@ The flag is sticky: every resume/feed command the orchestrator emits carries
 the same `--harness`, so you only set it once. Use it on `--ci-check` and
 `--ingest-feedback` launches too. Omitting it defaults to `claude`.
 
+## Test Fields
+
+Every test file is assigned one of three fields: `core` (default),
+`distributed`, or `graph`. Field detection is exact membership in
+`reference/distributed/test_list.txt` or `reference/graph/test_list.txt`;
+an unmatched path is `core`, and a path present in both non-core lists is an
+error.
+
+- `core` uses the legacy `reference/` directory and the full accelerator
+  decoupling workflow.
+- Non-core fields use `reference/<field>/` and currently run a safe baseline:
+  import/symbol cleanup only, field-agnostic verification and review, and no
+  local-test gate until a field-specific profile is added.
+
 The orchestrator outputs a JSON task spec to stdout. Follow this loop:
 
 ```
@@ -241,7 +255,7 @@ inline threads + `claude[bot]` summaries are harvested.
 ## Workspace
 
 ```
-agent_space/refactor/{file_name}/
+agent_space/refactor/{field}/{file_name}/
 ├── assessment.json
 ├── analyst_report.md / .json
 ├── coder_tasks.json
