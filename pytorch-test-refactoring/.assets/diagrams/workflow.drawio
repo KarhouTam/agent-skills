@@ -194,6 +194,9 @@
                         <mxPoint x="663" y="344.5" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
+                <mxCell id="sidecar-note" value="🔗 Sidecar：--ingest-feedback（PR 反馈 ingest）与 --review-queue（每日 PR review 队列）独立运行，复用 FlowSignal（Claude 子 agent / Codex 内联）" style="text;html=1;strokeColor=#d6b656;fillColor=#fff2cc;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#7a6200;rounded=1;" parent="1" vertex="1">
+                    <mxGeometry x="240" y="810" width="700" height="44" as="geometry"/>
+                </mxCell>
             </root>
         </mxGraphModel>
     </diagram>

@@ -1,14 +1,5 @@
 # Changelog
 
-## 2026-08-17 — Reviewer 输出中文化
-
-reviewer 产出的 review comment 内容改为中文：`summary`、每条 finding 的
-`description` 与 `fix` 均用中文撰写，便于下游直接阅读；枚举/结构字段
-（`severity`、`category`、`file`、`line_number`）保持不变。
-
-- `agent/prompts/reviewer.md`、`agent/prompts/reviewer_batch.md`：在 Output
-  段加入“人读字段用中文”的硬性指示（Claude sub-agent 与 Codex 内联两条路径同步）。
-
 ## 2026-08-17 — PR Review Queue（每日批量 review sidecar，按 harness 分流）
 
 新增独立 sidecar 模块 `review_ops.py`：读取 `agent_space/pr_needs_review.txt`
