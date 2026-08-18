@@ -1,5 +1,62 @@
 # Changelog
 
+## 2026-08-17 — Reviewer 输出中文化
+
+reviewer 产出的 review comment 内容改为中文：`summary`、每条 finding 的
+`description` 与 `fix` 均用中文撰写，便于下游直接阅读；枚举/结构字段
+（`severity`、`category`、`file`、`line_number`）保持不变。
+
+- `agent/prompts/reviewer.md`、`agent/prompts/reviewer_batch.md`：在 Output
+  段加入“人读字段用中文”的硬性指示（Claude sub-agent 与 Codex 内联两条路径同步）。
+
+## 2026-08-17 — PR Review Queue（每日批量 review sidecar，按 harness 分流）
+
+新增独立 sidecar 模块 `review_ops.py`：读取 `agent_space/pr_needs_review.txt`
+中的待 review PR，每天按批（`--limit N`，默认 10）做 diff-based review，并把
+结果以一天一条 comment 发布到 `cosdt/pytorch-initial-pr-reviews#1`。
+
+- **选择阶段（确定性）**：`scripts/review_queue.py` 通过 `gh pr view` 按 FIFO
+  分类——open 且有 test 文件改动（`test/**`、`torch/testing/**`）的 PR 进入
+  review 队列；merged/closed 或无 test 改动的 PR 记为“不适用”（在 comment
+  中列出并归档）；元数据拉取失败的 PR 静默跳过、留在待处理列表。
+- **Review 阶段（AI，按 harness 分流）**：Claude Code 每个 PR 一个 reviewer
+  sub-agent、按 4 并发波次执行；Codex 由 executor（main agent）内联逐个 review
+  （不 spawn 子 agent）。两者都复用 `review-test-refactoring` skill 的
+  diff-based 模式，并写入 `agent_space/pr_reviews/pr_<n>_result.json`。
+- **发布阶段（确定性）**：渲染一天一条 comment——每个 PR 一个 `<details>`
+  折叠块（`@作者`、PR 状态、Blocker/Major/Minor 完整 findings），
+  `gh issue comment` 发布到 tracking issue；归档已处理 PR 到
+  `agent_space/pr_reviews/pr_reviewed.json`，并重写 `pr_needs_review.txt`
+  （已处理移除、失败保留）。
+- **失败语义**：review 失败或 PR 元数据拉取失败不出现在 comment 中、留在
+  待处理列表下次重试；不适用项（merged/closed 或无 test 改动）在 comment
+  中列出并归档。
+- **为什么 Codex 分流**：Codex MultiAgentV2 会把 `spawn_agent` 的任务
+  `message` 记录成 assistant/commentary 邮箱信封而非 user/task 消息
+  （openai/codex#25458），spawn 出的 reviewer 会忽略自己的 review 任务并
+  重跑 orchestrator，因此 Codex 改为 main agent 内联执行；Claude Code 的
+  `Agent` 工具能正常下发任务，保留 sub-agent 模型。
+- **编排入口**：`orchestrator.py` 新增 `--review-queue` / `--limit`，feed
+  类型 `reviewer`；`ReviewOps` 状态持久化到
+  `agent_space/pr_reviews/flow_state.json`。
+- **测试**：新增 `tests/test_review_queue.py`（选择/渲染/发布/归档/内联与
+  sub-agent 两条状态机路径/失败跳过），全套 54 个测试通过。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `review_ops.py` | 新增 ReviewOps 状态机（select → review → publish，按 harness 分流） |
+| `scripts/review_queue.py` | 新增确定性逻辑：pending 加载/选择、gh 分类、comment 渲染、发布、归档、重写 pending |
+| `agent/prompts/reviewer.md` | 新增单个 reviewer prompt（Claude 子 agent 模式） |
+| `agent/prompts/reviewer_batch.md` | 新增内联批量 review 指令模板（Codex 模式） |
+| `agent/adapter.py`、`agent/claude_code.py`、`agent/codex.py` | 新增 `build_reviewer_task` / `review_task_to_spec` |
+| `state.py` | 新增 `PrReviewItem` / `PrReviewFinding` / `PrReviewResult` / `ReviewOpsState` |
+| `utils.py` | 新增 review-queue 路径常量与工作区 helper |
+| `orchestrator.py` | 新增 `--review-queue` / `--limit` 入口与 reviewer feed 路由 |
+| `SKILL.md`、`README.md`、`CLAUDE.md` | PR Review Queue 文档与每日触发说明 |
+| `tests/test_review_queue.py` | 新增 8 个单元测试 |
+
 ## 2026-08-17 — 测试字段分类与字段化引用知识库
 
 为工作流引入 `core` / `distributed` / `graph` 三个测试字段，使引用知识与运行行为

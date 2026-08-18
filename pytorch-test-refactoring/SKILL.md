@@ -252,6 +252,78 @@ in `findings/`). State cursor is per-PR `last_checked_at`; comments already
 processed are skipped. Only merged PRs (the `Merged` label) and replied
 inline threads + `claude[bot]` summaries are harvested.
 
+## PR Review Queue (sidecar)
+
+Review open PyTorch test-decoupling PRs listed in
+`agent_space/pr_needs_review.txt` in daily batches and post the results as
+one issue comment per day to
+`cosdt/pytorch-initial-pr-reviews#1`. Runs independently of the 8-phase
+refactoring workflow.
+
+```bash
+# One daily batch (defaults to 10 PRs per run)
+python orchestrator.py --review-queue --harness <claude|codex> [--limit N]
+```
+
+**What each run does**
+
+1. **Select** (deterministic): classify pending PRs FIFO via `gh pr view`.
+   Open PRs with changed test files (`test/**` or `torch/testing/**`) fill
+   the review queue up to `--limit`; merged/closed PRs and PRs without test
+   changes are marked not-applicable; PRs whose metadata cannot be fetched
+   are silently skipped and stay pending.
+2. **Review** (AI, harness-dependent):
+   - **Claude Code**: one `reviewer` sub-agent per PR, emitted in waves of up
+     to 4 concurrent tasks. Each sub-agent runs the diff-based mode of the
+     `review-test-refactoring` skill and writes a structured result to
+     `agent_space/pr_reviews/pr_<n>_result.json`.
+   - **Codex**: ONE inline instruction for the harness executor (main agent),
+     which reviews every PR itself with its own tools (no sub-agents) and
+     writes the same per-PR result files.
+3. **Publish** (deterministic): render one comment with a collapsed
+   `<details>` block per PR (full Blocker/Major/Minor findings, `@author`
+   mention), post it to the tracking issue, archive processed PRs in
+   `agent_space/pr_reviews/pr_reviewed.json`, and rewrite
+   `agent_space/pr_needs_review.txt` (processed PRs removed, failures kept).
+
+**Executor loop** (the JSON the orchestrator prints):
+
+```
+- Claude, status=need_agent (tasks[]): spawn each reviewer sub-agent; after
+  each finishes, run that task's feed_cmd to feed the result back.
+- Claude, status=waiting: wait for the remaining in-flight reviewers and feed
+  them.
+- Codex, status=need_agent (method="inline"): YOU are the reviewer — follow
+  the instruction, write one result JSON per PR, then run on_complete.feed_cmd.
+- status=done: batch complete; the comment URL is in comment_url.
+```
+
+**Daily trigger:**
+
+```
+Claude Code: run
+`python orchestrator.py --review-queue --limit 10 --harness claude`.
+On `need_agent`, spawn the reviewer sub-agents and feed each result; on
+`waiting`, wait for the remaining agents. Loop until `done`.
+
+Codex: run
+`python orchestrator.py --review-queue --limit 10 --harness codex`.
+On `need_agent` with `method="inline"`, perform the reviews yourself (do NOT
+spawn sub-agents), write the result files, then run `feed_cmd`. Loop until
+`done`.
+```
+
+Failure semantics: a reviewer that fails (or a PR whose metadata cannot be
+fetched) is **not mentioned in the comment** and stays in the pending list
+for the next run. Not-applicable PRs (merged/closed or no test changes) ARE
+listed in the comment as `不适用` and archived.
+
+Why Codex differs: Codex MultiAgentV2 records the `spawn_agent` task `message`
+as an assistant/commentary mailbox envelope rather than a user/task message
+(openai/codex#25458), so spawned reviewers ignore their assignment and re-run
+the orchestrator. Claude Code's `Agent` tool delivers the task correctly, so
+Claude keeps the per-PR sub-agent model.
+
 ## Workspace
 
 ```

@@ -311,6 +311,34 @@ class ClaudeCodeAdapter(BaseAdapter):
             mode="default",
         )
 
+    def build_reviewer_task(
+        self,
+        item: Any,
+        workspace: str,
+        result_file: str,
+    ) -> AgentTask:
+        prompt = _load_prompt("reviewer").format(
+            pr_number=item.pr_number,
+            pr_url=item.url,
+            title=item.title,
+            author=item.author,
+            state=item.state,
+            result_file=result_file,
+            workspace=workspace,
+            review_skill_path=str(
+                _SKILL_DIR / "agent" / "skills" / "review-test-refactoring" / "SKILL.md"
+            ),
+        )
+        return AgentTask(
+            phase="review",
+            agent_name=f"reviewer_pr_{item.pr_number}",
+            agent_type="general-purpose",
+            prompt=prompt,
+            run_in_background=True,
+            mode="default",
+            context={"pr_number": item.pr_number},
+        )
+
     def build_fix_tasks(
         self,
         file_path: str,
@@ -347,10 +375,13 @@ class ClaudeCodeAdapter(BaseAdapter):
             f"{f.message[:500]}"
             for f in failures
         )
-        deferred_text = "\n".join(
-            f"- `{d.test_name}` — {d.defer_reason or 'deferred'}"
-            for d in deferred_failures
-        ) or "_(none)_"
+        deferred_text = (
+            "\n".join(
+                f"- `{d.test_name}` — {d.defer_reason or 'deferred'}"
+                for d in deferred_failures
+            )
+            or "_(none)_"
+        )
         prompt = (
             "The local test gate found failing tests in the refactored file "
             f"`{file_path}`. For EACH failure below, decide whether it is caused "
@@ -482,6 +513,17 @@ class ClaudeCodeAdapter(BaseAdapter):
         return {
             "method": "spawn",
             "agent_name": task.agent_name,
+            "agent_type": getattr(task, "agent_type", "general-purpose"),
+            "run_in_background": getattr(task, "run_in_background", False),
+            "mode": getattr(task, "mode", "default"),
+            "prompt": task.prompt,
+        }
+
+    def review_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
+        return {
+            "method": "spawn",
+            "agent_name": task.agent_name,
+            "task_name": task.agent_name,
             "agent_type": getattr(task, "agent_type", "general-purpose"),
             "run_in_background": getattr(task, "run_in_background", False),
             "mode": getattr(task, "mode", "default"),

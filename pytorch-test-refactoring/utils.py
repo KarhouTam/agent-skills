@@ -143,7 +143,9 @@ def resolve_field(file_path: str) -> str:
     """
     normalized = normalize_test_path(file_path)
     matches = [
-        field for field in NON_CORE_FIELDS if normalized in _read_field_test_paths(field)
+        field
+        for field in NON_CORE_FIELDS
+        if normalized in _read_field_test_paths(field)
     ]
     if len(matches) > 1:
         raise ValueError(
@@ -194,6 +196,24 @@ def get_ingest_workspace() -> Path:
     ws.mkdir(parents=True, exist_ok=True)
     (ws / INGEST_FINDINGS_DIR).mkdir(parents=True, exist_ok=True)
     (ws / INGEST_RAW_DIR).mkdir(parents=True, exist_ok=True)
+    return ws
+
+
+# ── PR review queue sidecar ─────────────────────────────────────────
+
+PR_QUEUE_FILE = Path("agent_space/pr_needs_review.txt")
+PR_REVIEW_WORKSPACE_ROOT = Path("agent_space/pr_reviews")
+PR_REVIEWED_ARCHIVE_FILE = "pr_reviewed.json"
+PR_REVIEW_FLOW_STATE_FILE = "flow_state.json"
+PR_REVIEW_ISSUE_REPO = "cosdt/pytorch-initial-pr-reviews"
+PR_REVIEW_ISSUE_NUMBER = 1
+PR_REVIEW_TEST_PREFIXES = ("test/", "torch/testing/")
+
+
+def get_pr_review_workspace() -> Path:
+    """Return the PR review queue workspace dir, creating it if needed."""
+    ws = PR_REVIEW_WORKSPACE_ROOT
+    ws.mkdir(parents=True, exist_ok=True)
     return ws
 
 

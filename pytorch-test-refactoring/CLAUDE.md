@@ -11,24 +11,25 @@ The skill is not run standalone: it is invoked by the host harness (Claude Code 
 ## Architecture
 
 ```
-orchestrator.py  CLI bridge — emits JSON task specs, accepts feed-back; --harness selects the adapter; --ci-check / --ingest-feedback / --apply-ingest
+orchestrator.py  CLI bridge — emits JSON task specs, accepts feed-back; --harness selects the adapter; --ci-check / --ingest-feedback / --apply-ingest / --review-queue
 flow.py          RefactorFlow state machine — core orchestrator, phases 1-7
 ci_ops.py        CIOps state machine — CI monitoring & debug, phase 8
 ingest_ops.py    IngestOps state machine — PR feedback ingest sidecar
+review_ops.py    ReviewOps state machine — daily PR review queue sidecar
 ├── state.py     Pydantic models for all workflow data (signals, reports, tasks, results, CI, ingest)
 ├── utils.py     Path constants, workspace helpers, refactoring rule definitions
-├── scripts/     Deterministic steps (assess, verify, linter, report, ci, ingest, local_test, logger)
+├── scripts/     Deterministic steps (assess, verify, linter, report, ci, ingest, local_test, review_queue, logger)
 ├── agent/       Harness adapters, AI agent prompt templates (prompts/), sub-skills (skills/)
 └── reference/   Core reference base (default); non-core fields live under reference/<field>/
 ```
 
-The three state machines share one pattern: deterministic `scripts/*` steps do the mechanical work (analysis, verification, CI, harvesting); AI agents do the judgment (classification, coding, review, debugging). Each machine stops on a **flow signal** (`spawn_single` / `send_message` / `relay_findings` / `waiting` / `done`) and lets the selected harness adapter translate that signal into harness-specific actions.
+The state machines share one pattern: deterministic `scripts/*` steps do the mechanical work (analysis, verification, CI, harvesting, queue selection/publishing); AI agents do the judgment (classification, coding, review, debugging, PR reviewing). The review-queue sidecar is harness-dependent for its review phase: Claude Code uses one reviewer sub-agent per PR, while Codex reviews inline in the executor because Codex MultiAgentV2 mis-delivers `spawn_agent` task messages (openai/codex#25458). Each machine stops on a **flow signal** (`spawn_single` / `spawn_parallel` / `send_message` / `relay_findings` / `waiting` / `done`) and lets the selected harness adapter translate that signal into harness-specific actions.
 
 ### Harness adapter layer
 
 Harness differences are isolated in `agent/`. `orchestrator.py` and the state machines never branch on the harness name — they delegate through the `BaseAdapter` interface only.
 
-- `agent/adapter.py` — `BaseAdapter` interface + `AgentTask`; task builders and the harness-specific emission interface (`task_to_spec`/`ci_task_to_spec`/`ingest_task_to_spec`, `completion_note`, `ci_wait_on_complete`/`ci_done_next_steps`, `git_preflight`/`git_preflight_error`).
+- `agent/adapter.py` — `BaseAdapter` interface + `AgentTask`; task builders and the harness-specific emission interface (`task_to_spec`/`ci_task_to_spec`/`ingest_task_to_spec`/`review_task_to_spec`, `completion_note`, `ci_wait_on_complete`/`ci_done_next_steps`, `git_preflight`/`git_preflight_error`).
 - `agent/claude_code.py` — `ClaudeCodeAdapter` (`harness_name="claude"`): `Agent`/`SendMessage`/`CronCreate`/`Write` semantics.
 - `agent/codex.py` — `CodexAdapter` (`harness_name="codex"`): `spawn_agent`/`followup_task`/`wait_agent`, full-history forks, `sleep` poll instead of cron.
 - `agent/registry.py` — `HARNESS_ADAPTERS` registry + `get_adapter(name)`. Adding a harness = one adapter module + one registry entry.
@@ -39,11 +40,11 @@ Harness selection (`--harness` or `PYTORCH_TEST_REFACTOR_HARNESS`, default `clau
 
 Tests are split into three strategies (full decision framework in `agent/skills/refactor-test-decoupling/SKILL.md`):
 
-| Strategy | Mechanism | hw_classification | When |
-|----------|-----------|-------------------|------|
-| S1 | `@instantiate_parametrized_tests` or `TestCase` | `GENERIC` (or `CPU`) | No device dependency, pure CPU logic |
-| S2 | `instantiate_device_type_tests()` | `ACCELERATOR` | Uses `device` param with generic accelerator APIs |
-| S3 | `instantiate_device_type_tests(only_for="<device>")` | `CUDA`/`MPS`/`XPU` | Truly device-specific APIs (Category C) |
+| Strategy | Mechanism                                            | hw_classification    | When                                              |
+| -------- | ---------------------------------------------------- | -------------------- | ------------------------------------------------- |
+| S1       | `@instantiate_parametrized_tests` or `TestCase`      | `GENERIC` (or `CPU`) | No device dependency, pure CPU logic              |
+| S2       | `instantiate_device_type_tests()`                    | `ACCELERATOR`        | Uses `device` param with generic accelerator APIs |
+| S3       | `instantiate_device_type_tests(only_for="<device>")` | `CUDA`/`MPS`/`XPU`   | Truly device-specific APIs (Category C)           |
 
 **Import:** `from torch.testing._internal.common_utils import HardwareClassification`. Class renaming is OPTIONAL — the future `hw_classification` member drives classification; rename only when external reference impact (DecorateInfo, dynamo skips) is low.
 
@@ -86,10 +87,11 @@ The operational loop, JSON feed formats, CI automation, and feedback ingest are 
 python orchestrator.py <file> --harness <claude|codex>              # refactor a test file (phases 1-7)
 python orchestrator.py <file> --harness <claude|codex> --ci-check   # CI monitoring (phase 8)
 python orchestrator.py --harness <claude|codex> --ingest-feedback   # harvest PR feedback (sidecar)
+python orchestrator.py --harness <claude|codex> --review-queue      # daily PR review queue (sidecar)
 python orchestrator.py <file> --harness <claude|codex> --resume     # resume after interruption
 ```
 
-Each refactoring writes its workspace to `agent_space/refactor/{field}/{file_name}/` (assessment, reports, tasks, verification, findings, `final_summary.md`, audit/status/flow-state files); the ingest sidecar uses `agent_space/ingest/`.
+Each refactoring writes its workspace to `agent_space/refactor/{field}/{file_name}/` (assessment, reports, tasks, verification, findings, `final_summary.md`, audit/status/flow-state files); the ingest sidecar uses `agent_space/ingest/`; the review-queue sidecar uses `agent_space/pr_reviews/` and consumes `agent_space/pr_needs_review.txt`.
 
 ## Changelog
 

@@ -88,6 +88,7 @@ def _parse_args() -> argparse.Namespace:
             "feedback_triage",
             "feedback_analyst",
             "ruleset_editor",
+            "reviewer",
         ],
         help=(
             "Feed agent output back to the orchestrator. "
@@ -128,6 +129,20 @@ def _parse_args() -> argparse.Namespace:
         help="Run the PR feedback ingest sidecar (harvest + triage + draft).",
     )
     parser.add_argument(
+        "--review-queue",
+        action="store_true",
+        help=(
+            "Run the daily PR review queue sidecar: review open PRs from "
+            "agent_space/pr_needs_review.txt and post one issue comment."
+        ),
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Max PRs to review per --review-queue run (default 10).",
+    )
+    parser.add_argument(
         "--apply-ingest",
         type=str,
         default=None,
@@ -155,6 +170,10 @@ def main() -> None:
 
     if args.ingest_feedback:
         _run_ingest(args, adapter)
+        return
+
+    if args.review_queue:
+        _run_review_queue(args, adapter)
         return
 
     if args.apply_ingest:
@@ -846,6 +865,161 @@ def _emit_ingest_action(ops: "IngestOps") -> None:
                 "next_steps": (
                     "Review the findings file, mark findings Approved/Rejected, "
                     "then run: python orchestrator.py --apply-ingest <findings_file>"
+                ),
+            }
+        )
+
+
+# ── PR review queue sidecar ─────────────────────────────────────────
+
+
+def _run_review_queue(args, adapter) -> None:
+    """Handle --review-queue: select + review + publish one daily comment."""
+    from review_ops import ReviewOps
+    from utils import get_pr_review_workspace
+
+    ops = ReviewOps(adapter=adapter, limit=args.limit)
+    try:
+        if args.feed:
+            ops.run(resume=True)
+            raw = _read_feed(args)
+            data = _parse_feed_json(raw, args.feed)
+            if args.feed == "reviewer":
+                ops.feed_reviewer_result(data, feed_file=args.feed_file or "")
+            ops.run()
+        else:
+            ops.run()
+    except Exception as exc:
+        _write_json(
+            {
+                "status": "error",
+                "phase": f"review_queue_{ops.state.phase}",
+                "message": str(exc),
+                "workspace": str(get_pr_review_workspace()),
+            }
+        )
+        return
+    _emit_review_queue_action(ops)
+
+
+def _emit_review_queue_action(ops) -> None:
+    """Emit the next review-queue action as JSON to stdout."""
+    from utils import get_pr_review_workspace
+
+    sm = ops.state
+    adapter = ops.adapter
+    ws = get_pr_review_workspace()
+
+    if (
+        ops.mode == "inline"
+        and sm.phase == "review"
+        and sm.signal == FlowSignal.SPAWN_SINGLE
+    ):
+        feed_file = f"{ws}/_review_batch_done.json"
+        feed_cmd = _cmd(
+            adapter,
+            "--review-queue",
+            "--feed",
+            "reviewer",
+            "--feed-file",
+            feed_file,
+        )
+        instruction = ops.get_inline_instruction(feed_file, feed_cmd)
+        _write_json(
+            {
+                "status": "need_agent",
+                "phase": "review_queue_review",
+                "method": "inline",
+                "instruction": instruction,
+                "on_complete": {
+                    "feed_as": "reviewer",
+                    "feed_file": feed_file,
+                    "feed_cmd": feed_cmd,
+                    "note": (
+                        "This is an inline task: YOU are the reviewer. Do NOT "
+                        "spawn sub-agents. Follow the instruction, write one "
+                        "result JSON per PR, then write the completion marker to "
+                        "feed_file and run feed_cmd."
+                    ),
+                },
+            }
+        )
+
+    elif ops.mode == "subagents" and sm.signal == FlowSignal.SPAWN_PARALLEL:
+        tasks = ops.get_pending_tasks()
+        if not tasks:
+            _write_json(
+                {
+                    "status": "error",
+                    "phase": "review_queue_review",
+                    "message": "SPAWN_PARALLEL but no reviewer tasks returned",
+                }
+            )
+            return
+        task_specs = []
+        for task in tasks:
+            pr_number = task.context.get("pr_number", 0)
+            feed_file = f"{ws}/pr_{pr_number}_result.json"
+            feed_cmd = _cmd(
+                adapter,
+                "--review-queue",
+                "--feed",
+                "reviewer",
+                "--feed-file",
+                feed_file,
+            )
+            spec = adapter.review_task_to_spec(task)
+            spec["feed_file"] = feed_file
+            spec["feed_cmd"] = feed_cmd
+            task_specs.append(spec)
+        _write_json(
+            {
+                "status": "need_agent",
+                "phase": "review_queue_review",
+                "wave": [t.context.get("pr_number") for t in tasks],
+                "tasks": task_specs,
+                "on_complete": {
+                    "feed_as": "reviewer",
+                    "note": (
+                        "Spawn each task in tasks[] as a reviewer sub-agent. After "
+                        "each one finishes, the agent writes its result JSON to the "
+                        "task's feed_file; run that task's feed_cmd to feed it back. "
+                        "Feed results one by one; the orchestrator emits the next "
+                        "wave or done when all in-flight results are in."
+                    ),
+                },
+            }
+        )
+
+    elif ops.mode == "subagents" and sm.signal == FlowSignal.WAITING:
+        _write_json(
+            {
+                "status": "waiting",
+                "phase": "review_queue_review",
+                "in_flight": [item.pr_number for item in sm.in_flight],
+                "note": (
+                    "Wait for the remaining in-flight reviewer sub-agents. After "
+                    "each one finishes, run the feed_cmd from its task spec."
+                ),
+            }
+        )
+
+    else:  # DONE
+        ops.finalize()
+        _write_json(
+            {
+                "status": "done",
+                "phase": "review_queue_done",
+                "comment_url": sm.comment_url,
+                "comment_path": sm.comment_path,
+                "reviewed_count": len(sm.results),
+                "not_applicable_count": len(sm.not_applicable),
+                "workspace": str(ws),
+                "next_steps": (
+                    "Daily review batch complete. The comment was posted to "
+                    "cosdt/pytorch-initial-pr-reviews#1. Processed PRs were removed "
+                    "from agent_space/pr_needs_review.txt and archived in "
+                    "agent_space/pr_reviews/pr_reviewed.json."
                 ),
             }
         )

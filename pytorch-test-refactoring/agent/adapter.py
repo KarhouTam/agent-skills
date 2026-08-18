@@ -107,6 +107,15 @@ class BaseAdapter(ABC):
     @abstractmethod
     def build_feedback_analyst_task(self, comment_and_triage: dict) -> AgentTask: ...
 
+    @abstractmethod
+    def build_reviewer_task(
+        self,
+        item: Any,
+        workspace: str,
+        result_file: str,
+    ) -> AgentTask:
+        """Build the task for one PR reviewer sub-agent (Claude mode)."""
+
     def build_fix_tasks(
         self,
         file_path: str,
@@ -141,6 +150,10 @@ class BaseAdapter(ABC):
     @abstractmethod
     def ingest_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
         """Convert an ingest/ruleset-editor AgentTask into a spec."""
+
+    @abstractmethod
+    def review_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
+        """Convert a review-queue reviewer AgentTask into a spec."""
 
     @abstractmethod
     def completion_note(

@@ -122,6 +122,12 @@ class CodexAdapter(ClaudeCodeAdapter):
     def ingest_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
         return self._spawn_spec(task)
 
+    def review_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
+        # Kept for the abstract contract; Codex review-queue uses inline
+        # execution instead because spawn_agent mis-delivers task messages
+        # (openai/codex#25458).
+        return self._spawn_spec(task)
+
     def completion_note(
         self,
         kind: str,

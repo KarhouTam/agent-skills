@@ -335,3 +335,59 @@ class IngestState(BaseModel):
     )  # comment IDs already written to a findings file
     findings: list[FeedbackFinding] = []
     last_run_at: str = ""
+
+
+# ── PR review queue models (sidecar module) ─────────────────────────
+
+
+class PrReviewItem(BaseModel):
+    """One PR in the daily review queue (selection phase output)."""
+
+    url: str
+    pr_number: int
+    title: str = ""
+    author: str = ""
+    state: str = ""  # "OPEN" | "MERGED" | "CLOSED" | "DRAFT"
+    has_test_changes: bool = False
+    status: str = "review"  # "review" | "na" | "failed"
+    reason: str = ""  # e.g. "merged/closed" | "no_test_changes" | "fetch_failed"
+
+
+class PrReviewFinding(BaseModel):
+    """A single finding from a PR reviewer agent."""
+
+    severity: str = "Major"  # "Blocker" | "Major" | "Minor"
+    category: str = ""
+    file: str = ""
+    line_number: int = 0
+    description: str = ""
+    fix: str = ""
+
+
+class PrReviewResult(BaseModel):
+    """Structured result returned by one PR reviewer agent."""
+
+    pr_number: int = 0
+    title: str = ""
+    author: str = ""
+    state: str = ""
+    success: bool = True
+    all_clear: bool = False
+    reviewed_files: list[str] = []
+    findings: list[PrReviewFinding] = []
+    summary: str = ""
+    error: str = ""
+
+
+class ReviewOpsState(BaseModel):
+    """Transient runtime position of the review-queue state machine (persisted)."""
+
+    phase: str = "select"  # "select" | "review" | "publish" | "done"
+    review_queue: list[PrReviewItem] = []  # selected open PRs with test changes
+    not_applicable: list[PrReviewItem] = []  # merged/closed or no test changes
+    failed: list[PrReviewItem] = []  # fetch failures — left pending, never in comment
+    in_flight: list[PrReviewItem] = []  # reviewer sub-agents currently spawned (Claude)
+    results: dict[str, PrReviewResult] = {}  # str(pr_number) -> result
+    comment_url: str = ""
+    comment_path: str = ""
+    signal: FlowSignal = FlowSignal.DONE

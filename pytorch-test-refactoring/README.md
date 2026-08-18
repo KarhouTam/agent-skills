@@ -414,6 +414,48 @@ while state.signal.value != "done":
 
 ---
 
+### PR Review Queue（每日批量 review sidecar）
+
+读取 `agent_space/pr_needs_review.txt` 中待 review 的 PyTorch test-decoupling
+PR，每天按批（默认 10 个，`--limit N` 可调）做 diff-based review，并把结果
+以**一天一条 comment** 的形式发布到 `cosdt/pytorch-initial-pr-reviews#1`。
+每个 PR 在 comment 里是一个 `<details>` 折叠块，块内包含 `@作者`、PR 状态、
+Blocker/Major/Minor 完整 findings；PR 之间相互隔离。
+
+```bash
+python orchestrator.py --review-queue --harness codex --limit 10
+```
+
+**流程**：确定性 select（`gh pr view` 分类 open/merged/closed 与 test 文件改动）
+→ **按 harness 分流 review**：Claude Code 每个 open 且有 test 改动的 PR 生成
+一个 reviewer sub-agent、按 4 并发波次执行；Codex 则由 executor（main agent）
+内联逐个 review（不 spawn 子 agent）。两者都复用 `review-test-refactoring` skill
+的 diff-based 模式 → 确定性 publish
+（渲染 comment、`gh issue comment` 发布、归档已处理 PR 到
+`agent_space/pr_reviews/pr_reviewed.json`、重写 `pr_needs_review.txt`）。
+
+**失败语义**：review 失败或 PR 元数据拉取失败的 PR **不出现在 comment 里**，
+留在待处理列表下次重试；merged/closed 或无 test 改动的 PR 记为“不适用”，
+在 comment 中列出并归档。执行者按 orchestrator 输出的 JSON 循环：Claude 走
+`need_agent`(spawn reviewer sub-agent) / `waiting`；Codex 走
+`need_agent`(method=inline，自己 review) → 跑 `feed_cmd`；最终 `done`。
+
+> 为什么 Codex 不走子 agent：Codex MultiAgentV2 会把 `spawn_agent` 的任务
+> `message` 记录成 assistant/commentary 邮箱信封而非 user/task 消息
+> （openai/codex#25458），子 agent 会忽略自己的 review 任务并重跑 orchestrator。
+> Claude Code 的 `Agent` 工具能正常下发任务，因此保留 sub-agent 模型。
+
+**每日触发**（外部定时任务）：
+
+```
+Claude Code：run `python orchestrator.py --review-queue --limit 10 --harness claude`
+  → need_agent 时 spawn reviewer sub-agent 并逐个回传；waiting 时等待；done 结束。
+Codex：run `python orchestrator.py --review-queue --limit 10 --harness codex`
+  → need_agent(method=inline) 时自己 review、写 result 文件、跑 feed_cmd；done 结束。
+```
+
+---
+
 ## 工作空间
 
 每次重构会在 `agent_space/refactor/{field}/{file_name}/` 下创建工作空间：
@@ -446,6 +488,7 @@ pytorch-test-refactoring/
 ├── orchestrator.py              # CLI 桥接层（JSON 任务规格 ⇄ Agent/SendMessage）
 ├── flow.py                      # RefactorFlow 状态机（核心，P1-P7）
 ├── ci_ops.py                    # CIOps 状态机（CI 监控，P8）
+├── review_ops.py                # ReviewOps 状态机（PR review queue sidecar）
 ├── state.py                     # Pydantic 状态模型
 ├── utils.py                     # 常量和工具函数
 ├── scripts/
@@ -454,6 +497,7 @@ pytorch-test-refactoring/
 │   ├── linter.py                # 测试用例 linter（hw_classification 结构化契约）
 │   ├── report.py                # Phase 7：生成总结报告（确定性）
 │   ├── ci.py                    # Phase 8：CI 操作（check-run、bot 评论）
+│   ├── review_queue.py          # PR review queue 确定性逻辑（选择/渲染/发布）
 │   └── logger.py                # 审计日志和状态管理
 ├── agent/
 │   ├── adapter.py               # Agent 任务构建抽象基类
@@ -463,6 +507,8 @@ pytorch-test-refactoring/
 │   │   ├── coder.md             # 编码者 Prompt
 │   │   ├── checker.md           # 审查者 Prompt
 │   │   └── debugger.md          # CI 失败调试 Prompt
+│   │   ├── reviewer.md          # PR review queue 的单个 reviewer Prompt（Claude 子 agent）
+│   │   └── reviewer_batch.md    # PR review queue 的内联批量 review Prompt（Codex）
 │   └── skills/
 │       ├── classify-test-files/ # 测试文件分类 skill
 │       ├── refactor-test-decoupling/  # 解耦方法论 skill
