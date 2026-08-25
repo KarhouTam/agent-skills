@@ -333,6 +333,110 @@ def test_ingest_ops_resumes_from_persisted_state(monkeypatch, tmp_path):
     assert tasks2 and tasks2[0].agent_name == "feedback_analyst"
 
 
+def _triage_task(agent_name: str = "feedback_triage"):
+    from agent.adapter import AgentTask
+
+    return AgentTask(
+        phase="triage",
+        agent_name=agent_name,
+        prompt="## Task\nClassify every comment.",
+    )
+
+
+def test_ingest_inline_spec_codex_and_claude():
+    from agent.claude_code import ClaudeCodeAdapter
+    from agent.codex import CodexAdapter
+
+    task = _triage_task()
+    codex = CodexAdapter()
+    spec = codex.build_ingest_inline_spec(
+        task, feed_file="agent_space/ingest/feedback_triage_result.json", feed_cmd="python orchestrator.py x"
+    )
+    assert spec is not None
+    assert spec["method"] == "inline"
+    assert "feedback_triage" in spec["instruction"]
+    assert "Do NOT spawn sub-agents" in spec["instruction"]
+    assert "orchestrator.py" in spec["instruction"]
+    assert "agent_space/ingest/feedback_triage_result.json" in spec["instruction"]
+    assert "python orchestrator.py x" in spec["instruction"]
+    assert "## Task" in spec["instruction"]
+    assert "Classify every comment." in spec["instruction"]
+    # The spawn contract stays available as a fallback.
+    assert codex.ingest_task_to_spec(task)["method"] == "spawn"
+
+    claude = ClaudeCodeAdapter()
+    assert (
+        claude.build_ingest_inline_spec(
+            task,
+            feed_file="agent_space/ingest/feedback_triage_result.json",
+            feed_cmd="python orchestrator.py x",
+        )
+        is None
+    )
+
+
+def test_emit_ingest_action_codex_inline(monkeypatch, tmp_path):
+    import orchestrator
+    from agent.codex import CodexAdapter
+
+    c = FeedbackComment(
+        comment_id=1,
+        pr_number=185881,
+        author="x",
+        body="b",
+        html_url="u",
+        created_at="2026-08-13T00:00:00Z",
+    )
+    monkeypatch.setattr(ingest, "harvest", lambda *a, **k: ([c], IngestState()))
+    monkeypatch.setattr(ingest_ops_module, "get_ingest_workspace", lambda: tmp_path)
+
+    ops = IngestOps(adapter=CodexAdapter())
+    ops.run()
+    assert ops.state.phase == "triage"
+
+    emitted = {}
+    monkeypatch.setattr(orchestrator, "_write_json", emitted.update)
+    orchestrator._emit_ingest_action(ops)
+
+    assert emitted["status"] == "need_agent"
+    assert emitted["phase"] == "ingest_triage"
+    assert emitted["method"] == "inline"
+    assert "feedback_triage" in emitted["instruction"]
+    assert "tasks" not in emitted
+    assert emitted["on_complete"]["feed_as"] == "feedback_triage"
+    assert "feedback_triage_result.json" in emitted["on_complete"]["feed_file"]
+    assert "--harness codex" in emitted["on_complete"]["command"]
+
+
+def test_emit_ingest_action_claude_spawns(monkeypatch, tmp_path):
+    import orchestrator
+    from agent.claude_code import ClaudeCodeAdapter
+
+    c = FeedbackComment(
+        comment_id=1,
+        pr_number=185881,
+        author="x",
+        body="b",
+        html_url="u",
+        created_at="2026-08-13T00:00:00Z",
+    )
+    monkeypatch.setattr(ingest, "harvest", lambda *a, **k: ([c], IngestState()))
+    monkeypatch.setattr(ingest_ops_module, "get_ingest_workspace", lambda: tmp_path)
+
+    ops = IngestOps(adapter=ClaudeCodeAdapter())
+    ops.run()
+
+    emitted = {}
+    monkeypatch.setattr(orchestrator, "_write_json", emitted.update)
+    orchestrator._emit_ingest_action(ops)
+
+    assert emitted["status"] == "need_agent"
+    assert emitted["phase"] == "ingest_triage"
+    assert "tasks" in emitted
+    assert emitted["tasks"][0]["method"] == "spawn"
+    assert emitted["tasks"][0]["agent_name"] == "feedback_triage"
+
+
 def test_write_findings_md_contains_status_checkbox(tmp_path):
     f = FeedbackFinding(
         id="192760-1001",

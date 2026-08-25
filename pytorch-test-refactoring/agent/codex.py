@@ -120,7 +120,44 @@ class CodexAdapter(ClaudeCodeAdapter):
         return self._spawn_spec(task)
 
     def ingest_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
+        # Kept for the abstract contract; the orchestrator prefers
+        # build_ingest_inline_spec() for Codex because spawn_agent
+        # mis-delivers task messages (openai/codex#25458).
         return self._spawn_spec(task)
+
+    def build_ingest_inline_spec(
+        self,
+        task: AgentTask,
+        *,
+        feed_file: str,
+        feed_cmd: str,
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Return an inline (executor-performed) spec for ingest AI steps.
+
+        Codex MultiAgentV2 records the spawn_agent task `message` as an
+        assistant/commentary mailbox envelope rather than a user/task message
+        (openai/codex#25458), so spawned triage/analyst/ruleset-editor agents
+        ignore their assignment and re-run the orchestrator instead. The
+        executor performs the step itself and feeds the result back.
+        """
+        instruction = (
+            f"You are the `{task.agent_name}` agent for the feedback-ingest "
+            "pipeline. Perform the task below YOURSELF with your own tools. "
+            "Do NOT spawn sub-agents, do NOT run `orchestrator.py` again, and "
+            "do NOT wait on other agents. Read any referenced ruleset files "
+            "before deciding.\n\n"
+            f"When done, write your result JSON exactly to:\n{feed_file}\n\n"
+            f"Then run exactly:\n{feed_cmd}\n\n"
+            "## Task\n\n"
+            f"{task.prompt}"
+        )
+        if note:
+            instruction += f"\n\nNote: {note}"
+        return {
+            "method": "inline",
+            "instruction": instruction,
+        }
 
     def review_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
         # Kept for the abstract contract; Codex review-queue uses inline

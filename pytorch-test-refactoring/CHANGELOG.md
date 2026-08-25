@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-08-25 — Ingest sidecar 适配 Codex harness（inline 执行）
+
+- **修复**：`--ingest-feedback` 与 `--apply-ingest` 在 Codex harness 下不再
+  spawn triage/analyst/ruleset-editor 子代理。Codex MultiAgentV2 会把
+  `spawn_agent` 的任务 message 记录为 assistant/commentary 信封而非
+  user/task message（openai/codex#25458），导致子代理忽略任务并重跑
+  orchestrator（表现为挂起、无结果、重复产出）。与 review queue 相同，
+  Codex 改为 `method="inline"`：由 executor（main agent）自己执行
+  triage/analyst/apply 步骤，把结果 JSON 写入 `feed_file` 后运行
+  `on_complete.command`；Claude 保持 spawn 子代理不变。
+- **实现**：`BaseAdapter.build_ingest_inline_spec()`（默认返回 None），
+  `CodexAdapter` 覆写为 inline spec；`orchestrator._emit_ingest_action` 与
+  `_run_apply_ingest` 优先使用 inline spec，无 harness 分支侵入 orchestrator。
+  SKILL.md 的 ingest 章节与 daily cron prompt 更新为按 harness 分流。
+
 ## 2026-08-24 — Reviewer 反馈摄取（已应用）
 
 - **Minor** [193124-3809809488](https://github.com/pytorch/pytorch/pull/193124#discussion_r3809809488) — 重构后遗留的孤儿 helper 函数未被覆盖：analyst/coder prompt 与 verify.py 只处理过期 import/符号，从不扫描无调用方的死 helper 函数。（目标：coder.md）

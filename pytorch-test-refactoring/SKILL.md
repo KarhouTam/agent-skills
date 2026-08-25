@@ -230,27 +230,46 @@ into ruleset edits after human approval. Runs independently of the 8-phase
 refactoring workflow.
 
 ```bash
-# Harvest + analyze (cron-driven; runs triage then draft agents)
+# Harvest + analyze (cron-driven; runs triage then draft steps)
 python orchestrator.py --harness <claude|codex> --ingest-feedback
 
 # Apply approved findings (after editing a findings file's checkboxes)
 python orchestrator.py --harness <claude|codex> --apply-ingest agent_space/ingest/findings/PR-<n>.md
 ```
 
+The AI steps are harness-dependent, same as the review queue:
+
+- **Claude Code** — status=`need_agent` with `tasks[]` (`method=spawn`): spawn
+  the triage/analyst/ruleset-editor agent, then feed its result back.
+- **Codex** — status=`need_agent` with `method="inline"`: YOU are the
+  triage/analyst/ruleset-editor agent. Follow `instruction`, write the result
+  JSON to the `feed_file` path, then run `on_complete.command`. Do NOT spawn
+  sub-agents.
+
 **Daily cron:** `CronCreate` with a durable prompt:
 
 ```
 Run `python orchestrator.py --ingest-feedback`. Read the JSON output.
-If status is `need_agent`, spawn the agent with the provided parameters
-(run_in_background=true). When done, save the result JSON to the
-`feed_file` path from the task spec (Write tool), then run the
-`on_complete.command`. Loop until status is `done`.
+If status is `need_agent`:
+- `method=spawn` (Claude): spawn the agent with the provided parameters
+  (run_in_background=true). When done, save the result JSON to the
+  `feed_file` path (Write tool), then run the `on_complete.command`.
+- `method=inline` (Codex): perform the task yourself — follow `instruction`,
+  write the result JSON to the `feed_file` path, then run the
+  `on_complete.command`. Do NOT spawn sub-agents.
+Loop until status is `done`.
 ```
 
 Workspace: `agent_space/ingest/` (state in `state.json`, reviewable findings
 in `findings/`). State cursor is per-PR `last_checked_at`; comments already
 processed are skipped. Only merged PRs (the `Merged` label) and replied
 inline threads + `claude[bot]` summaries are harvested.
+
+Why Codex differs: Codex MultiAgentV2 records the `spawn_agent` task `message`
+as an assistant/commentary mailbox envelope rather than a user/task message
+(openai/codex#25458), so spawned ingest agents ignore their assignment and
+re-run the orchestrator — the same bug that forced the review queue to inline
+execution. The executor therefore performs triage/analyst/apply steps itself.
 
 ## PR Review Queue (sidecar)
 

@@ -833,6 +833,29 @@ def _emit_ingest_action(ops: "IngestOps") -> None:
         cmd = _cmd(
             adapter, "--ingest-feedback", "--feed", feed_as, "--feed-file", feed_file
         )
+        inline = adapter.build_ingest_inline_spec(
+            tasks[0], feed_file=feed_file, feed_cmd=cmd
+        )
+        if inline is not None:
+            _write_json(
+                {
+                    "status": "need_agent",
+                    "phase": f"ingest_{sm.phase}",
+                    **inline,
+                    "on_complete": {
+                        "feed_as": feed_as,
+                        "command": cmd,
+                        "feed_file": feed_file,
+                        "note": (
+                            "This is an inline task: YOU are the "
+                            f"`{feed_as}` agent. Do NOT spawn sub-agents. "
+                            "Follow the instruction, write the result JSON to "
+                            f"{feed_file}, then run: {cmd}"
+                        ),
+                    },
+                }
+            )
+            return
         _write_json(
             {
                 "status": "need_agent",
@@ -1081,6 +1104,30 @@ def _run_apply_ingest(args, adapter) -> None:
         "--feed-file",
         feed_file,
     )
+    inline = adapter.build_ingest_inline_spec(
+        task, feed_file=feed_file, feed_cmd=feed_cmd
+    )
+    if inline is not None:
+        _write_json(
+            {
+                "status": "need_agent",
+                "phase": "ingest_apply",
+                **inline,
+                "on_complete": {
+                    "feed_as": "ruleset_editor",
+                    "command": feed_cmd,
+                    "feed_file": feed_file,
+                    "note": (
+                        "This is an inline task: YOU are the `ruleset_editor`. "
+                        "Do NOT spawn sub-agents. Apply the approved edits to "
+                        "the ruleset files yourself, save a JSON summary "
+                        '{"applied": true} to the feed_file, then run the '
+                        "command to record the CHANGELOG entry."
+                    ),
+                },
+            }
+        )
+        return
     _write_json(
         {
             "status": "need_agent",

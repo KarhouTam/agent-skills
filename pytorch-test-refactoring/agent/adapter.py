@@ -151,6 +151,24 @@ class BaseAdapter(ABC):
     def ingest_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
         """Convert an ingest/ruleset-editor AgentTask into a spec."""
 
+    def build_ingest_inline_spec(
+        self,
+        task: AgentTask,
+        *,
+        feed_file: str,
+        feed_cmd: str,
+        note: str = "",
+    ) -> dict[str, Any] | None:
+        """Return an inline (executor-performed) spec for ingest AI steps.
+
+        Harnesses whose spawned agents receive delegated task messages
+        correctly (Claude Code) return None and use `ingest_task_to_spec`
+        instead. Harnesses where spawn_agent mis-delivers the task message
+        (Codex, openai/codex#25458) return an inline spec that the executor
+        performs itself. Defaults to None; adapters override as needed.
+        """
+        return None
+
     @abstractmethod
     def review_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
         """Convert a review-queue reviewer AgentTask into a spec."""
