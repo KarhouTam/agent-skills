@@ -388,8 +388,13 @@ def _check_has_device_param(ctx: RuleContext) -> list[LintMessage]:
 
 
 @_register(HardwareClassification.ACCELERATOR)
+@_register(HardwareClassification.GENERIC)
+@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
 def _check_no_only_decorators(ctx: RuleContext) -> list[LintMessage]:
-    """ACCELERATOR classes: test methods must not use only* decorators except onlyAccelerator."""
+    """All classes: test methods must not use only* device-scope decorators
+    (onlyCUDA / onlyOn / onlyCPU / ...) except onlyAccelerator. Device scope
+    must be declared via hw_classification plus only_for/except_for
+    instantiation, not method-level device decorators."""
     messages: list[LintMessage] = []
     for stmt in ctx.test_methods:
         for dec in stmt.decorator_list:

@@ -39,6 +39,7 @@ def verify(
         checks.append(_check_decorateinfo(file_path, original_classes))
         checks.append(_check_external_refs(file_path, original_classes, workspace))
         checks.append(_check_stale_patterns(file_path, workspace, assessment))
+        checks.append(_check_onlycuda_residual(file_path))
         checks.append(_check_imports(file_path))
 
         # New Phase-5 checks
@@ -528,6 +529,43 @@ def _check_stale_patterns(
         passed=passed,
         details="Clean" if passed else f"Remaining: {'; '.join(findings)}",
         command=f"grep -nE 'onlyOn\\(|(?<!torch)\\.cuda\\(\\)|device\\s*=\\s*\"cuda\"' {file_path}",
+    )
+
+
+def _check_onlycuda_residual(file_path: str) -> VerificationCheck:
+    """Flag residual @onlyCUDA decorators outside S3 CUDA-guarded classes.
+
+    @onlyCUDA is only legitimate inside an S3 CUDA-guarded class (a class
+    whose name carries a CUDA/MPS/XPU suffix or that has a CUDA guard
+    decorator, per ``_mark_cuda_class_ranges``). A leftover @onlyCUDA
+    anywhere else silently pins the test to CUDA even though the class is
+    not CUDA-specific — it must be migrated to @onlyAccelerator (S2) or the
+    test moved into an S3 class.
+    """
+    content = Path(file_path).read_text()
+    lines = content.split("\n")
+
+    cuda_class_ranges: set[int] = set()
+    _mark_cuda_class_ranges(lines, cuda_class_ranges)
+
+    findings: list[str] = []
+    for i, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if re.search(r"@onlyCUDA\b", stripped) and not stripped.startswith("#"):
+            if i not in cuda_class_ranges:
+                findings.append(
+                    f"L{i}: @onlyCUDA outside S3 CUDA-guarded class "
+                    f"(should be @onlyAccelerator or moved into an S3 class)"
+                )
+
+    passed = len(findings) == 0
+    return VerificationCheck(
+        name="onlycuda_residual",
+        passed=passed,
+        details="No residual @onlyCUDA decorators"
+        if passed
+        else "; ".join(findings[:10]),
+        command=f"grep -n '@onlyCUDA' {file_path}",
     )
 
 
@@ -1124,8 +1162,10 @@ def _check_imports(file_path: str) -> VerificationCheck:
 
     Checks for imports that indicate the file still has device-specific
     coupling: TEST_CUDA, TEST_MPS, TEST_XPU, onlyOn, onlyCUDA.
-    ``onlyCUDA`` is exempted when it is actively used as a decorator
-    (``@onlyCUDA``), which is legitimate for S3 device-specific classes.
+    ``onlyCUDA`` is exempted only when it is actively used as a decorator
+    (``@onlyCUDA``) inside an S3 CUDA-guarded class, which is legitimate.
+    A ``@onlyCUDA`` anywhere else is residual and must not keep the import
+    alive — it is flagged by ``_check_onlycuda_residual``.
     """
     content = Path(file_path).read_text()
     findings = [imp for imp in _STALE_IMPORTS if imp in content]
@@ -1134,9 +1174,18 @@ def _check_imports(file_path: str) -> VerificationCheck:
         if re.search(rf"^{sym}\s*=", content, re.MULTILINE):
             findings.append(f"{sym} (module-level variable)")
 
-    # Exempt onlyCUDA when actively used as a decorator (S3 classes)
-    if "onlyCUDA" in findings and re.search(r"@onlyCUDA\b", content):
-        findings.remove("onlyCUDA")
+    # Exempt onlyCUDA only when it is actively used as a decorator inside an
+    # S3 CUDA-guarded class (legitimate).
+    if "onlyCUDA" in findings:
+        lines = content.split("\n")
+        cuda_class_ranges: set[int] = set()
+        _mark_cuda_class_ranges(lines, cuda_class_ranges)
+        in_s3_cuda_class = any(
+            i in cuda_class_ranges and re.search(r"@onlyCUDA\b", lines[i - 1].strip())
+            for i in range(1, len(lines) + 1)
+        )
+        if in_s3_cuda_class:
+            findings.remove("onlyCUDA")
 
     passed = len(findings) == 0
     return VerificationCheck(

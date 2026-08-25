@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-24 — Reviewer 反馈摄取（已应用）
+
+- **Minor** [193124-3809809488](https://github.com/pytorch/pytorch/pull/193124#discussion_r3809809488) — 重构后遗留的孤儿 helper 函数未被覆盖：analyst/coder prompt 与 verify.py 只处理过期 import/符号，从不扫描无调用方的死 helper 函数。（目标：coder.md）
+- **Major** [192741-3756398487](https://github.com/pytorch/pytorch/pull/192741#discussion_r3756398487) — S3 CUDA 类之外的残留 `@onlyCUDA` 装饰器能通过验证：`_check_stale_patterns` 从不标记 `@onlyCUDA`，`_check_imports` 只要文件任意位置出现 `@onlyCUDA` 装饰器即豁免 `onlyCUDA` import，导致遗留的 CUDA-only 装饰器从未被确定性捕获。（目标：verify.py、scripts/linter.py）
+- **Major** [187926-5284009124](https://github.com/pytorch/pytorch/pull/187926#issuecomment-5284009124) — “半转换”缺口：测试新增了 device 参数但部分张量构造仍建在 CPU 上（`test_fliplr_invalid` 的 `torch.randn(42).to(dtype)` 忽略 device），且设备无关改动（`.cpu()` before `.numpy()`）被带入 `only_for="cpu"` 类成为死代码（`test_diagonal_multidim`）；coder.md 未记录或验证这些模式。（目标：coder.md）
+
 ## 2026-08-17 — PR Review Queue（每日批量 review sidecar，按 harness 分流）
 
 新增独立 sidecar 模块 `review_ops.py`：读取 `agent_space/pr_needs_review.txt`

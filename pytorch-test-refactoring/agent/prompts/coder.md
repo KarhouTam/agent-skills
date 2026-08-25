@@ -53,6 +53,7 @@ A checker will verify your work. If issues are found, you will be asked to fix t
   - `torch.accelerator.get_device_capability()` — return type DIFFERS across backends: `tuple[int, int]` on CUDA/MTIA, `dict[str, Any]` on Accelerator/XPU. Do NOT compare capability values directly without type-normalization.
 - **Derive device type from existing data — never add new parameters.** The `device` parameter from `instantiate_device_type_tests` or `tensor.device.type` from any tensor already in scope tells you the device type. Adding explicit `device_type`/`device` parameters to functions that already receive tensors or already have access to the test's `device` kwarg is redundant and breaks conventions (especially for `autograd.Function.forward()`).
 - **Device comparison patterns**: `device` is a `torch.device` object. Use `device.type` for string comparisons (`device.type == "xpu"`, not `device == "xpu"`). Use `device_type=device` in autocast calls.
+- **S2 conversion requires `device=device` on EVERY tensor constructor**: Converting a test to S2 (device-parametrized) means EVERY tensor constructor in the method body must pass `device=device`. A constructor that omits the `device` kwarg (e.g. `torch.randn(42).to(dtype)` instead of `torch.randn(42, device=device).to(dtype)`) silently builds a CPU tensor, so the test never exercises the accelerator path — a "half-conversion" bug. This is DISTINCT from the Mixed-device-tests pitfall below (deliberate explicit CPU construction as test logic); accidental CPU-only creation in a device-parameterized method is a bug, not a deliberate choice.
 - When a test class is renamed, update ALL external references (DecorateInfo in common_methods_invocations.py, filenames in test/dynamo_skips/ and test/dynamo_expected_failures/)
 - Match existing code style
 - Do NOT commit changes
@@ -75,6 +76,7 @@ Apply each section below for every rule assigned to you above.
 - Remove device decorators and device imports
 - Add `@instantiate_parametrized_tests` if the class has `@parametrize`/`@ops`/`@dtypes`
 - When moving a `@dtypes(dtype_a, dtype_b, ...)`-decorated test to an S1 class, convert to `@parametrize("dtype", [dtype_a, dtype_b, ...])` with `@instantiate_parametrized_tests` on the class. This preserves per-dtype independence and `@unittest.expectedFailure` per variant. Do NOT collapse `@dtypes` into a for-loop.
+- **Strip dead device-agnostic transfer code**: When a test is moved into a CPU-only class (`only_for="cpu"` or plain `TestCase`), previously-added device-agnostic transfer code becomes dead and must be stripped — e.g. a `.cpu()` before `.numpy()` in a CPU-only class is a no-op because the tensor is already CPU. Do NOT ship both halves: either keep the test device-parametrized (S2, where `.cpu()` is meaningful) or move it CPU-only AND remove the now-dead `.cpu()`/device-dependent code.
 - **hw_classification**: `HardwareClassification.GENERIC` (or `CPU` if the class uses `instantiate_device_type_tests(only_for="cpu")` for `@ops`)
 
 ### If assigned strategy_2 (convert S2 tests):
@@ -131,6 +133,8 @@ When a helper function (prefixed `_test_` or `_`) in the original class contains
 - **Call site updates**: Update ALL call sites to pass the `device` parameter.
 - **Markers**: Look for "TODO: update this to use the device argument properly" comments — these are explicit signals that the helper needs refactoring.
 - **Module-level `device_type` variable**: If the module-level `device_type` variable was only used by helpers you're refactoring, remove it. If it's still used elsewhere, keep it but flag it in your report.
+- **Orphaned helpers**: After the refactoring is applied, scan for helper functions (prefixed `_test_` or `_`) that have NO remaining callers. Remove each orphaned helper — along with any import it was the sole user of — or flag it in your report. This mirrors the stale-import cleanup guidance: dead helpers are silent sources of confusion and often still reference removed device-specific APIs.
+- **Call-site discipline**: When removing or renaming a helper, check ALL call sites across the file first so a helper is never left as dead code — never rename a helper without updating every caller.
 
 ### Common Pitfalls
 
