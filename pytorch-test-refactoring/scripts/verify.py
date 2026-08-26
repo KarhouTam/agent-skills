@@ -430,7 +430,7 @@ def _check_stale_patterns(
     Uses word boundaries and context to avoid false positives:
     - .cuda() is only flagged when not preceded by 'torch' (avoids
       matching torch.cuda.is_available() etc.)
-    - .cuda() calls inside CUDA-guarded classes (Strategy 3) are skipped
+    - .cuda() calls inside CUDA-guarded classes (device-specific) are skipped
     - device=\"cuda\" only flags hardcoded defaults, not equality checks
       against a variable named device.
     """
@@ -455,7 +455,7 @@ def _check_stale_patterns(
             stale_counts[key] = stale_counts.get(key, 0) + 1
 
         # Skip all device-specific pattern checks inside CUDA-guarded classes
-        # (Strategy 3 tests legitimately use CUDA-specific APIs)
+        # (device-specific tests legitimately use CUDA-specific APIs)
         if i in cuda_class_ranges:
             continue
 
@@ -483,22 +483,22 @@ def _check_stale_patterns(
             key = "@onlyCPU decorator (should be removed or replaced)"
             stale_counts[key] = stale_counts.get(key, 0) + 1
 
-        # ── m1: _cuda suffix in test method names (non-S3 classes) ──
+        # ── m1: _cuda suffix in test method names (non-device-specific classes) ──
         method_match = re.match(r"def\s+(test_\w*_cuda\w*)\(", stripped)
         if method_match:
-            key = f"_cuda suffix in method '{method_match.group(1)}' (rename or move to S3)"
+            key = f"_cuda suffix in method '{method_match.group(1)}' (rename or move to device-specific)"
             stale_counts[key] = stale_counts.get(key, 0) + 1
 
-        # ── M5 item 2: @unittest.skipIf(not TEST_CUDA, ...) in non-S3 ──
+        # ── M5 item 2: @unittest.skipIf(not TEST_CUDA, ...) in non-device-specific ──
         if re.search(r"@unittest\.skipIf\(not\s+TEST_CUDA", stripped):
-            key = "@unittest.skipIf(not TEST_CUDA, ...) in non-S3 class (should be @onlyAccelerator)"
+            key = "@unittest.skipIf(not TEST_CUDA, ...) in non-device-specific class (should be @onlyAccelerator)"
             stale_counts[key] = stale_counts.get(key, 0) + 1
 
-        # ── M5 item 4: torch.cuda.* calls in non-S3 classes ──
+        # ── M5 item 4: torch.cuda.* calls in non-device-specific classes ──
         torch_cuda_calls = re.findall(r"torch\.cuda\.\w+", stripped)
         if torch_cuda_calls and not stripped.startswith("#"):
             for call in torch_cuda_calls:
-                key = f"{call} in non-S3 class (should be migrated or moved to S3)"
+                key = f"{call} in non-device-specific class (should be migrated or moved to device-specific)"
                 stale_counts[key] = stale_counts.get(key, 0) + 1
 
         # ── m2: device == 'cuda' / 'xpu' bare string comparison ──
@@ -533,14 +533,14 @@ def _check_stale_patterns(
 
 
 def _check_onlycuda_residual(file_path: str) -> VerificationCheck:
-    """Flag residual @onlyCUDA decorators outside S3 CUDA-guarded classes.
+    """Flag residual @onlyCUDA decorators outside device-specific CUDA-guarded classes.
 
-    @onlyCUDA is only legitimate inside an S3 CUDA-guarded class (a class
+    @onlyCUDA is only legitimate inside a device-specific CUDA-guarded class (a class
     whose name carries a CUDA/MPS/XPU suffix or that has a CUDA guard
     decorator, per ``_mark_cuda_class_ranges``). A leftover @onlyCUDA
     anywhere else silently pins the test to CUDA even though the class is
-    not CUDA-specific — it must be migrated to @onlyAccelerator (S2) or the
-    test moved into an S3 class.
+    not CUDA-specific — it must be migrated to @onlyAccelerator (device-agnostic) or the
+    test moved into a device-specific class.
     """
     content = Path(file_path).read_text()
     lines = content.split("\n")
@@ -554,8 +554,8 @@ def _check_onlycuda_residual(file_path: str) -> VerificationCheck:
         if re.search(r"@onlyCUDA\b", stripped) and not stripped.startswith("#"):
             if i not in cuda_class_ranges:
                 findings.append(
-                    f"L{i}: @onlyCUDA outside S3 CUDA-guarded class "
-                    f"(should be @onlyAccelerator or moved into an S3 class)"
+                    f"L{i}: @onlyCUDA outside device-specific CUDA-guarded class "
+                    f"(should be @onlyAccelerator or moved into a device-specific class)"
                 )
 
     passed = len(findings) == 0
@@ -819,8 +819,8 @@ def _extract_method_decorators(content: str) -> dict[str, list[str]]:
 def _mark_cuda_class_ranges(lines: list[str], cuda_ranges: set[int]) -> None:
     """Populate cuda_ranges with line numbers inside device-specific test classes.
 
-    A class is considered device-specific (Strategy 3) if:
-    - Its name contains CUDA, MPS, or XPU (S3 naming convention: TestFooCUDA)
+    A class is considered device-specific if:
+    - Its name contains CUDA, MPS, or XPU (device-specific naming convention: TestFooCUDA)
     - It has a class-level decorator with ``cuda.is_available()`` or ``torch.cuda``
     Lines from the class start through its end are added to cuda_ranges.
     """
@@ -837,7 +837,7 @@ def _mark_cuda_class_ranges(lines: list[str], cuda_ranges: set[int]) -> None:
             class_name = stripped.split("class ")[1].split("(")[0].split(":")[0]
             is_s3 = False
 
-            # Check class name for S3 device suffix (TestFooCUDA, TestFooMPS, etc.)
+            # Check class name for device-specific device suffix (TestFooCUDA, TestFooMPS, etc.)
             if any(class_name.endswith(d) for d in ("CUDA", "MPS", "XPU")):
                 is_s3 = True
 
@@ -888,7 +888,7 @@ _STALE_IMPORTS = [
     "onlyCUDA",
 ]
 
-# Module-level symbols that become stale after S2 conversion.
+# Module-level symbols that become stale after device-agnostic conversion.
 _STALE_SYMBOLS = [
     "device_type",
 ]
@@ -904,7 +904,7 @@ def _check_class_split(
     Reads analyst_report.json from workspace and checks:
     1. If new_classes were recommended, the new classes exist in the file
     2. The recommended tests were actually moved out of the original class
-    3. New classes have correct instantiation (no instantiate_device_type_tests for S1)
+    3. New classes have correct instantiation (no instantiate_device_type_tests for CPU-only)
     """
     if workspace is None:
         file_name = Path(file_path).stem
@@ -971,11 +971,11 @@ def _check_class_split(
                         f"(should be in '{class_name}')"
                     )
 
-        # Check correct instantiation for S1 classes
-        if strategy == "Strategy1":
+        # Check correct instantiation for CPU-only classes
+        if strategy == "cpu_only":
             if f"instantiate_device_type_tests({class_name}" in content:
                 issues.append(
-                    f"S1 class '{class_name}' uses instantiate_device_type_tests "
+                    f"CPU-only class '{class_name}' uses instantiate_device_type_tests "
                     f"— should use plain TestCase or @instantiate_parametrized_tests"
                 )
 
@@ -1163,7 +1163,7 @@ def _check_imports(file_path: str) -> VerificationCheck:
     Checks for imports that indicate the file still has device-specific
     coupling: TEST_CUDA, TEST_MPS, TEST_XPU, onlyOn, onlyCUDA.
     ``onlyCUDA`` is exempted only when it is actively used as a decorator
-    (``@onlyCUDA``) inside an S3 CUDA-guarded class, which is legitimate.
+    (``@onlyCUDA``) inside a device-specific CUDA-guarded class, which is legitimate.
     A ``@onlyCUDA`` anywhere else is residual and must not keep the import
     alive — it is flagged by ``_check_onlycuda_residual``.
     """
@@ -1175,7 +1175,7 @@ def _check_imports(file_path: str) -> VerificationCheck:
             findings.append(f"{sym} (module-level variable)")
 
     # Exempt onlyCUDA only when it is actively used as a decorator inside an
-    # S3 CUDA-guarded class (legitimate).
+    # device-specific CUDA-guarded class (legitimate).
     if "onlyCUDA" in findings:
         lines = content.split("\n")
         cuda_class_ranges: set[int] = set()

@@ -16,7 +16,7 @@
           <mxGeometry x="400" y="70" width="300" height="80" as="geometry" />
         </mxCell>
 
-        <!-- No branch -> Strategy 1 -->
+        <!-- No branch -> CPU-only -->
         <mxCell id="edge-no" value="NO" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#82b366;fontSize=12;fontStyle=1;" edge="1" parent="1" source="root">
           <mxGeometry x="-0.2" y="30" relative="1" as="geometry">
             <mxPoint x="200" y="180" as="targetPoint" />
@@ -25,7 +25,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="s1-result" value="策略1&lt;br&gt;🧪 Accelerator-Unrelated&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;CPU only · 纯逻辑验证&lt;br&gt;@instantiate_parametrized_tests&lt;br&gt;或 plain TestCase&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;arcSize=10;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="s1-result" value="CPU-only&lt;br&gt;🧪 TestFoo&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;CPU only · 纯逻辑验证&lt;br&gt;@instantiate_parametrized_tests&lt;br&gt;或 plain TestCase&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;arcSize=10;fontSize=13;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="50" y="170" width="300" height="90" as="geometry" />
         </mxCell>
 
@@ -40,7 +40,7 @@
           <mxGeometry x="400" y="240" width="300" height="70" as="geometry" />
         </mxCell>
 
-        <!-- Branch: generic only -> Strategy 2 -->
+        <!-- Branch: generic only -> device-agnostic -->
         <mxCell id="edge-generic" value="通用 API&lt;br&gt;(device参数, make_tensor)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" edge="1" parent="1" source="q2">
           <mxGeometry x="-0.9" y="20" relative="1" as="geometry">
             <mxPoint x="200" y="360" as="targetPoint" />
@@ -49,11 +49,11 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="s2a-result" value="策略2&lt;br&gt;⚡ Accelerator-Agnostic&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;使用 device 参数&lt;br&gt;instantiate_device_type_tests()&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;arcSize=10;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="s2a-result" value="device-agnostic&lt;br&gt;⚡ TestFooDevice&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;使用 device 参数&lt;br&gt;instantiate_device_type_tests()&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;arcSize=10;fontSize=13;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="50" y="350" width="300" height="80" as="geometry" />
         </mxCell>
 
-        <!-- Branch: Category A/B -> Strategy 2 -->
+        <!-- Branch: Category A/B -> device-agnostic -->
         <mxCell id="edge-catab" value="Category A/B API&lt;br&gt;(有 accelerator 等价物&lt;br&gt;或通用概念)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" edge="1" parent="1" source="q2">
           <mxGeometry x="0" y="20" relative="1" as="geometry">
             <mxPoint x="550" y="430" as="targetPoint" />
@@ -96,14 +96,14 @@
           </mxGeometry>
         </mxCell>
 
-        <!-- Strategy 2 labels -->
-        <mxCell id="s2-label-a" value="→ 策略2" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=11;fontStyle=1;fontColor=#6c8ebf;" vertex="1" parent="1">
+        <!-- device-agnostic labels -->
+        <mxCell id="s2-label-a" value="→ device-agnostic" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=11;fontStyle=1;fontColor=#6c8ebf;" vertex="1" parent="1">
           <mxGeometry x="100" y="625" width="180" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="s2-label-b" value="→ 策略2" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=11;fontStyle=1;fontColor=#6c8ebf;" vertex="1" parent="1">
+        <mxCell id="s2-label-b" value="→ device-agnostic" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=11;fontStyle=1;fontColor=#6c8ebf;" vertex="1" parent="1">
           <mxGeometry x="460" y="625" width="180" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="s3-label-c" value="→ 策略3 🔧" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=11;fontStyle=1;fontColor=#b85450;" vertex="1" parent="1">
+        <mxCell id="s3-label-c" value="→ device-specific 🔧" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=11;fontStyle=1;fontColor=#b85450;" vertex="1" parent="1">
           <mxGeometry x="820" y="625" width="180" height="20" as="geometry" />
         </mxCell>
 
@@ -148,7 +148,7 @@
         <mxCell id="keyrule-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;arcSize=8;" vertex="1" parent="1">
           <mxGeometry x="790" y="750" width="240" height="75" as="geometry" />
         </mxCell>
-        <mxCell id="keyrule-text" value="&lt;b&gt;判别法则&lt;/b&gt;&lt;br&gt;将 &quot;cuda&quot; 换成 &quot;mps&quot;&lt;br&gt;测试是否仍然合理？&lt;br&gt;是 → 策略2 · 否 → 策略3" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#4a3073;" vertex="1" parent="1">
+        <mxCell id="keyrule-text" value="&lt;b&gt;判别法则&lt;/b&gt;&lt;br&gt;将 &quot;cuda&quot; 换成 &quot;mps&quot;&lt;br&gt;测试是否仍然合理？&lt;br&gt;是 → device-agnostic · 否 → device-specific" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=11;fontColor=#4a3073;" vertex="1" parent="1">
           <mxGeometry x="795" y="755" width="230" height="65" as="geometry" />
         </mxCell>
 

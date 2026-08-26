@@ -62,9 +62,9 @@ def test_reference_dirs_are_fielded():
 
 
 def test_non_core_rules_are_cleanup_only():
-    assignments = {"TestFoo": "Strategy2"}
+    assignments = {"TestFoo": "device_agnostic"}
     assert compute_applicable_rules(assignments, "core") == [
-        "strategy_2",
+        "device_agnostic",
         "cleanup",
     ]
     assert compute_applicable_rules(assignments, "graph") == ["cleanup"]

@@ -9,9 +9,9 @@ For human-readable summary, see `reference/device_specific_features_report.md`.
 Category C (device-specific) > Category B (no wrapper) > Category A (replaceable) > none (CPU-only)
 ```
 
-First match wins. A test using ANY Category C API is Strategy 3.
+First match wins. A test using ANY Category C API is device-specific.
 
-**S3 classification note:** An `if device_type == "<backend>"` conditional in the test body does NOT make a test S3. Classify based on Category C API calls only — check the `device_api_catalog.yaml` Category C list.
+**Device-specific classification note:** An `if device_type == "<backend>"` conditional in the test body does NOT make a test device-specific. Classify based on Category C API calls only — check the `device_api_catalog.yaml` Category C list.
 
 ## Lookup Rules
 
@@ -21,7 +21,7 @@ First match wins. A test using ANY Category C API is Strategy 3.
 2. Check `category_a.name_differs` — if the API name matches a device_api entry, it's Category A (use the accelerator_api name)
 3. Check `category_c.<backend>.*.apis` — if the full path matches, it's Category C (must stay device-specific)
 4. Check `category_b.*` — if the API name matches, it's Category B (no wrapper exists, treat as device-specific)
-5. Otherwise — no device dependency (Strategy 1)
+5. Otherwise — no device dependency (CPU-only)
 
 ### Decision rules (from YAML):
 

@@ -18,7 +18,7 @@ All paths are relative to the workspace: `{workspace}`
    - `CAUSED_BY_US` — The refactoring introduced this failure. Fix the code.
    - `UNRELATED` — Pre-existing, flaky, infrastructure, or not our fault. Skip.
 3. **Read** `analyst_report.json` to understand the original strategy assignments. Common fix patterns:
-   - XPU/MPS can't run a test moved to S2 → revert to S3
+   - XPU/MPS can't run a test moved to device-agnostic → revert to device-specific
    - Wrong decorator applied → fix decorator
    - Import breakage from removed TEST_CUDA/TEST_MPS → restore needed imports
    - Class rename broke DecorateInfo or dynamo references → update references

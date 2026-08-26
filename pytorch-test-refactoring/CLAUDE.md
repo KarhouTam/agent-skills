@@ -43,17 +43,17 @@ Tests are split into three strategies (full decision framework in `agent/skills/
 
 | Strategy | Mechanism                                            | hw_classification    | When                                              |
 | -------- | ---------------------------------------------------- | -------------------- | ------------------------------------------------- |
-| S1       | `@instantiate_parametrized_tests` or `TestCase`      | `GENERIC` (or `CPU`) | No device dependency, pure CPU logic              |
-| S2       | `instantiate_device_type_tests()`                    | `ACCELERATOR`        | Uses `device` param with generic accelerator APIs |
-| S3       | `instantiate_device_type_tests(only_for="<device>")` | `CUDA`/`MPS`/`XPU`   | Truly device-specific APIs (Category C)           |
+| CPU-only       | `@instantiate_parametrized_tests` or `TestCase`      | `GENERIC` (or `CPU`) | No device dependency, pure CPU logic              |
+| device-agnostic       | `instantiate_device_type_tests()`                    | `ACCELERATOR`        | Uses `device` param with generic accelerator APIs |
+| device-specific       | `instantiate_device_type_tests(only_for="<device>")` | `CUDA`/`MPS`/`XPU`   | Truly device-specific APIs (Category C)           |
 
 **Import:** `from torch.testing._internal.common_utils import HardwareClassification`. Class renaming is OPTIONAL — the future `hw_classification` member drives classification; rename only when external reference impact (DecorateInfo, dynamo skips) is low.
 
 ### Device API classification (first match wins)
 
-- **Category A** — has `torch.accelerator.*` equivalent → S2
-- **Category B** — cross-backend concept, no wrapper yet (Stream, Event) → S2
-- **Category C** — truly device-specific (NCCL, NVTX, cuDNN, GDS, Jiterator, Metal shaders) → S3
+- **Category A** — has `torch.accelerator.*` equivalent → device-agnostic
+- **Category B** — cross-backend concept, no wrapper yet (Stream, Event) → device-agnostic
+- **Category C** — truly device-specific (NCCL, NVTX, cuDNN, GDS, Jiterator, Metal shaders) → device-specific
 
 The authoritative catalog is `reference/device_api_catalog.yaml` (lookup guide: `reference/classification_guide.md`).
 
@@ -63,7 +63,7 @@ Files resolve to `core` (default), `distributed`, or `graph` by exact
 membership in `reference/distributed/test_list.txt` or
 `reference/graph/test_list.txt`. Ambiguous membership is an error.
 
-`core` keeps the historical root reference directory and full S1/S2/S3
+`core` keeps the historical root reference directory and full CPU-only/device-agnostic/device-specific
 workflow. Non-core fields use `reference/<field>/`, fall back to core
 references for missing content, and currently run a field-agnostic baseline:
 cleanup only, generic verification/review, and no local-test gate.

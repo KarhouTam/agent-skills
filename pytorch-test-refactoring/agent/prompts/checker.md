@@ -4,7 +4,7 @@ You are the CHECKER for the {file_name} refactoring team. Review the analyst's r
 
 {scope_detail}
 
-**If scope is PER-RULE and rule is strategy_2**: Additionally verify that the test methods being converted to device-parametrized genuinely benefit from running on multiple devices. Flag any test where `device` adds no testing value — e.g., tests of pure utility logic (`pad_sequence`, `pack_sequence`, etc.) where tensor creation is incidental. A test whose `device` parameter is unused in the method body is a strong signal of incorrect S2 classification.
+**If scope is PER-RULE and rule is device_agnostic**: Additionally verify that the test methods being converted to device-parametrized genuinely benefit from running on multiple devices. Flag any test where `device` adds no testing value — e.g., tests of pure utility logic (`pad_sequence`, `pack_sequence`, etc.) where tensor creation is incidental. A test whose `device` parameter is unused in the method body is a strong signal of incorrect device-agnostic classification.
 
 ## Before You Start
 
@@ -29,18 +29,18 @@ Use the review checklist at `agent/skills/review-test-refactoring/SKILL.md`
 1. **Blacklist skips** (@skipXPU, @skipCUDAIf, @skipMPS, @skipMeta) MUST be kept — do NOT flag their presence as issues. @onlyNativeDeviceTypes / @onlyNativeDeviceTypesAnd are redundant and SHOULD be removed.
 2. **Whitelist** (@onlyCUDA, @onlyOn) MUST be enlarged to @onlyAccelerator
 3. **Stale imports** must be removed
-4. **Class naming**: Renaming is OPTIONAL. The `hw_classification` member handles classification. Only flag a name as an issue if it's actively misleading (e.g., a CPU-only class named `TestFooCUDA`). Recommended names: TestFoo (S1), TestFooDevice (S2), S3 keeps the original name (`instantiate_device_type_tests` appends the device suffix).
+4. **Class naming**: Renaming is OPTIONAL. The `hw_classification` member handles classification. Only flag a name as an issue if it's actively misleading (e.g., a CPU-only class named `TestFooCUDA`). Recommended names: TestFoo (CPU-only), TestFooDevice (device-agnostic), device-specific keeps the original name (`instantiate_device_type_tests` appends the device suffix).
 5. **Test count** must match original: {original_test_count}
 6. **Device-specific APIs** correctly classified (Category A/B vs C per {ref_dir}/classification_guide.md)
 7. **External reference alignment**: If classes were NOT renamed, skip this check. If test classes WERE renamed, stale references in these locations MUST be updated:
-8. **Classification correctness**: Verify that each test class's strategy assignment is correct. For S2 classes, confirm that running the tests on multiple devices provides specific testing value beyond CPU — device transfer semantics, memory format behavior, or accelerator-specific error paths. If a class only exercises utility functions (`rnn_utils`, `pad_sequence`, `pack_sequence`, `F.pad`, etc.) with generic tensor ops, it should be S1 (GENERIC). A test that merely creates tensors with `device=device` is NOT sufficient justification for S2.
+8. **Classification correctness**: Verify that each test class's strategy assignment is correct. For device-agnostic classes, confirm that running the tests on multiple devices provides specific testing value beyond CPU — device transfer semantics, memory format behavior, or device-specific error paths. If a class only exercises utility functions (`rnn_utils`, `pad_sequence`, `pack_sequence`, `F.pad`, etc.) with generic tensor ops, it should be CPU-only (GENERIC). A test that merely creates tensors with `device=device` is NOT sufficient justification for device-agnostic.
 9. **HardwareClassification tag**: Every test class MUST have a `hw_classification` class attribute with the correct value:
-   - S1 (no device, plain TestCase or `@instantiate_parametrized_tests`): `HardwareClassification.GENERIC`
-   - S1 (with `@ops`, uses `instantiate_device_type_tests(only_for="cpu")`): `HardwareClassification.CPU`
-   - S2 (device-agnostic, `instantiate_device_type_tests(except_for=...)`): `HardwareClassification.ACCELERATOR`
-   - S3 (CUDA-specific): `HardwareClassification.CUDA`
-   - S3 (MPS-specific): `HardwareClassification.MPS`
-   - S3 (XPU-specific): `HardwareClassification.XPU`
+   - CPU-only (no device, plain TestCase or `@instantiate_parametrized_tests`): `HardwareClassification.GENERIC`
+   - CPU-only (with `@ops`, uses `instantiate_device_type_tests(only_for="cpu")`): `HardwareClassification.CPU`
+   - device-agnostic (`instantiate_device_type_tests(except_for=...)`): `HardwareClassification.ACCELERATOR`
+   - device-specific (CUDA-specific): `HardwareClassification.CUDA`
+   - device-specific (MPS-specific): `HardwareClassification.MPS`
+   - device-specific (XPU-specific): `HardwareClassification.XPU`
    Verify the import `from torch.testing._internal.common_utils import HardwareClassification` is present and merged alphabetically into the existing `common_utils` import block.
    **Structural contract (mirrors the deterministic test linter) — verify per classification:**
    - `GENERIC`: class must NOT be instantiated via `instantiate_device_type_tests`; test methods must NOT accept a `device`/`devices` parameter.

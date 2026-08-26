@@ -63,9 +63,9 @@ def _finding_matches_rule(finding, rule_id: str) -> bool:
     """Check whether an analyst finding is relevant to a refactoring rule."""
     cat = finding.category
     tgt = finding.target_class
-    if rule_id == "strategy_1":
-        # Match S1 classifications AND findings targeting non-device classes.
-        # Also match when the target class is a new CPU-only class (S1 extraction).
+    if rule_id == "cpu_only":
+        # Match CPU-only classifications AND findings targeting non-device classes.
+        # Also match when the target class is a newly extracted CPU-only class.
         return bool(
             tgt
             and "Device" not in tgt
@@ -73,11 +73,11 @@ def _finding_matches_rule(finding, rule_id: str) -> bool:
             and "MPS" not in tgt
             and "XPU" not in tgt
         ) or cat in ("classification",)
-    if rule_id == "strategy_2":
+    if rule_id == "device_agnostic":
         return cat in ("whitelist", "device_api", "stale_symbol") or (
             tgt and "Device" in tgt
         )
-    if rule_id == "strategy_3":
+    if rule_id == "device_specific":
         return (
             cat == "classification"
             and bool(tgt)
@@ -838,7 +838,7 @@ class RefactorFlow:
         The analyst owns classification (what strategy each test needs);
         distribute owns sharding (how to divide the work across coders).
 
-        When the analyst recommends class splits (new_classes), the strategy_1
+        When the analyst recommends class splits (new_classes), the cpu_only
         rule is augmented with explicit extraction instructions: which tests
         to move, the new class name, base class, and instantiation method.
         """
@@ -857,7 +857,7 @@ class RefactorFlow:
         rules = compute_applicable_rules(report.strategy_assignments, self.state.field)
         self.state.coder_count = len(rules)
 
-        # Build extraction instructions from new_classes for strategy_1
+        # Build extraction instructions from new_classes for cpu_only
         new_class_instructions = ""
         if report.new_classes:
             parts = []
@@ -874,8 +874,8 @@ class RefactorFlow:
             new_class_instructions = (
                 "\n## Class Extraction Plan\n\n"
                 + "\n\n".join(parts)
-                + "\n\n**IMPORTANT**: The strategy_1 rule includes class extraction. "
-                "Do NOT skip creating the new class — keeping S1 tests in an S2 "
+                + "\n\n**IMPORTANT**: The cpu_only rule includes class extraction. "
+                "Do NOT skip creating the new class — keeping CPU-only tests in a device-agnostic "
                 "class with @onlyCPU preserved does NOT achieve the refactoring goal."
             )
 
@@ -897,8 +897,8 @@ class RefactorFlow:
                     f"Apply the rule across the entire file."
                 )
 
-            # Augment strategy_1 instructions with class extraction plan
-            if rule_id == "strategy_1" and new_class_instructions:
+            # Augment cpu_only instructions with class extraction plan
+            if rule_id == "cpu_only" and new_class_instructions:
                 instructions = (
                     new_class_instructions
                     + "\n\n## Per-Finding Actions\n\n"

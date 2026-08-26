@@ -9,9 +9,9 @@ guide after running the pytorch-test-refactoring skill to completion.
 ### What is evaluated
 
 1. **Analyst classification accuracy** — does the analyst assign the
-   correct strategy (S1/S2/S3) to each test?
+   correct strategy (CPU-only/device-agnostic/device-specific) to each test?
 2. **Class split detection** — does the analyst recommend extracting
-   S1 tests into a separate class when appropriate?
+   CPU-only tests into a separate class when appropriate?
 3. **Verification results** — do all 12 verification checks pass?
 4. **Review findings** — what issues does the checker find in the
    final review?
@@ -54,200 +54,200 @@ task brief is 155 + 6. The table below lists only the 155 standalone
 tests; the 6 nested helpers are documented at the end of this section
 and must NOT be classified as separate tests.
 
-All gold labels are S1 or S2. **S3 = 0** — no test in this file uses
+All gold labels are CPU-only or device-agnostic. **device-specific = 0** — no test in this file uses
 Category C device-specific APIs (no NCCL, cuDNN, NVTX, GDS, etc.).
 
 | # | Test method | Strategy | Target class | Notes |
 |---|------------|----------|-------------|-------|
-| 1 | test_dim_default | S2 | TestReductions | Already device-agnostic |
-| 2 | test_dim_default_keepdim | S2 | TestReductions | Already device-agnostic |
-| 3 | test_dim_none | S2 | TestReductions | Already device-agnostic |
-| 4 | test_dim_none_keepdim | S2 | TestReductions | Already device-agnostic |
-| 5 | test_dim_single | S2 | TestReductions | Already device-agnostic |
-| 6 | test_dim_single_keepdim | S2 | TestReductions | Already device-agnostic |
-| 7 | test_dim_empty | S2 | TestReductions | Already device-agnostic |
-| 8 | test_dim_empty_keepdim | S2 | TestReductions | Already device-agnostic |
-| 9 | test_dim_multi | S2 | TestReductions | Already device-agnostic |
-| 10 | test_dim_multi_keepdim | S2 | TestReductions | Already device-agnostic |
-| 11 | test_dim_multi_unsorted | S2 | TestReductions | Already device-agnostic |
-| 12 | test_dim_multi_unsorted_keepdim | S2 | TestReductions | Already device-agnostic |
-| 13 | test_dim_multi_duplicate | S2 | TestReductions | Already device-agnostic |
-| 14 | test_dim_multi_unsupported | S2 | TestReductions | Already device-agnostic |
-| 15 | test_dim_offbounds | S2 | TestReductions | Already device-agnostic |
-| 16 | test_dim_ndim_limit | S2 | TestReductions | Already device-agnostic |
-| 17 | test_identity | S2 | TestReductions | Already device-agnostic |
-| 18 | test_nan_policy_propagate | S2 | TestReductions | Already device-agnostic |
-| 19 | test_nan_policy_omit | S2 | TestReductions | Already device-agnostic |
-| 20 | test_result_dtype | S2 | TestReductions | Already device-agnostic |
-| 21 | test_empty_tensor_empty_slice | S2 | TestReductions | Already device-agnostic |
-| 22 | test_empty_tensor_nonempty_slice | S2 | TestReductions | Already device-agnostic |
-| 23 | test_noncontiguous_innermost | S2 | TestReductions | Already device-agnostic |
-| 24 | test_noncontiguous_outermost | S2 | TestReductions | Already device-agnostic |
-| 25 | test_noncontiguous_all | S2 | TestReductions | Already device-agnostic |
-| 26 | test_noncontiguous_transposed | S2 | TestReductions | Already device-agnostic |
-| 27 | test_noncontiguous_expanded | S2 | TestReductions | Already device-agnostic |
-| 28 | test_ref_scalar_input | S2 | TestReductions | Already device-agnostic |
-| 29 | test_ref_small_input | S2 | TestReductions | Already device-agnostic |
-| 30 | test_ref_large_input_1D | S2 | TestReductions | Already device-agnostic |
-| 31 | test_ref_large_input_2D | S2 | TestReductions | Already device-agnostic |
-| 32 | test_ref_large_input_64bit_indexing | S2 | TestReductions | Already device-agnostic |
-| 33 | test_ref_duplicate_values | S2 | TestReductions | Already device-agnostic |
-| 34 | test_ref_extremal_values | S2 | TestReductions | Already device-agnostic |
-| 35 | test_var_unbiased | S2 | TestReductions | Already device-agnostic |
-| 36 | test_var_stability | S2 | TestReductions | Already device-agnostic |
-| 37 | test_sum_dim_reduction_uint8_overflow | S2 | TestReductions | Already device-agnostic |
-| 38 | test_dim_reduction_less_than_64 | S2 | TestReductions | Already device-agnostic |
-| 39 | test_dim_reduction_lastdim | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` |
-| 40 | test_logsumexp | S2 | TestReductions | Already device-agnostic |
-| 41 | test_logsumexp_integral_promotion | S2 | TestReductions | Already device-agnostic |
-| 42 | test_logcumsumexp_complex | S2 | TestReductions | Already device-agnostic |
-| 43 | test_sum_parallel | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` (trivial `.to(device)`) |
-| 44 | test_max_elementwise | S1 | TestReductionsOnCPU | Uses `_testCSelection` → CPU-only `Tensor.map2_`; not mechanically convertible |
-| 45 | test_min_elementwise | S1 | TestReductionsOnCPU | Same `map2_` CPU-only helper |
-| 46 | test_all_any | S2 | TestReductions | Already device-agnostic |
-| 47 | test_all_any_with_dim | S2 | TestReductions | Already device-agnostic |
-| 48 | test_numpy_named_args | S2 | TestReductions | Helper `_test_dim_ops` converted to `device` param |
-| 49 | test_sum_dim | S2 | TestReductions | `@slowTest @onlyCPU` → `@slowTest @skipIfMPS` |
-| 50 | test_mean_dim | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` |
-| 51 | test_std_dim | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` |
-| 52 | test_var_dim | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` |
-| 53 | test_logsumexp_dim | S2 | TestReductions | `@onlyCPU @skipIfNoSciPy` → `@skipIfNoSciPy @skipIfMPS` |
-| 54 | test_mean_int_with_optdtype | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` |
-| 55 | test_mean_out_is_alias_of_return | S2 | TestReductions | `@onlyCPU` → `@dtypesIfMPS(...)` (dtype-narrowing, not skip) |
-| 56 | test_sum_integer_upcast | S1 | TestReductionsOnCPU | `get_all_math_dtypes('cpu')` — CPU-specific dtype enumeration |
-| 57 | test_prod_integer_upcast | S1 | TestReductionsOnCPU | Same helper |
-| 58 | test_cumsum_integer_upcast | S1 | TestReductionsOnCPU | Same helper |
-| 59 | test_cumprod_integer_upcast | S1 | TestReductionsOnCPU | Same helper |
-| 60 | test_mode | S2 | TestReductions | Already device-agnostic |
-| 61 | test_mode_large | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 62 | test_mode_boolean | S2 | TestReductions | Already device-agnostic |
-| 63 | test_mode_wrong_dtype | S2 | TestReductions | Already device-agnostic |
-| 64 | test_mode_wrong_device | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 65 | test_accreal_type | S1 | TestReductionsOnCPU | `@onlyCPU`; "TODO: make work on CUDA, too" — accreal semantics CPU-only |
-| 66 | test_var_mean_some_dims | S2 | TestReductions | Already device-agnostic |
-| 67 | test_all_any_empty | S2 | TestReductions | Already device-agnostic |
-| 68 | test_all_issue117215 | S2 | TestReductions | Already device-agnostic |
-| 69 | test_max_with_inf | S2 | TestReductions | Already device-agnostic |
-| 70 | test_min_with_inf | S2 | TestReductions | Already device-agnostic |
-| 71 | test_max | S2 | TestReductions | Already device-agnostic |
-| 72 | test_min | S2 | TestReductions | Already device-agnostic |
-| 73 | test_amin | S2 | TestReductions | Already device-agnostic |
-| 74 | test_amax | S2 | TestReductions | Already device-agnostic |
-| 75 | test_aminmax | S2 | TestReductions | Already device-agnostic |
-| 76 | test_invalid_0dim_aminmax | S2 | TestReductions | Already device-agnostic |
-| 77 | test_bincount | S2 | TestReductions | Already device-agnostic |
-| 78 | test_var_stability2 | S2 | TestReductions | Already device-agnostic |
-| 79 | test_sum_noncontig_lowp | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` |
-| 80 | test_sum_all | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` |
-| 81 | test_sum_out | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` |
-| 82 | test_prod_gpu | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 83 | test_prod | S2 | TestReductions | `@onlyCPU @dtypes(torch.float)` → `@dtypes(torch.float) @skipIfMPS` |
-| 84 | test_prod_lowp | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` |
-| 85 | test_prod_bool | S2 | TestReductions | Already device-agnostic |
-| 86 | test_max_mixed_devices | S2 | TestReductions | `@onlyCPU` → `@onlyAccelerator @skipIfMPS`; uses `.to(device)` |
-| 87 | test_min_mixed_devices | S2 | TestReductions | `@onlyCPU` → `@onlyAccelerator @skipIfMPS` |
-| 88 | test_bucketization | S2 | TestReductions | Already device-agnostic |
-| 89 | test_nansum | S2 | TestReductions | Already device-agnostic |
-| 90 | test_count_nonzero | S2 | TestReductions | Already device-agnostic |
-| 91 | test_sum_vs_numpy | S2 | TestReductions | Already device-agnostic |
-| 92 | test_nansum_vs_numpy | S2 | TestReductions | Already device-agnostic |
-| 93 | test_nansum_complex | S1 | TestReductionsOnCPU | `@onlyCPU`; CPU-specific error-message assertion |
-| 94 | test_nansum_out_dtype | S2 | TestReductions | Already device-agnostic |
-| 95 | test_nansum_int_out_dtype_float_input | S2 | TestReductions | Already device-agnostic |
-| 96 | test_nansum_int_out_dtype_matches_inductor | S2 | TestReductions | `@onlyCPU` → `@skipIfMPS` |
-| 97 | test_argminmax_multiple | S2 | TestReductions | Already device-agnostic |
-| 98 | test_all_any_vs_numpy | S2 | TestReductions | Already device-agnostic |
-| 99 | test_repeated_dim | S2 | TestReductions | Already device-agnostic |
-| 100 | test_var | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 101 | test_var_large_input | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 102 | test_sum_noncontig | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 103 | test_min_max_nan | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 104 | test_sum_cpu_device_mismatch | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 105 | test_minmax_illegal_dtype | S2 | TestReductions | Already device-agnostic |
-| 106 | test_dim_arg_reduction_scalar | S2 | TestReductions | Already device-agnostic |
-| 107 | test_dim_reduction | S2 | TestReductions | Already device-agnostic |
-| 108 | test_nanmean_integral_types | S2 | TestReductions | `@onlyCPU @dtypes(...)` → `@dtypes(...) @skipIfMPS` |
-| 109 | test_dim_reduction_fns | S2 | TestReductions | Already device-agnostic |
-| 110 | test_reduction_split | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 111 | test_reduction_vectorize_along_input_corner | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 112 | test_reduction_vectorize_along_output | S2 | TestReductions | `@onlyCUDA` → `@onlyAccelerator @skipIfMPS` (only `@onlyCUDA` in file) |
-| 113 | test_argminmax_large_axis | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 114 | test_argminmax_axis_with_dim_one | S2 | TestReductions | Already device-agnostic |
-| 115 | test_median_real_values | S2 | TestReductions | Already device-agnostic |
-| 116 | test_median_nan_values | S2 | TestReductions | Already device-agnostic |
-| 117 | test_median_corner_cases | S2 | TestReductions | Already device-agnostic |
-| 118 | test_quantile | S2 | TestReductions | Already device-agnostic |
-| 119 | test_quantile_backward | S2 | TestReductions | Already device-agnostic |
-| 120 | test_quantile_error | S2 | TestReductions | Already device-agnostic |
-| 121 | test_quantile_large_input | S2 | TestReductions | Already device-agnostic |
-| 122 | test_quantile_size_limit | S2 | TestReductions | Already device-agnostic |
-| 123 | test_quantile_partial_selection | S2 | TestReductions | Already device-agnostic |
-| 124 | test_quantile_partial_selection_autograd | S2 | TestReductions | Already device-agnostic |
-| 125 | test_std_mean | S2 | TestReductions | Already device-agnostic |
-| 126 | test_std_mean_all_dims | S2 | TestReductions | Already device-agnostic |
-| 127 | test_var_mean | S2 | TestReductions | Already device-agnostic |
-| 128 | test_var_mean_all_dims | S2 | TestReductions | Already device-agnostic |
-| 129 | test_std_mean_some_dims | S2 | TestReductions | Already device-agnostic |
-| 130 | test_var_vs_numpy | S2 | TestReductions | Already device-agnostic |
-| 131 | test_std_vs_numpy | S2 | TestReductions | Already device-agnostic |
-| 132 | test_var_correction_vs_numpy | S2 | TestReductions | Already device-agnostic |
-| 133 | test_std_correction_vs_numpy | S2 | TestReductions | Already device-agnostic |
-| 134 | test_std_mean_correction | S2 | TestReductions | Already device-agnostic |
-| 135 | test_var_mean_correction | S2 | TestReductions | Already device-agnostic |
-| 136 | test_warn_invalid_degrees_of_freedom | S2 | TestReductions | Already device-agnostic |
-| 137 | test_amin_amax_some_dims | S2 | TestReductions | Already device-agnostic |
-| 138 | test_histc | S2 | TestReductions | Already device-agnostic |
-| 139 | test_histc_lowp | S1 | TestReductionsOnCPU | `@onlyCPU` + low-precision histc; dtype loop over `(bfloat16, half)` |
-| 140 | test_histc_min_max_errors | S2 | TestReductions | Already device-agnostic |
-| 141 | test_histc_min_max_corner_cases | S2 | TestReductions | Already device-agnostic |
-| 142 | test_histc_value_corner_cases | S1* | TestReductions | `@onlyCPU` (S1 signal); landed PR kept it `@onlyCPU` in `TestReductions`. Accept either this or extraction to `TestReductionsOnCPU` |
-| 143 | test_histc_min_max_corner_cases_cuda | S2 | TestReductions | **Renamed** `_cuda`→`_device`; `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
-| 144 | test_histogram | S1 | TestReductionsOnCPU | numpy-bound, no GPU value |
-| 145 | test_histogramdd | S1 | TestReductionsOnCPU | numpy-bound |
-| 146 | test_histogram_error_handling | S1 | TestReductionsOnCPU | CPU-only error messages; explicit `device="cpu"` |
-| 147 | test_tensor_compare_ops_empty | S2 | TestReductions | Already device-agnostic |
-| 148 | test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty | S2 | TestReductions | Already device-agnostic |
-| 149 | test_tensor_reduce_ops_empty | S2 | TestReductions | Already device-agnostic |
-| 150 | test_reduction_empty_any_all | S2 | TestReductions | Already device-agnostic |
-| 151 | test_reduce_dtype | S2 | TestReductions | Already device-agnostic |
-| 152 | test_reference_masked | S2 | TestReductions | Already device-agnostic |
-| 153 | test_reductions_large_half_tensors | S2 | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator` (no `@skipIfMPS`; uses `@dtypesIfXPU`) |
-| 154 | test_scalar_tensor_as_dim_argument | S2 | TestReductions | Already device-agnostic |
-| 155 | test_scalar_tensor_dim_compiled_mode | S2 | TestReductions | Already device-agnostic |
+| 1 | test_dim_default | device-agnostic | TestReductions | Already device-agnostic |
+| 2 | test_dim_default_keepdim | device-agnostic | TestReductions | Already device-agnostic |
+| 3 | test_dim_none | device-agnostic | TestReductions | Already device-agnostic |
+| 4 | test_dim_none_keepdim | device-agnostic | TestReductions | Already device-agnostic |
+| 5 | test_dim_single | device-agnostic | TestReductions | Already device-agnostic |
+| 6 | test_dim_single_keepdim | device-agnostic | TestReductions | Already device-agnostic |
+| 7 | test_dim_empty | device-agnostic | TestReductions | Already device-agnostic |
+| 8 | test_dim_empty_keepdim | device-agnostic | TestReductions | Already device-agnostic |
+| 9 | test_dim_multi | device-agnostic | TestReductions | Already device-agnostic |
+| 10 | test_dim_multi_keepdim | device-agnostic | TestReductions | Already device-agnostic |
+| 11 | test_dim_multi_unsorted | device-agnostic | TestReductions | Already device-agnostic |
+| 12 | test_dim_multi_unsorted_keepdim | device-agnostic | TestReductions | Already device-agnostic |
+| 13 | test_dim_multi_duplicate | device-agnostic | TestReductions | Already device-agnostic |
+| 14 | test_dim_multi_unsupported | device-agnostic | TestReductions | Already device-agnostic |
+| 15 | test_dim_offbounds | device-agnostic | TestReductions | Already device-agnostic |
+| 16 | test_dim_ndim_limit | device-agnostic | TestReductions | Already device-agnostic |
+| 17 | test_identity | device-agnostic | TestReductions | Already device-agnostic |
+| 18 | test_nan_policy_propagate | device-agnostic | TestReductions | Already device-agnostic |
+| 19 | test_nan_policy_omit | device-agnostic | TestReductions | Already device-agnostic |
+| 20 | test_result_dtype | device-agnostic | TestReductions | Already device-agnostic |
+| 21 | test_empty_tensor_empty_slice | device-agnostic | TestReductions | Already device-agnostic |
+| 22 | test_empty_tensor_nonempty_slice | device-agnostic | TestReductions | Already device-agnostic |
+| 23 | test_noncontiguous_innermost | device-agnostic | TestReductions | Already device-agnostic |
+| 24 | test_noncontiguous_outermost | device-agnostic | TestReductions | Already device-agnostic |
+| 25 | test_noncontiguous_all | device-agnostic | TestReductions | Already device-agnostic |
+| 26 | test_noncontiguous_transposed | device-agnostic | TestReductions | Already device-agnostic |
+| 27 | test_noncontiguous_expanded | device-agnostic | TestReductions | Already device-agnostic |
+| 28 | test_ref_scalar_input | device-agnostic | TestReductions | Already device-agnostic |
+| 29 | test_ref_small_input | device-agnostic | TestReductions | Already device-agnostic |
+| 30 | test_ref_large_input_1D | device-agnostic | TestReductions | Already device-agnostic |
+| 31 | test_ref_large_input_2D | device-agnostic | TestReductions | Already device-agnostic |
+| 32 | test_ref_large_input_64bit_indexing | device-agnostic | TestReductions | Already device-agnostic |
+| 33 | test_ref_duplicate_values | device-agnostic | TestReductions | Already device-agnostic |
+| 34 | test_ref_extremal_values | device-agnostic | TestReductions | Already device-agnostic |
+| 35 | test_var_unbiased | device-agnostic | TestReductions | Already device-agnostic |
+| 36 | test_var_stability | device-agnostic | TestReductions | Already device-agnostic |
+| 37 | test_sum_dim_reduction_uint8_overflow | device-agnostic | TestReductions | Already device-agnostic |
+| 38 | test_dim_reduction_less_than_64 | device-agnostic | TestReductions | Already device-agnostic |
+| 39 | test_dim_reduction_lastdim | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` |
+| 40 | test_logsumexp | device-agnostic | TestReductions | Already device-agnostic |
+| 41 | test_logsumexp_integral_promotion | device-agnostic | TestReductions | Already device-agnostic |
+| 42 | test_logcumsumexp_complex | device-agnostic | TestReductions | Already device-agnostic |
+| 43 | test_sum_parallel | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` (trivial `.to(device)`) |
+| 44 | test_max_elementwise | CPU-only | TestReductionsOnCPU | Uses `_testCSelection` → CPU-only `Tensor.map2_`; not mechanically convertible |
+| 45 | test_min_elementwise | CPU-only | TestReductionsOnCPU | Same `map2_` CPU-only helper |
+| 46 | test_all_any | device-agnostic | TestReductions | Already device-agnostic |
+| 47 | test_all_any_with_dim | device-agnostic | TestReductions | Already device-agnostic |
+| 48 | test_numpy_named_args | device-agnostic | TestReductions | Helper `_test_dim_ops` converted to `device` param |
+| 49 | test_sum_dim | device-agnostic | TestReductions | `@slowTest @onlyCPU` → `@slowTest @skipIfMPS` |
+| 50 | test_mean_dim | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` |
+| 51 | test_std_dim | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` |
+| 52 | test_var_dim | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` |
+| 53 | test_logsumexp_dim | device-agnostic | TestReductions | `@onlyCPU @skipIfNoSciPy` → `@skipIfNoSciPy @skipIfMPS` |
+| 54 | test_mean_int_with_optdtype | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` |
+| 55 | test_mean_out_is_alias_of_return | device-agnostic | TestReductions | `@onlyCPU` → `@dtypesIfMPS(...)` (dtype-narrowing, not skip) |
+| 56 | test_sum_integer_upcast | CPU-only | TestReductionsOnCPU | `get_all_math_dtypes('cpu')` — CPU-specific dtype enumeration |
+| 57 | test_prod_integer_upcast | CPU-only | TestReductionsOnCPU | Same helper |
+| 58 | test_cumsum_integer_upcast | CPU-only | TestReductionsOnCPU | Same helper |
+| 59 | test_cumprod_integer_upcast | CPU-only | TestReductionsOnCPU | Same helper |
+| 60 | test_mode | device-agnostic | TestReductions | Already device-agnostic |
+| 61 | test_mode_large | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 62 | test_mode_boolean | device-agnostic | TestReductions | Already device-agnostic |
+| 63 | test_mode_wrong_dtype | device-agnostic | TestReductions | Already device-agnostic |
+| 64 | test_mode_wrong_device | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 65 | test_accreal_type | CPU-only | TestReductionsOnCPU | `@onlyCPU`; "TODO: make work on CUDA, too" — accreal semantics CPU-only |
+| 66 | test_var_mean_some_dims | device-agnostic | TestReductions | Already device-agnostic |
+| 67 | test_all_any_empty | device-agnostic | TestReductions | Already device-agnostic |
+| 68 | test_all_issue117215 | device-agnostic | TestReductions | Already device-agnostic |
+| 69 | test_max_with_inf | device-agnostic | TestReductions | Already device-agnostic |
+| 70 | test_min_with_inf | device-agnostic | TestReductions | Already device-agnostic |
+| 71 | test_max | device-agnostic | TestReductions | Already device-agnostic |
+| 72 | test_min | device-agnostic | TestReductions | Already device-agnostic |
+| 73 | test_amin | device-agnostic | TestReductions | Already device-agnostic |
+| 74 | test_amax | device-agnostic | TestReductions | Already device-agnostic |
+| 75 | test_aminmax | device-agnostic | TestReductions | Already device-agnostic |
+| 76 | test_invalid_0dim_aminmax | device-agnostic | TestReductions | Already device-agnostic |
+| 77 | test_bincount | device-agnostic | TestReductions | Already device-agnostic |
+| 78 | test_var_stability2 | device-agnostic | TestReductions | Already device-agnostic |
+| 79 | test_sum_noncontig_lowp | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` |
+| 80 | test_sum_all | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` |
+| 81 | test_sum_out | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` |
+| 82 | test_prod_gpu | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 83 | test_prod | device-agnostic | TestReductions | `@onlyCPU @dtypes(torch.float)` → `@dtypes(torch.float) @skipIfMPS` |
+| 84 | test_prod_lowp | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` |
+| 85 | test_prod_bool | device-agnostic | TestReductions | Already device-agnostic |
+| 86 | test_max_mixed_devices | device-agnostic | TestReductions | `@onlyCPU` → `@onlyAccelerator @skipIfMPS`; uses `.to(device)` |
+| 87 | test_min_mixed_devices | device-agnostic | TestReductions | `@onlyCPU` → `@onlyAccelerator @skipIfMPS` |
+| 88 | test_bucketization | device-agnostic | TestReductions | Already device-agnostic |
+| 89 | test_nansum | device-agnostic | TestReductions | Already device-agnostic |
+| 90 | test_count_nonzero | device-agnostic | TestReductions | Already device-agnostic |
+| 91 | test_sum_vs_numpy | device-agnostic | TestReductions | Already device-agnostic |
+| 92 | test_nansum_vs_numpy | device-agnostic | TestReductions | Already device-agnostic |
+| 93 | test_nansum_complex | CPU-only | TestReductionsOnCPU | `@onlyCPU`; CPU-specific error-message assertion |
+| 94 | test_nansum_out_dtype | device-agnostic | TestReductions | Already device-agnostic |
+| 95 | test_nansum_int_out_dtype_float_input | device-agnostic | TestReductions | Already device-agnostic |
+| 96 | test_nansum_int_out_dtype_matches_inductor | device-agnostic | TestReductions | `@onlyCPU` → `@skipIfMPS` |
+| 97 | test_argminmax_multiple | device-agnostic | TestReductions | Already device-agnostic |
+| 98 | test_all_any_vs_numpy | device-agnostic | TestReductions | Already device-agnostic |
+| 99 | test_repeated_dim | device-agnostic | TestReductions | Already device-agnostic |
+| 100 | test_var | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 101 | test_var_large_input | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 102 | test_sum_noncontig | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 103 | test_min_max_nan | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 104 | test_sum_cpu_device_mismatch | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 105 | test_minmax_illegal_dtype | device-agnostic | TestReductions | Already device-agnostic |
+| 106 | test_dim_arg_reduction_scalar | device-agnostic | TestReductions | Already device-agnostic |
+| 107 | test_dim_reduction | device-agnostic | TestReductions | Already device-agnostic |
+| 108 | test_nanmean_integral_types | device-agnostic | TestReductions | `@onlyCPU @dtypes(...)` → `@dtypes(...) @skipIfMPS` |
+| 109 | test_dim_reduction_fns | device-agnostic | TestReductions | Already device-agnostic |
+| 110 | test_reduction_split | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 111 | test_reduction_vectorize_along_input_corner | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 112 | test_reduction_vectorize_along_output | device-agnostic | TestReductions | `@onlyCUDA` → `@onlyAccelerator @skipIfMPS` (only `@onlyCUDA` in file) |
+| 113 | test_argminmax_large_axis | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 114 | test_argminmax_axis_with_dim_one | device-agnostic | TestReductions | Already device-agnostic |
+| 115 | test_median_real_values | device-agnostic | TestReductions | Already device-agnostic |
+| 116 | test_median_nan_values | device-agnostic | TestReductions | Already device-agnostic |
+| 117 | test_median_corner_cases | device-agnostic | TestReductions | Already device-agnostic |
+| 118 | test_quantile | device-agnostic | TestReductions | Already device-agnostic |
+| 119 | test_quantile_backward | device-agnostic | TestReductions | Already device-agnostic |
+| 120 | test_quantile_error | device-agnostic | TestReductions | Already device-agnostic |
+| 121 | test_quantile_large_input | device-agnostic | TestReductions | Already device-agnostic |
+| 122 | test_quantile_size_limit | device-agnostic | TestReductions | Already device-agnostic |
+| 123 | test_quantile_partial_selection | device-agnostic | TestReductions | Already device-agnostic |
+| 124 | test_quantile_partial_selection_autograd | device-agnostic | TestReductions | Already device-agnostic |
+| 125 | test_std_mean | device-agnostic | TestReductions | Already device-agnostic |
+| 126 | test_std_mean_all_dims | device-agnostic | TestReductions | Already device-agnostic |
+| 127 | test_var_mean | device-agnostic | TestReductions | Already device-agnostic |
+| 128 | test_var_mean_all_dims | device-agnostic | TestReductions | Already device-agnostic |
+| 129 | test_std_mean_some_dims | device-agnostic | TestReductions | Already device-agnostic |
+| 130 | test_var_vs_numpy | device-agnostic | TestReductions | Already device-agnostic |
+| 131 | test_std_vs_numpy | device-agnostic | TestReductions | Already device-agnostic |
+| 132 | test_var_correction_vs_numpy | device-agnostic | TestReductions | Already device-agnostic |
+| 133 | test_std_correction_vs_numpy | device-agnostic | TestReductions | Already device-agnostic |
+| 134 | test_std_mean_correction | device-agnostic | TestReductions | Already device-agnostic |
+| 135 | test_var_mean_correction | device-agnostic | TestReductions | Already device-agnostic |
+| 136 | test_warn_invalid_degrees_of_freedom | device-agnostic | TestReductions | Already device-agnostic |
+| 137 | test_amin_amax_some_dims | device-agnostic | TestReductions | Already device-agnostic |
+| 138 | test_histc | device-agnostic | TestReductions | Already device-agnostic |
+| 139 | test_histc_lowp | CPU-only | TestReductionsOnCPU | `@onlyCPU` + low-precision histc; dtype loop over `(bfloat16, half)` |
+| 140 | test_histc_min_max_errors | device-agnostic | TestReductions | Already device-agnostic |
+| 141 | test_histc_min_max_corner_cases | device-agnostic | TestReductions | Already device-agnostic |
+| 142 | test_histc_value_corner_cases | CPU-only* | TestReductions | `@onlyCPU` (CPU-only signal); landed PR kept it `@onlyCPU` in `TestReductions`. Accept either this or extraction to `TestReductionsOnCPU` |
+| 143 | test_histc_min_max_corner_cases_cuda | device-agnostic | TestReductions | **Renamed** `_cuda`→`_device`; `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator @skipIfMPS` |
+| 144 | test_histogram | CPU-only | TestReductionsOnCPU | numpy-bound, no GPU value |
+| 145 | test_histogramdd | CPU-only | TestReductionsOnCPU | numpy-bound |
+| 146 | test_histogram_error_handling | CPU-only | TestReductionsOnCPU | CPU-only error messages; explicit `device="cpu"` |
+| 147 | test_tensor_compare_ops_empty | device-agnostic | TestReductions | Already device-agnostic |
+| 148 | test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty | device-agnostic | TestReductions | Already device-agnostic |
+| 149 | test_tensor_reduce_ops_empty | device-agnostic | TestReductions | Already device-agnostic |
+| 150 | test_reduction_empty_any_all | device-agnostic | TestReductions | Already device-agnostic |
+| 151 | test_reduce_dtype | device-agnostic | TestReductions | Already device-agnostic |
+| 152 | test_reference_masked | device-agnostic | TestReductions | Already device-agnostic |
+| 153 | test_reductions_large_half_tensors | device-agnostic | TestReductions | `@onlyOn(["cuda","xpu"])` → `@onlyAccelerator` (no `@skipIfMPS`; uses `@dtypesIfXPU`) |
+| 154 | test_scalar_tensor_as_dim_argument | device-agnostic | TestReductions | Already device-agnostic |
+| 155 | test_scalar_tensor_dim_compiled_mode | device-agnostic | TestReductions | Already device-agnostic |
 
 Strategy summary (155 standalone tests):
 
 | Strategy | Count | Target class |
 |----------|-------|--------------|
-| S1 | 12 | TestReductionsOnCPU |
-| S1* (borderline) | 1 | TestReductions (retained `@onlyCPU`) |
-| S2 | 142 | TestReductions |
-| S3 | 0 | — |
+| CPU-only | 12 | TestReductionsOnCPU |
+| CPU-only* (borderline) | 1 | TestReductions (retained `@onlyCPU`) |
+| device-agnostic | 142 | TestReductions |
+| device-specific | 0 | — |
 
 The **6 nested inner `def test_*` helper functions** (not standalone tests; already counted in their parent tests):
 
 | Pre line | Nested helper | Parent test (classification) |
 |----------|---------------|------------------------------|
-| 1103 | `test_for_dtypes(x_ty, v_ty, i_ty, message)` | `test_mode_wrong_dtype` (S2) |
-| 1692 | `test_output_dtype(dtype, is_int32)` | `test_bucketization` (S2) |
-| 1728 | `test_dtype_bfloat16(...)` | `test_bucketization` (S2) |
-| 2413 | `test_multidim(x, dim)` | `test_dim_reduction_fns` (S2) |
-| 3385 | `test_against_np(tensor, bins=100, ...)` | `test_histc` (S2) |
-| 3990 | `test_reduction(op, has_no_dim, ...)` | `test_reduce_dtype` (S2) |
+| 1103 | `test_for_dtypes(x_ty, v_ty, i_ty, message)` | `test_mode_wrong_dtype` (device-agnostic) |
+| 1692 | `test_output_dtype(dtype, is_int32)` | `test_bucketization` (device-agnostic) |
+| 1728 | `test_dtype_bfloat16(...)` | `test_bucketization` (device-agnostic) |
+| 2413 | `test_multidim(x, dim)` | `test_dim_reduction_fns` (device-agnostic) |
+| 3385 | `test_against_np(tensor, bins=100, ...)` | `test_histc` (device-agnostic) |
+| 3990 | `test_reduction(op, has_no_dim, ...)` | `test_reduce_dtype` (device-agnostic) |
 
 ### Expected Class Splits
 
-The analyst should recommend extracting S1 tests into a new class:
+The analyst should recommend extracting CPU-only tests into a new class:
 
 | New class | Strategy | Base class | Instantiation |
 |-----------|----------|-----------|---------------|
-| TestReductionsOnCPU | S1 | TestCase | None — plain `TestCase`, discovered by `run_tests()`. MUST NOT use `instantiate_device_type_tests` (S1/S3 convention) |
+| TestReductionsOnCPU | CPU-only | TestCase | None — plain `TestCase`, discovered by `run_tests()`. MUST NOT use `instantiate_device_type_tests` (CPU-only/device-specific convention) |
 
 Note: the task brief called this class `TestReductionsCPU`. The landed
 PR #185881 uses **`TestReductionsOnCPU`** — the gold label uses the
 landed name to avoid false negatives. A plain `TestCase` (no
 instantiation) is the gold mechanism here; `@instantiate_parametrized_tests`
-would also be acceptable per the S1 convention if the tests were
+would also be acceptable per the CPU-only convention if the tests were
 parametrized, but the landed PR does not instantiate this class.
 
 **Tests to move to TestReductionsOnCPU** (12 total):
@@ -266,7 +266,7 @@ fixed `torch.float32` tensor construction; `test_max_elementwise` gained
 
 **Tests to remain in TestReductions** (143 total):
 
-All S2 tests (110 unchanged + 18 `@onlyCPU`→S2 conversions + 14
+All device-agnostic tests (110 unchanged + 18 `@onlyCPU`→device-agnostic conversions + 14
 `@onlyOn`/`@onlyCUDA`→`@onlyAccelerator` conversions incl. the renamed
 `test_histc_min_max_corner_cases_device`) plus `test_histc_value_corner_cases`
 (retained `@onlyCPU`). Instantiation unchanged:
@@ -345,12 +345,12 @@ For each test method in the Gold Labels table:
 - Find the test in the refactored file — which class is it in?
 - Look up `analyst_report.json` → `strategy_assignments` for that class
 - Compare: does the analyst's strategy match the gold label?
-- If gold expects S1 extraction, check `analyst_report.json` → `new_classes`
+- If gold expects CPU-only extraction, check `analyst_report.json` → `new_classes`
 
 Record mismatches:
 ```
-MISMATCH: test_histogram → analyst classified as S2, gold says S1
-MISMATCH: test_sum_parallel → analyst classified as S1, gold says S2
+MISMATCH: test_histogram → analyst classified as device-agnostic, gold says CPU-only
+MISMATCH: test_sum_parallel → analyst classified as CPU-only, gold says device-agnostic
 MISSING: TestReductionsOnCPU not in new_classes
 ```
 
@@ -361,15 +361,15 @@ Compute precision, recall, F1.
 
 ```
 Strategy  |  TP  |  FP  |  FN  |  Precision  |  Recall  |  F1
-S1        |  10  |   2  |   3  |     0.83    |   0.77   | 0.80
-S2        | 140  |   3  |   2  |     0.98    |   0.99   | 0.98
-S3        |   0  |   0  |   0  |      N/A    |    N/A   |  N/A
+CPU-only        |  10  |   2  |   3  |     0.83    |   0.77   | 0.80
+device-agnostic        | 140  |   3  |   2  |     0.98    |   0.99   | 0.98
+device-specific        |   0  |   0  |   0  |      N/A    |    N/A   |  N/A
 ──────────────────────────────────────────────────────────────
-Overall accuracy: 93.8% (150/160 with S3 excluded)
+Overall accuracy: 93.8% (150/160 with device-specific excluded)
 ```
 
-Note: S3 F1 is N/A when there are no S3 tests in the file. For this
-file, S3 is always N/A (0 S3 tests).
+Note: device-specific F1 is N/A when there are no device-specific tests in the file. For this
+file, device-specific is always N/A (0 device-specific tests).
 
 6. **Compare verification results**
 
@@ -416,9 +416,9 @@ Fill in this table:
 | Metric | Before | After | Delta |
 |--------|--------|-------|-------|
 | Classification accuracy | XX% | YY% | ±Zpp |
-| S1 F1 | X.XX | Y.YY | ±Z |
-| S2 F1 | X.XX | Y.YY | ±Z |
-| S3 F1 | N/A | N/A | — |
+| CPU-only F1 | X.XX | Y.YY | ±Z |
+| device-agnostic F1 | X.XX | Y.YY | ±Z |
+| device-specific F1 | N/A | N/A | — |
 | Class split detected | Yes/No | Yes/No | — |
 | Verification failures | N | M | ±K |
 | Review findings | N (X major) | M (Y major) | ±K |

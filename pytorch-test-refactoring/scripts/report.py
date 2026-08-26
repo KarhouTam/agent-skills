@@ -65,7 +65,7 @@ def generate_report(state: RefactorState) -> str:
             )
             if not local_test.accelerator_available:
                 lines.append(
-                    ":information_source: No accelerator present — S2/S3 tests "
+                    ":information_source: No accelerator present — device-agnostic/device-specific tests "
                     "were not locally exercised."
                 )
             if local_test.failures:

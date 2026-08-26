@@ -88,7 +88,7 @@ def test_codex_spawn_spec_shape():
 def test_codex_followup_rebuilds_role_prompt():
     rc = {
         "coder_id": "coder-1",
-        "rule": "strategy_2",
+        "rule": "device_agnostic",
         "rule_description": "Convert to device-agnostic",
         "instructions": "- enlarge @onlyCUDA",
         "total_rules": 1,

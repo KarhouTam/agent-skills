@@ -6,7 +6,7 @@ You are the ANALYST for the `{file_name}` refactoring team.
 
 This is a non-core field run. No field-specific refactoring profile exists yet,
 so this phase is a field-agnostic baseline only. Do NOT classify tests into
-S1/S2/S3, recommend device decoupling, class extraction, class renames, or
+CPU-only/device-agnostic/device-specific, recommend device decoupling, class extraction, class renames, or
 decorator changes. Those are core-field concepts.
 
 ## Tasks

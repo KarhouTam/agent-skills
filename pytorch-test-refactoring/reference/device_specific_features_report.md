@@ -7,11 +7,11 @@
 
 | Category | Rule | Strategy |
 |----------|------|----------|
-| **A** — Has `torch.accelerator` equivalent | Replace with `torch.accelerator.*` | Strategy 2 |
-| **B** — General concept, no wrapper | Keep device-specific for now | Strategy 3 |
-| **C** — Truly device-specific | Must stay, never remove guards | Strategy 3 |
+| **A** — Has `torch.accelerator` equivalent | Replace with `torch.accelerator.*` | device-agnostic |
+| **B** — General concept, no wrapper | Keep device-specific for now | device-specific |
+| **C** — Truly device-specific | Must stay, never remove guards | device-specific |
 
-**Classification is hierarchical: C > B > A > none.** A test using ANY Cat C API is Strategy 3.
+**Classification is hierarchical: C > B > A > none.** A test using ANY Cat C API is device-specific.
 
 ## Decorator Rules
 

@@ -9,7 +9,7 @@ targets.
 ## The ruleset (layers you may target)
 
 - `analyst.md` / `coder.md` / `checker.md` — agent prompts (classification, coding, review guidance)
-- `refactor-test-decoupling/SKILL.md` — the S1/S2/S3 methodology source of truth
+- `refactor-test-decoupling/SKILL.md` — the CPU-only/device-agnostic/device-specific methodology source of truth
 - `review-test-refactoring/SKILL.md` — the 9-section review checklist
 - `device_api_catalog.yaml` — Category A/B/C API classification
 - `classification_guide.md` — API-category lookup guidance

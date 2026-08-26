@@ -6,7 +6,7 @@ You are the CHECKER for the `{file_name}` refactoring team.
 
 This is a non-core field run. No field-specific review profile exists yet, so
 this review is a field-agnostic baseline. Do NOT apply core accelerator
-decoupling rules, S1/S2/S3 classification, or core-specific external reference
+decoupling rules, CPU-only/device-agnostic/device-specific classification, or core-specific external reference
 requirements.
 
 ## Check Scope: {scope}

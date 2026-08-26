@@ -20,7 +20,7 @@ ModuleNotFoundError: No module named 'test.test_expanded_weights'
 - :x: **class_structure**: Missing original classes: ['TestContext', 'ContextManagerTests']
 - :white_check_mark: **decorateinfo_alignment**: No stale DecorateInfo references
 - :white_check_mark: **external_refs**: No stale external references
-- :x: **stale_patterns**: Remaining: 1x torch.cuda.get_device_capability in non-S3 class (should be migrated or moved to S3)
+- :x: **stale_patterns**: Remaining: 1x torch.cuda.get_device_capability in non-device-specific class (should be migrated or moved to device-specific)
 - :x: **import_audit**: Stale imports: TEST_CUDA
 - :white_check_mark: **dtype_integrity**: No issues
 - :white_check_mark: **accelerator_safety**: No issues found
@@ -35,8 +35,8 @@ ModuleNotFoundError: No module named 'test.test_expanded_weights'
 :white_check_mark: All clear
 
 ## Strategy Assignments
-- `TestContext` -> **Strategy1** (GENERIC)
-- `TestExpandedWeightHelperFunction` -> **Strategy2** (ACCELERATOR)
-- `TestExpandedWeightFunctional` -> **Strategy2** (ACCELERATOR)
-- `TestExpandedWeightModule` -> **Strategy2** (ACCELERATOR)
-- `ContextManagerTests` -> **Strategy2** (ACCELERATOR)
+- `TestContext` -> **cpu_only** (GENERIC)
+- `TestExpandedWeightHelperFunction` -> **device_agnostic** (ACCELERATOR)
+- `TestExpandedWeightFunctional` -> **device_agnostic** (ACCELERATOR)
+- `TestExpandedWeightModule` -> **device_agnostic** (ACCELERATOR)
+- `ContextManagerTests` -> **device_agnostic** (ACCELERATOR)

@@ -34,7 +34,7 @@
     {
       "name": "stale_patterns",
       "passed": false,
-      "details": "Remaining: 1x torch.cuda.get_device_capability in non-S3 class (should be migrated or moved to S3)",
+      "details": "Remaining: 1x torch.cuda.get_device_capability in non-device-specific class (should be migrated or moved to device-specific)",
       "command": "grep -nE 'onlyOn\\(|(?<!torch)\\.cuda\\(\\)|device\\s*=\\s*\"cuda\"' test/test_expanded_weights.py"
     },
     {

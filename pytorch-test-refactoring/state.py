@@ -71,7 +71,7 @@ class NewClassSpec(BaseModel):
     """
 
     name: str
-    strategy: str  # "Strategy1" | "Strategy2" | "Strategy3"
+    strategy: str  # "cpu_only" | "device_agnostic" | "device_specific"
     hw_classification: str = (
         ""  # "GENERIC" | "ACCELERATOR" | "CPU" | "CUDA" | "MPS" | "XPU"
     )

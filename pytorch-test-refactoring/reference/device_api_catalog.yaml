@@ -7,9 +7,9 @@
 #   category_c > category_b > category_a > none
 #
 # Decision rules:
-#   category_a → Strategy 2: replace with torch.accelerator.*
-#   category_b → Strategy 3: no accelerator wrapper exists, keep device-specific
-#   category_c → Strategy 3: truly device-specific, must stay
+#   category_a → device-agnostic: replace with torch.accelerator.*
+#   category_b → device-specific: no accelerator wrapper exists, keep device-specific
+#   category_c → device-specific: truly device-specific, must stay
 
 meta:
   version: "2.0"
@@ -21,7 +21,7 @@ meta:
     mtia: { module: torch.mtia, has_stream: true, has_event: true, has_graph: true, accelerator_coverage: medium }
 
 # ── Category A: Replaceable by torch.accelerator ──────────────────────────
-# rule: test using ONLY these APIs → Strategy 2 (accelerator-agnostic)
+# rule: test using ONLY these APIs → device-agnostic
 # action: replace device module call with torch.accelerator equivalent
 
 category_a:
@@ -631,7 +631,7 @@ category_c:
 decision_rules:
   classification:
     hierarchy: [category_c, category_b, category_a, none]
-    description: "First match wins. A test using ANY Cat C API is Strategy 3."
+    description: "First match wins. A test using ANY Cat C API is device-specific."
 
   decorators:
     blacklist_keep:
@@ -665,13 +665,13 @@ decision_rules:
       Keep `import torch.{device}` if ANY Category B/C usage remains.
 
   strategy_assignment:
-    strategy_1:
+    cpu_only:
       condition: "No device API usage"
       class_suffix: ""  # TestFoo (keep original name)
-    strategy_2:
+    device_agnostic:
       condition: "Only Category A API usage"
       class_suffix: ""  # optional: "Device" → TestFooDevice (renaming is optional)
-    strategy_3:
+    device_specific:
       condition: "Any Category B or C API usage"
       class_suffix: ""  # optional: "{Device}" → TestFooCUDA, TestFooXPU, etc. (renaming is optional)
 

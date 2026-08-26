@@ -84,7 +84,7 @@ def test_materials_parse_into_models():
         CoderTask.model_validate(d)
         for d in json.loads((MATERIALS / "coder_tasks.json").read_text())
     ]
-    assert [t.rule for t in coder_tasks] == ["strategy_1", "strategy_2", "cleanup"]
+    assert [t.rule for t in coder_tasks] == ["cpu_only", "device_agnostic", "cleanup"]
 
     verification = VerificationResult.model_validate_json(
         (MATERIALS / "verification.json").read_text()
@@ -136,8 +136,8 @@ def test_flow_resumes_from_materials(tmp_path, monkeypatch):
     assert state.current_phase == "review"
     assert state.signal == FlowSignal.SPAWN_SINGLE
     assert [t.rule for t in state.coder_tasks] == [
-        "strategy_1",
-        "strategy_2",
+        "cpu_only",
+        "device_agnostic",
         "cleanup",
     ]
     assert state.agent_ids == {
@@ -217,8 +217,8 @@ def test_full_flow_replay_to_finalize(tmp_path, monkeypatch):
 
     # Phase 3 distributed three rules, each verified and finally reviewed.
     assert [t.rule for t in state.coder_tasks] == [
-        "strategy_1",
-        "strategy_2",
+        "cpu_only",
+        "device_agnostic",
         "cleanup",
     ]
     assert state.review_findings is not None and state.review_findings.all_clear

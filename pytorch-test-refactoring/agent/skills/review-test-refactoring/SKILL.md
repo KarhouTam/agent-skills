@@ -7,7 +7,7 @@ description: >
   Use this when asked to review a test refactoring PR, check a test decoupling
   change, verify a refactored test file, review a single test file for
   classification correctness, or when the user mentions "review" in the context
-  of test splitting, test decoupling, test refactoring, or accelerator-agnostic
+  of test splitting, test decoupling, test refactoring, or device-agnostic
   test migration. Also use when the user opens a PR, diff, or Python test file
   and asks for a quality check.
 ---
@@ -75,24 +75,24 @@ Report findings organized by severity:
 
 | Category | Description | Strategy Implication |
 |----------|-------------|---------------------|
-| **A** | APIs with `torch.accelerator` equivalents | **NOT device-specific** → Strategy 2 |
-| **B** | General cross-backend concepts, no wrapper yet | **NOT device-specific** → Strategy 2 |
-| **C** | Truly device-specific, no cross-device equivalent | **Strategy 3 only** |
+| **A** | APIs with `torch.accelerator` equivalents | **NOT device-specific** → device-agnostic |
+| **B** | General cross-backend concepts, no wrapper yet | **NOT device-specific** → device-agnostic |
+| **C** | Truly device-specific, no cross-device equivalent | **device-specific only** |
 
-**Rule**: Only Category C APIs justify Strategy 3. If a test uses only Category A or B APIs, it must be Strategy 2 with `@onlyAccelerator`.
+**Rule**: Only Category C APIs justify device-specific. If a test uses only Category A or B APIs, it must be device-agnostic with `@onlyAccelerator`.
 
 ## Review Checklist
 
 ### 1. Classification Correctness
 
 The single most impactful category of review finding. A wrong classification
-either locks tests out of accelerators they could run on (Strategy 2
-misclassified as Strategy 3) or causes test failures on accelerators that lack
-the required features (Strategy 3 misclassified as Strategy 2).
+either locks tests out of accelerators they could run on (device-agnostic
+misclassified as device-specific) or causes test failures on accelerators that lack
+the required features (device-specific misclassified as device-agnostic).
 
 #### 1a. False-CUDA Detection (most common error)
 
-For every test classified as Strategy 3 (`TestFooCUDA`) or using
+For every test classified as device-specific (`TestFooCUDA`) or using
 `@onlyCUDA` / `device="cuda"`, ask:
 
 > Is this test verifying a truly device-specific feature (Category C in the
@@ -100,24 +100,24 @@ For every test classified as Strategy 3 (`TestFooCUDA`) or using
 
 **How to check**: Look up each `torch.cuda.*` API the test uses in
 `../../../reference/device_api_catalog.yaml`. If every API it uses is Category A or B,
-the test is misclassified — it should be Strategy 2 with `@onlyAccelerator`.
+the test is misclassified — it should be device-agnostic with `@onlyAccelerator`.
 
 **Red flags** (signals the test is wrongly classified as CUDA-specific):
 
 | Code Pattern | What It Means | Severity |
 |-------------|---------------|----------|
-| Test with generic ops (add, softmax, matmul, loss) still has `@onlyCUDA` or `device="cuda"` | Should be Strategy 2 with `@onlyAccelerator` | Blocker |
+| Test with generic ops (add, softmax, matmul, loss) still has `@onlyCUDA` or `device="cuda"` | Should be device-agnostic with `@onlyAccelerator` | Blocker |
 | `.cuda()` / `.to("cuda")` used instead of `.to(device)` | Test hardcodes CUDA for no reason | Blocker |
 | `torch.cuda.<api>` call where the catalog shows `torch.accelerator.<api>` exists | Category A — has cross-accelerator equivalent; replace with `torch.accelerator.*` | Major |
-| `torch.cuda.Stream` / `torch.cuda.Event` used but test not marked as Strategy 3 | Category B — general concept; verify usage context, usually Strategy 2 | Info |
-| `TEST_CUDA` import remains but no Strategy 3 CUDA tests exist in the file | Stale import keeps file classified as device_specific | Major |
+| `torch.cuda.Stream` / `torch.cuda.Event` used but test not marked as device-specific | Category B — general concept; verify usage context, usually device-agnostic | Info |
+| `TEST_CUDA` import remains but no device-specific CUDA tests exist in the file | Stale import keeps file classified as device_specific | Major |
 
 **Unnecessary `@onlyAccelerator`**: If `@onlyAccelerator` was ADDED to a test that had no prior device restriction, verify the test genuinely requires an accelerator. If it works on CPU, the restriction should have been removed entirely.
 
 #### 1b. Over-generalization Detection
 
 Conversely, check that tests using Category C APIs were NOT incorrectly
-generalized to Strategy 2. Consult `../../../reference/device_api_catalog.yaml` → `category_c` for the full per-backend lists. Key examples:
+generalized to device-agnostic. Consult `../../../reference/device_api_catalog.yaml` → `category_c` for the full per-backend lists. Key examples:
 
 | Code Pattern | What It Means | Severity |
 |-------------|---------------|----------|
@@ -128,7 +128,7 @@ generalized to Strategy 2. Consult `../../../reference/device_api_catalog.yaml` 
 **Dtype compatibility on MPS**: Even when a test uses only generic ops (no
 Category C APIs), it may still fail on non-CUDA accelerators if it uses dtypes
 not supported by that backend. The most common case: `complex128` and `float64`
-are unsupported on MPS. When a test is generalized to Strategy 2 (or already
+are unsupported on MPS. When a test is generalized to device-agnostic (or already
 uses `@onlyAccelerator`):
 
 | Check | How to Verify |
@@ -148,9 +148,9 @@ where `@onlyCUDA` was removed.
 
 **@onlyCPU to device-agnostic**: Verify each `@onlyCPU` test was individually evaluated (not bulk-decided). Check that `device` param was added when `@onlyCPU` was removed.
 
-#### 1c. Strategy 1 Correctness
+#### 1c. CPU-only Correctness
 
-For tests in a Strategy 1 class (`TestFoo` without device suffix):
+For tests in a CPU-only class (`TestFoo` without device suffix):
 
 | Check | What to Look For |
 |-------|-----------------|
@@ -163,15 +163,15 @@ For tests in a Strategy 1 class (`TestFoo` without device suffix):
 
 Class renaming is **OPTIONAL**. The future `hw_classification` member on TestCase will handle strategy classification; class names are no longer the primary discriminator. The coder decides whether to rename based on external reference impact (see `refactor-test-decoupling` for the decision framework).
 
-**Do NOT flag a class name mismatch as an issue unless it is actively misleading** (e.g., an S1 CPU-only class named `TestFooCUDA`). A class using the original name with the correct strategy mechanism is valid.
+**Do NOT flag a class name mismatch as an issue unless it is actively misleading** (e.g., a CPU-only class named `TestFooCUDA`). A class using the original name with the correct strategy mechanism is valid.
 
 For reference, the recommended naming convention (when coder chooses to rename):
 
 | Strategy | Recommended Name | Acceptable Alternative |
 |----------|-----------------|----------------------|
-| Strategy 1 (accelerator-unrelated) | `TestFoo` (original name) | Must NOT have device suffix |
-| Strategy 2 (accelerator-agnostic) | `TestFooDevice` | Original name is fine |
-| Strategy 3 (accelerator-specific) | Original name (`instantiate_device_type_tests` appends the device suffix) | Original name is fine |
+| CPU-only | `TestFoo` (original name) | Must NOT have device suffix |
+| device-agnostic | `TestFooDevice` | Original name is fine |
+| device-specific | Original name (`instantiate_device_type_tests` appends the device suffix) | Original name is fine |
 
 #### 2a. Cross-File Reference Integrity
 
@@ -195,7 +195,7 @@ stop matching, turning expected failures into unexpected failures.
 
 **How to fix:** For each stale reference, update the class name to match the
 new name. Verify which class actually owns each test — when a class is split
-into multiple new classes (Strategy 1 + 2 + 3), tests may now live under
+into multiple new classes (CPU-only + 2 + 3), tests may now live under
 different class names (e.g., `TestIndexing.test_foo` might now be
 `TestIndexingDevice.test_foo` or `TestIndexingCPU.test_foo`).
 
@@ -232,14 +232,14 @@ should run.
 
 | Strategy | Expected Mechanism | Wrong Mechanism |
 |----------|-------------------|-----------------|
-| Strategy 1, no parametrization | Plain `TestCase` | `instantiate_device_type_tests` |
-| Strategy 1, with `@parametrize`/`@dtypes` | `@instantiate_parametrized_tests` | `instantiate_device_type_tests` |
-| Strategy 1, with `@ops` | `instantiate_device_type_tests(..., only_for="cpu")` | `@instantiate_parametrized_tests` |
-| Strategy 2 | `instantiate_device_type_tests(TestFooDevice, globals())` | `@instantiate_parametrized_tests` |
-| Strategy 3 | `instantiate_device_type_tests(..., only_for="<device>")` | Plain `TestCase` with `setUp` guard or `@instantiate_parametrized_tests` |
+| CPU-only, no parametrization | Plain `TestCase` | `instantiate_device_type_tests` |
+| CPU-only, with `@parametrize`/`@dtypes` | `@instantiate_parametrized_tests` | `instantiate_device_type_tests` |
+| CPU-only, with `@ops` | `instantiate_device_type_tests(..., only_for="cpu")` | `@instantiate_parametrized_tests` |
+| device-agnostic | `instantiate_device_type_tests(TestFooDevice, globals())` | `@instantiate_parametrized_tests` |
+| device-specific | `instantiate_device_type_tests(..., only_for="<device>")` | Plain `TestCase` with `setUp` guard or `@instantiate_parametrized_tests` |
 
 **Critical**: Check that `instantiate_device_type_tests` is never used for
-CPU-only (Strategy 1) classes — it creates useless per-device variants.
+CPU-only classes — it creates useless per-device variants.
 
 **Critical**: Check that no class uses both `instantiate_parametrized_tests`
 and `instantiate_device_type_tests` — double instantiation causes test name
@@ -247,7 +247,7 @@ collisions.
 
 ### 4. API Replacement Correctness
 
-For Strategy 2 tests, verify device-specific APIs were replaced with their
+For device-agnostic tests, verify device-specific APIs were replaced with their
 device-agnostic equivalents. **Consult `../../../reference/device_api_catalog.yaml` → `category_a` for the authoritative mapping.** The catalog defines every `torch.<device>.<api>` → `torch.accelerator.<api>` replacement.
 
 **Key checks:**
@@ -259,23 +259,23 @@ device-agnostic equivalents. **Consult `../../../reference/device_api_catalog.ya
 | `device="cuda"` | `device` parameter | No hardcoded `"cuda"` |
 | `.cuda()` / `.to("cuda")` | `.to(device)` | No `.cuda()` calls |
 
-For any `torch.cuda.<api>()` call remaining in a Strategy 2 test, check the
+For any `torch.cuda.<api>()` call remaining in a device-agnostic test, check the
 catalog: if Category A, it should be `torch.accelerator.<api>()`. If Category B,
 use the unified type (e.g., `torch.Stream` instead of `torch.cuda.Stream`). If
-Category C, the test belongs in Strategy 3.
+Category C, the test belongs in device-specific.
 
 **Return type compatibility**: Verify return type compatibility for all `torch.accelerator.*` replacements, especially HIGH RISK APIs: `current_device_index` (returns `int`, compare against `int`), `set_device_index` (takes `int` arg), `get_device_capability` (return type differs across backends). Consult `../../../reference/device_api_catalog.yaml` type annotations.
 
-**Remaining `torch.cuda` in S2 classes**: Scan each S2 class for remaining `torch.cuda.*` calls — each must be either migrated to `torch.accelerator.*` or the test moved to Strategy 3.
+**Remaining `torch.cuda` in device-agnostic classes**: Scan each device-agnostic class for remaining `torch.cuda.*` calls — each must be either migrated to `torch.accelerator.*` or the test moved to device-specific.
 
 ### 5. Import Cleanup
 
 | Check | How to Verify |
 |-------|---------------|
-| `TEST_CUDA` import removed if no Strategy 3 CUDA tests remain | `grep "TEST_CUDA"` in the file |
-| `TEST_MPS` import removed if no Strategy 3 MPS tests remain | `grep "TEST_MPS"` in the file |
-| `TEST_XPU` import removed if no Strategy 3 XPU tests remain | `grep "TEST_XPU"` in the file |
-| `@onlyCUDA` import removed if no Strategy 3 CUDA tests remain | `grep "onlyCUDA"` in the imports |
+| `TEST_CUDA` import removed if no device-specific CUDA tests remain | `grep "TEST_CUDA"` in the file |
+| `TEST_MPS` import removed if no device-specific MPS tests remain | `grep "TEST_MPS"` in the file |
+| `TEST_XPU` import removed if no device-specific XPU tests remain | `grep "TEST_XPU"` in the file |
+| `@onlyCUDA` import removed if no device-specific CUDA tests remain | `grep "onlyCUDA"` in the imports |
 | `@onlyOn` import removed if all uses were replaced | `grep "onlyOn"` in the file |
 | `@onlyNativeDeviceTypes` removal | `@onlyNativeDeviceTypes` / `@onlyNativeDeviceTypesAnd` are redundant on device-agnostic classes — REMOVE them. Before removing, verify dtype compatibility (`float64`/`complex128`/channels-last may be unsupported on MPS/MTIA) and add `@skipIfMPS`/`@dtypesIfMPS` if needed. |
 | New imports are correct | `onlyAccelerator` from `common_device_type`, `torch.accelerator` if used |
@@ -290,10 +290,10 @@ its device dependency level (e.g., a test using only CPU ops should not be in a
 | Check | How to Verify |
 |-------|---------------|
 | Every `def test_` belongs to the correct strategy class | Cross-reference each test's API usage against the catalog and its enclosing class name |
-| Device instantiation present for Strategy 3 | `instantiate_device_type_tests(..., only_for="<device>")` with a `device` param on each method |
+| Device instantiation present for device-specific | `instantiate_device_type_tests(..., only_for="<device>")` with a `device` param on each method |
 | No test logic unintentionally modified | If reviewing a diff, compare test bodies against the base version. If whole-file, flag tests that appear incomplete or have empty bodies |
-| No duplicate test bodies across device-specific classes | If identical test bodies appear across S3 classes, they belong in the S2 shared class |
-| No device-specific artifacts in S2 classes | Scan for `_cuda` suffix in test method names, internal variable names like `cuda_out`, module-level helpers with `if device_type == "<backend>"` branches — clean these when the test is in an S2 class |
+| No duplicate test bodies across device-specific classes | If identical test bodies appear across device-specific classes, they belong in the device-agnostic shared class |
+| No device-specific artifacts in device-agnostic classes | Scan for `_cuda` suffix in test method names, internal variable names like `cuda_out`, module-level helpers with `if device_type == "<backend>"` branches — clean these when the test is in a device-agnostic class |
 
 **Diff-based review**: Additionally verify that every original test method is
 accounted for (count `def test_` in old vs new). A test "lost" in refactoring is
@@ -304,7 +304,7 @@ a regression.
 | Pitfall | Detection | Severity |
 |---------|-----------|----------|
 | `@onlyAccelerator` used as class decorator | `@onlyAccelerator\nclass TestFoo` — breaks `instantiate_device_type_tests` | Blocker |
-| Strategy 1 class has `device` parameter | `def test_foo(self, device)` in `TestFoo` (no Device suffix) | Blocker |
+| CPU-only class has `device` parameter | `def test_foo(self, device)` in `TestFoo` (no Device suffix) | Blocker |
 | `skipIfXpu`/`skipIfCUDA` from `common_utils` in device-agnostic class | These skip ALL variants, not just the target device | Major |
 | `GPU_TYPE`/`HAS_GPU` from `inductor_utils` not converted | Leftover inductor-specific device abstraction | Major |
 | Mixed `device` param and hardcoded `"cuda"` in same class | Inconsistent; some tests use device param, others hardcode | Major |
@@ -314,16 +314,16 @@ a regression.
 | Missing blacklist skip decorators | `@skipXPU`, `@skipMPS`, `@skipMeta` absent — these document known gaps. If the original file had them and they're now gone, that's a regression | Blocker |
 | `@onlyAccelerator` used without dtype compatibility check | Test runs on MPS/XPU but uses `complex128` or `float64` (unsupported on MPS). For every test using `@onlyAccelerator`, verify every dtype the test uses is supported on ALL target backends. If not, add `@expectedFailureMPS`, `@dtypesIfMPS`, or a skip decorator. | Blocker |
 | Test class name doesn't match OpInfo DecorateInfo references | `DecorateInfo` entries in `common_methods_invocations.py` use exact class name matching in `is_active()`. If the test class was RENAMED, verify DecorateInfo entries were updated (section 2a). If the coder kept the original name, this check is a no-op. | Blocker |
-| **Flagging an original class name as "wrong" when the coder chose not to rename** | Renaming is optional. If the coder kept the original name (e.g., `TestFoo` for an S2 class), do NOT flag it unless the name is actively misleading (e.g., a CPU-only class named `TestFooCUDA`). The `hw_classification` member will handle classification. | N/A — reviewer guidance |
-| `@unittest.skipIf(not TEST_CUDA, ...)` leftover in S2 class | Should be `@onlyAccelerator` | Major |
+| **Flagging an original class name as "wrong" when the coder chose not to rename** | Renaming is optional. If the coder kept the original name (e.g., `TestFoo` for a device-agnostic class), do NOT flag it unless the name is actively misleading (e.g., a CPU-only class named `TestFooCUDA`). The `hw_classification` member will handle classification. | N/A — reviewer guidance |
+| `@unittest.skipIf(not TEST_CUDA, ...)` leftover in device-agnostic class | Should be `@onlyAccelerator` | Major |
 | `@skipIfMPS`/`@skipXPU`/`@skipCUDAIf` applied to method without `device` parameter | These decorators check the `device` kwarg and silently fail if missing | Blocker |
 | Missing `hw_classification` class attribute | Every test class must have `hw_classification = HardwareClassification.XXX`. Missing attr causes test runner to skip or misroute tests. | Blocker |
-| Incorrect `hw_classification` value | Value must match the class mechanism: GENERIC for S1, ACCELERATOR for S2, CUDA/MPS/XPU for S3 per device, CPU for S1-with-`@ops`. A wrong value (e.g., GENERIC on an S2 class) breaks `--hw-classification` filtering. | Blocker |
+| Incorrect `hw_classification` value | Value must match the class mechanism: GENERIC for CPU-only, ACCELERATOR for device-agnostic, CUDA/MPS/XPU for device-specific per device, CPU for CPU-only-with-`@ops`. A wrong value (e.g., GENERIC on a device-agnostic class) breaks `--hw-classification` filtering. | Blocker |
 | `HardwareClassification` not imported | Must be imported from `torch.testing._internal.common_utils` and merged alphabetically into the existing import block. | Blocker |
 
 ### 8. Decorator Ordering
 
-For Strategy 2 tests, decorators must be ordered correctly. The `device`
+For device-agnostic tests, decorators must be ordered correctly. The `device`
 parameter is filled in by `instantiate_device_type_tests`, and other
 parametrization decorators fill additional arguments:
 
@@ -407,6 +407,6 @@ Structure your review as follows:
 The refactoring standards this review checks against are defined in the
 `refactor-test-decoupling` skill. Consult it for the full classification
 decision tree, blacklist vs. whitelist rules, instantiation mechanism
-comparison, and Strategy 1/2/3 patterns.
+comparison, and CPU-only/2/3 patterns.
 
 **`../../../reference/device_api_catalog.yaml`** is the single authoritative source for API classification. It categorizes every device API as A (accelerator equivalent), B (general concept), or C (truly device-specific). All classification decisions in the review must be grounded in this catalog — never hard-code or guess which APIs belong to which category.

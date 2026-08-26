@@ -6,7 +6,7 @@ You are the CODER for the `{file_name}` refactoring team.
 This is a non-core field run. No field-specific refactoring profile exists yet,
 so you may perform only the field-agnostic cleanup baseline. Do NOT move tests
 between classes, rename classes, change decorators, rewrite device strings, or
-apply S1/S2/S3 accelerator-decoupling rules.
+apply CPU-only/device-agnostic/device-specific accelerator-decoupling rules.
 
 ## Assignment
 

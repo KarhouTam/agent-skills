@@ -45,7 +45,7 @@
 - 字段检测基于 `reference/distributed/test_list.txt` 与
   `reference/graph/test_list.txt` 的精确路径匹配；未命中默认 `core`，
   同时命中两个非 core 列表则报错。
-- `core` 继续使用根目录 `reference/`，执行完整 S1/S2/S3 加速器解耦工作流。
+- `core` 继续使用根目录 `reference/`，执行完整 CPU-only/device-agnostic/device-specific 加速器解耦工作流。
 - 非 core 字段使用 `reference/<field>/`，缺少字段专属内容时回退 core 参考；
   当前先执行安全基线：仅清理 import/符号，运行通用验证与审查，暂不启动
   本地测试门禁。
@@ -95,9 +95,9 @@ RefactorFlow (状态机核心)
 
 | 策略      | 类命名（推荐，可选） | 实例化机制                                      | 示例                                                                    | 使用场景                             |
 | --------- | -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------ |
-| **策略1** | `TestFoo`（保持原名） | `@instantiate_parametrized_tests` 或 `TestCase` | `TestBinaryUfuncs`                                                      | 无设备依赖的纯逻辑测试               |
-| **策略2** | `TestFoo` 或 `TestFooDevice` | `instantiate_device_type_tests()`               | `TestBinaryUfuncsDevice` → 生成 `TestBinaryUfuncsDeviceCPU/CUDA/MPS` 等 | 使用 device 参数但仅需通用加速器 API |
-| **策略3** | `TestFoo`（保持原名，`instantiate_device_type_tests` 追加设备后缀） | `instantiate_device_type_tests(only_for="<device>")` | `TestBinaryUfuncsCUDA`（由 `TestBinaryUfuncs` + `only_for="cuda"` 生成） | 需要特定加速器的独特功能             |
+| **CPU-only** | `TestFoo`（保持原名） | `@instantiate_parametrized_tests` 或 `TestCase` | `TestBinaryUfuncs`                                                      | 无设备依赖的纯逻辑测试               |
+| **device-agnostic** | `TestFoo` 或 `TestFooDevice` | `instantiate_device_type_tests()`               | `TestBinaryUfuncsDevice` → 生成 `TestBinaryUfuncsDeviceCPU/CUDA/MPS` 等 | 使用 device 参数但仅需通用加速器 API |
+| **device-specific** | `TestFoo`（保持原名，`instantiate_device_type_tests` 追加设备后缀） | `instantiate_device_type_tests(only_for="<device>")` | `TestBinaryUfuncsCUDA`（由 `TestBinaryUfuncs` + `only_for="cuda"` 生成） | 需要特定加速器的独特功能             |
 
 ### 设备 API 分类层次
 
@@ -105,13 +105,13 @@ RefactorFlow (状态机核心)
 Category C（设备专属） > Category B（通用概念） > Category A（有 accelerator 等价物） > 无设备使用
 ```
 
-**首次匹配即停止。** 测试中使用了任何 Category C API → 策略3。
+**首次匹配即停止。** 测试中使用了任何 Category C API → device-specific。
 
 | 分类           | 含义                              | 示例 API                                                      | 策略  |
 | -------------- | --------------------------------- | ------------------------------------------------------------- | ----- |
-| **Category A** | 存在 `torch.accelerator.*` 等价物 | `empty_cache`、`synchronize`、`CUDAGraph`→`Graph`、`memory_*` | 策略2 |
-| **Category B** | 跨后端通用概念，暂无 wrapper      | `Stream`、`Event`、`manual_seed`、`get_device_properties`     | 策略2 |
-| **Category C** | 真正设备专属，无跨设备等价物      | NCCL、NVTX、cuDNN、GDS、Jiterator、Metal shader               | 策略3 |
+| **Category A** | 存在 `torch.accelerator.*` 等价物 | `empty_cache`、`synchronize`、`CUDAGraph`→`Graph`、`memory_*` | device-agnostic |
+| **Category B** | 跨后端通用概念，暂无 wrapper      | `Stream`、`Event`、`manual_seed`、`get_device_properties`     | device-agnostic |
+| **Category C** | 真正设备专属，无跨设备等价物      | NCCL、NVTX、cuDNN、GDS、Jiterator、Metal shader               | device-specific |
 
 ---
 
@@ -337,13 +337,13 @@ state = flow.run("test/test_ops.py", resume=True)  # 从磁盘加载已有产物
 
 | 模式                                              | 含义                  | 处理                               |
 | ------------------------------------------------- | --------------------- | ---------------------------------- |
-| `@onlyCUDA` + 测试通用 op（softmax、add、matmul） | CUDA 只是作为设备使用 | → 策略2，扩大为 `@onlyAccelerator` |
-| `.cuda()` / `.to("cuda")` + 测试通用行为          | CUDA 只是设备放置     | → 策略2，替换为 `.to(device)`      |
-| `device="cuda"` + 通用逻辑                        | 硬编码设备字符串      | → 策略2，使用 `device` 参数        |
-| `TEST_CUDA` 作为"需要加速器"的门控                | 代理条件              | → 策略2，替换为 `@onlyAccelerator` |
-| Category C API（NCCL、cuDNN 等）                  | 真正 CUDA 专属        | → 策略3，保留                      |
+| `@onlyCUDA` + 测试通用 op（softmax、add、matmul） | CUDA 只是作为设备使用 | → device-agnostic，扩大为 `@onlyAccelerator` |
+| `.cuda()` / `.to("cuda")` + 测试通用行为          | CUDA 只是设备放置     | → device-agnostic，替换为 `.to(device)`      |
+| `device="cuda"` + 通用逻辑                        | 硬编码设备字符串      | → device-agnostic，使用 `device` 参数        |
+| `TEST_CUDA` 作为"需要加速器"的门控                | 代理条件              | → device-agnostic，替换为 `@onlyAccelerator` |
+| Category C API（NCCL、cuDNN 等）                  | 真正 CUDA 专属        | → device-specific，保留                      |
 
-**判别法则**：将 `"cuda"` 替换为 `"mps"` 或 `"xpu"`，测试逻辑是否仍然合理？是 → 策略2，否 → 策略3。
+**判别法则**：将 `"cuda"` 替换为 `"mps"` 或 `"xpu"`，测试逻辑是否仍然合理？是 → device-agnostic，否 → device-specific。
 
 ### 常见陷阱速查
 
@@ -351,11 +351,11 @@ state = flow.run("test/test_ops.py", resume=True)  # 从磁盘加载已有产物
 | ----------------------------------------------- | ------------------------------------ | --------------------------------------------- |
 | 删除黑名单跳过                                  | 在其他平台 CI 上崩溃                 | 保留 `@skipXPU`、`@skipCUDAIf` 等             |
 | 将 Cat A API 视作 CUDA 专属                     | 测试被不必要锁定在 CUDA              | 替换为 `torch.accelerator.*` 等价物           |
-| 将 Cat B API 视作 CUDA 专属                     | 同上                                 | 使用统一 `torch.Stream`/`Event` 或保留在策略2 |
+| 将 Cat B API 视作 CUDA 专属                     | 同上                                 | 使用统一 `torch.Stream`/`Event` 或保留在device-agnostic |
 | 将 `@onlyAccelerator` 用作类装饰器              | `instantiate_device_type_tests` 失败 | 只用作方法装饰器                              |
 | `instantiate_device_type_tests` 用于纯 CPU 测试 | 创建无用的 CUDA/MPS 变体             | 使用 `@instantiate_parametrized_tests`        |
 | 重命名类后未更新 DecorateInfo                   | 跳过/xfail 装饰器静默失效            | 搜索 `common_methods_invocations.py` 更新引用 |
-| 策略1 类用设备后缀命名（如 `TestFooCPU`）       | 误导性命名，暗示不存在的依赖         | 用原名（如 `TestFoo`）                        |
+| CPU-only 类用设备后缀命名（如 `TestFooCPU`）       | 误导性命名，暗示不存在的依赖         | 用原名（如 `TestFoo`）                        |
 
 ---
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-08-26 — 策略术语替换：S1/S2/S3 → CPU-only / device-agnostic / device-specific
+
+移除 S1/S2/S3 及 `Strategy1/2/3` 策略代号，统一为自解释术语：**CPU-only**（原 S1，
+无设备依赖）、**device-agnostic**（原 S2，跨加速器通用）、**device-specific**（原 S3，
+单加速器专属）。
+
+- **代码标识符**：rule ID `strategy_1/2/3` → `cpu_only` / `device_agnostic` /
+  `device_specific`；analyst 输出值 `"Strategy1/2/3"` → 同名 snake_case；
+  `STRATEGY_TO_HW_CLASSIFICATION`、`compute_applicable_rules`、`verify.py` 的
+  class_split 检查同步更新。
+- **术语统一**：`accelerator-unrelated` → CPU-only、`accelerator-agnostic` /
+  `device-generic` → device-agnostic、`accelerator-specific` → device-specific；
+  prompts、SKILL.md、CLAUDE.md、参考文档、测试 fixture 与图表（overview /
+  decision-tree 的 drawio + SVG）全部清扫。
+- **兼容性**：当前无存量 `agent_space/refactor/` 工作区；如 resume 旧工作区，
+  旧策略值不再被识别，需重新生成 analyst 报告。
+
 ## 2026-08-25 — Harness 插件层重构（任务构建与发射解耦）
 
 将 harness 依赖从"`BaseAdapter` 大接口 + `CodexAdapter(ClaudeCodeAdapter)` 继承链"重构为

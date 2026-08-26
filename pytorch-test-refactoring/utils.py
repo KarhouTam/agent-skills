@@ -28,15 +28,15 @@ DYNAMO_EXPECTED_FAILURES_DIR = "test/dynamo_expected_failures"
 # Refactoring rules for rule-based coder distribution.
 # Each coder is assigned one rule and applies it across the entire file.
 REFACTOR_RULES: dict[str, str] = {
-    "strategy_1": "Extract accelerator-unrelated tests (S1) — "
+    "cpu_only": "Extract CPU-only tests — "
     "move CPU-only tests into the original-named class with "
     "@instantiate_parametrized_tests or plain TestCase",
-    "strategy_2": "Convert to device-agnostic tests (S2) — "
+    "device_agnostic": "Convert to device-agnostic tests — "
     "enlarge @onlyCUDA/@onlyOn to @onlyAccelerator, replace .cuda()/.to('cuda') "
     "with .to(device), replace Category A/B APIs with accelerator equivalents, "
     "create class with instantiate_device_type_tests(). "
     "Renaming to TestFooDevice is optional — agent decides based on external refs.",
-    "strategy_3": "Extract accelerator-specific tests (S3) — "
+    "device_specific": "Extract device-specific tests — "
     "move tests using Category C APIs into a class, "
     "give each test a `device` parameter, and register with "
     "instantiate_device_type_tests(<Class>, globals(), only_for='cuda'). "
@@ -47,7 +47,7 @@ REFACTOR_RULES: dict[str, str] = {
     "rename stale entries in test/dynamo_skips/ and test/dynamo_expected_failures/",
 }
 
-RULE_ORDER = ["strategy_1", "strategy_2", "strategy_3", "cleanup"]
+RULE_ORDER = ["cpu_only", "device_agnostic", "device_specific", "cleanup"]
 
 # HardwareClassification mapping — strategy → (hw_classification_value, import_line)
 # Maps refactoring strategy + optional device to the correct HardwareClassification enum member.
@@ -56,12 +56,12 @@ HW_CLASSIFICATION_IMPORT = (
     "from torch.testing._internal.common_utils import HardwareClassification"
 )
 HW_CLASSIFICATION_MAP: dict[str, str] = {
-    # S1 — no device dependency
+    # CPU-only — no device dependency
     "GENERIC": "HardwareClassification.GENERIC",  # plain TestCase or @instantiate_parametrized_tests
     "CPU": "HardwareClassification.CPU",  # instantiate_device_type_tests(only_for="cpu")
-    # S2 — device-agnostic (any accelerator)
+    # device-agnostic (any accelerator)
     "ACCELERATOR": "HardwareClassification.ACCELERATOR",  # instantiate_device_type_tests(except_for=...)
-    # S3 — device-specific
+    # device-specific
     "CUDA": "HardwareClassification.CUDA",  # Category C CUDA APIs
     "MPS": "HardwareClassification.MPS",  # Category C MPS APIs
     "XPU": "HardwareClassification.XPU",  # Category C XPU APIs
@@ -69,9 +69,9 @@ HW_CLASSIFICATION_MAP: dict[str, str] = {
 
 # Mapping from strategy assignment to recommended hw_classification key
 STRATEGY_TO_HW_CLASSIFICATION: dict[str, str] = {
-    "Strategy1": "GENERIC",
-    "Strategy2": "ACCELERATOR",
-    "Strategy3": "CUDA",  # default for S3; overridden per device (CUDA/MPS/XPU)
+    "cpu_only": "GENERIC",
+    "device_agnostic": "ACCELERATOR",
+    "device_specific": "CUDA",  # default for device-specific; overridden per device (CUDA/MPS/XPU)
 }
 
 
@@ -91,12 +91,12 @@ def compute_applicable_rules(
 
     rules: list[str] = []
     strategies = set(strategy_assignments.values())
-    if "Strategy1" in strategies:
-        rules.append("strategy_1")
-    if "Strategy2" in strategies:
-        rules.append("strategy_2")
-    if "Strategy3" in strategies:
-        rules.append("strategy_3")
+    if "cpu_only" in strategies:
+        rules.append("cpu_only")
+    if "device_agnostic" in strategies:
+        rules.append("device_agnostic")
+    if "device_specific" in strategies:
+        rules.append("device_specific")
     rules.append("cleanup")
     return rules
 
