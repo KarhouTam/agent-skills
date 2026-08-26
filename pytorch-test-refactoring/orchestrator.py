@@ -59,7 +59,8 @@ from state import (
     LocalTestFailure,
 )
 from utils import ANALYST_REPORT_JSON
-from agent.registry import get_adapter
+from agent.harnesses import get_harness, HARNESSES
+from agent.tasks import build_ruleset_editor_task
 
 
 # ── argument parsing ──────────────────────────────────────────────
@@ -151,7 +152,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--harness",
-        choices=["claude", "codex"],
+        choices=sorted(HARNESSES),
         default=os.environ.get("PYTORCH_TEST_REFACTOR_HARNESS", "claude"),
         help=(
             "Agent harness to emit task specs for. Defaults to the "
@@ -166,25 +167,25 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    adapter = get_adapter(args.harness)
+    harness = get_harness(args.harness)
 
     if args.ingest_feedback:
-        _run_ingest(args, adapter)
+        _run_ingest(args, harness)
         return
 
     if args.review_queue:
-        _run_review_queue(args, adapter)
+        _run_review_queue(args, harness)
         return
 
     if args.apply_ingest:
-        _run_apply_ingest(args, adapter)
+        _run_apply_ingest(args, harness)
         return
 
     if args.ci_check:
-        _run_ci_check(args, adapter)
+        _run_ci_check(args, harness)
         return
 
-    flow = RefactorFlow(adapter=adapter)
+    flow = RefactorFlow()
 
     if args.feed:
         # ── feed path ──────────────────────────────────────────
@@ -219,7 +220,7 @@ def main() -> None:
         state = flow.run(args.file_path, resume=args.resume)
 
     # ── emit next action ──
-    _emit_next_action(flow, state)
+    _emit_next_action(flow, state, harness)
 
 
 # ── stdin helpers ─────────────────────────────────────────────────
@@ -432,7 +433,7 @@ def _build_local_test_fix_result(data: dict[str, Any]) -> list[LocalTestFailure]
 # ── output emitters ───────────────────────────────────────────────
 
 
-def _emit_next_action(flow: RefactorFlow, state: RefactorState) -> None:
+def _emit_next_action(flow: RefactorFlow, state: RefactorState, harness) -> None:
     """Output the next action as JSON to stdout.
 
     Three possible outputs:
@@ -461,7 +462,7 @@ def _emit_next_action(flow: RefactorFlow, state: RefactorState) -> None:
                 f"Phase: {state.current_phase}, sub_phase: {state.rule_sub_phase}",
             )
             return
-        _emit_tasks(flow, state, tasks, signal)
+        _emit_tasks(flow, state, tasks, signal, harness)
         return
 
     # ── deterministic phase completed internally ─────────────
@@ -478,7 +479,7 @@ def _emit_next_action(flow: RefactorFlow, state: RefactorState) -> None:
             FlowSignal.RELAY_FINDINGS,
         ):
             tasks2 = flow.get_pending_tasks()
-            _emit_tasks(flow, state2, tasks2, state2.signal)
+            _emit_tasks(flow, state2, tasks2, state2.signal, harness)
         else:
             _emit_error(
                 flow,
@@ -521,26 +522,28 @@ def _emit_tasks(
     state: RefactorState,
     tasks: list[Any],
     signal: FlowSignal,
+    harness,
 ) -> None:
     """Emit the 'need_agent' task spec."""
-    adapter = flow.adapter
     file_path = state.file_path
     ws = str(state.workspace) if state.workspace else "."
-    rule_context = _rule_context_for(state)
-    task_specs = [
-        adapter.task_to_spec(
-            t,
-            signal,
-            file_path=file_path,
-            workspace=ws,
-            rule_context=rule_context,
-        )
-        for t in tasks
-    ]
+    if signal == FlowSignal.SPAWN_SINGLE:
+        task_specs = [harness.spawn(t) for t in tasks]
+    else:  # SEND_MESSAGE / RELAY_FINDINGS
+        rule_context = _rule_context_for(state)
+        task_specs = [
+            harness.followup(
+                t,
+                file_path=file_path,
+                workspace=ws,
+                rule_context=rule_context,
+            )
+            for t in tasks
+        ]
     feed_as = _feed_type_for(state)
 
     # Build the resume command
-    cmd = _cmd(adapter, file_path, "--feed", feed_as)
+    cmd = _cmd(harness, file_path, "--feed", feed_as)
     feed_file = f"{ws}/{feed_as}_result.json"
     feed_cmd = f"{cmd} --feed-file {feed_file}"
 
@@ -556,7 +559,7 @@ def _emit_tasks(
                 "feed_as": feed_as,
                 "command": feed_cmd,
                 "feed_file": feed_file,
-                "note": adapter.completion_note(
+                "note": harness.note(
                     "refactor",
                     feed_file=feed_file,
                     feed_cmd=feed_cmd,
@@ -583,7 +586,7 @@ def _emit_error(flow: RefactorFlow, message: str) -> None:
 # -- CI handoff -------------------------------------------------------
 
 
-def _run_ci_check(args, adapter) -> None:
+def _run_ci_check(args, harness) -> None:
     """Handle --ci-check: monitor CI state, possibly spawn debugger."""
     from utils import get_workspace, resolve_field
 
@@ -591,7 +594,7 @@ def _run_ci_check(args, adapter) -> None:
     field = resolve_field(args.file_path)
     workspace = get_workspace(file_name, field)
 
-    ci = CIOps(adapter=adapter)
+    ci = CIOps()
 
     if args.feed:
         ci.run(args.file_path, str(workspace), resume=True)
@@ -612,16 +615,15 @@ def _run_ci_check(args, adapter) -> None:
             pr_number=args.pr_number,
         )
 
-    _emit_ci_action(ci)
+    _emit_ci_action(ci, harness)
 
 
-def _emit_ci_action(ci: CIOps) -> None:
+def _emit_ci_action(ci: CIOps, harness) -> None:
     """Emit the next CI ops action as JSON to stdout."""
     ci_state = ci.state
     signal = ci_state.signal
     ws = str(ci_state.workspace) if ci_state.workspace else ""
     file_path = ci_state.file_path
-    adapter = ci.adapter
 
     if ci_state.ci_phase == "monitor" and signal == FlowSignal.WAITING:
         _write_json(
@@ -633,28 +635,28 @@ def _emit_ci_action(ci: CIOps) -> None:
                 "head_sha": ci_state.head_sha,
                 "ci_phase": ci_state.ci_phase,
                 "fix_round": len(ci_state.fix_history),
-                "on_complete": adapter.ci_wait_on_complete(file_path),
+                "on_complete": harness.wait_on_complete(file_path),
             }
         )
 
     elif ci_state.ci_phase == "monitor" and signal == FlowSignal.DONE:
         ci.run(file_path, str(ci_state.workspace) if ci_state.workspace else "")
-        _emit_ci_action(ci)
+        _emit_ci_action(ci, harness)
 
     elif ci_state.ci_phase == "debug" and signal == FlowSignal.SPAWN_SINGLE:
         # Preflight: the debugger applies fixes by committing and pushing.
         # Fail fast with an actionable message if the harness would block it.
-        blocked_git = adapter.git_preflight()
+        blocked_git = harness.git_preflight()
         if blocked_git:
-            _emit_error_ci(ci, adapter.git_preflight_error(blocked_git, file_path))
+            _emit_error_ci(ci, harness.git_preflight_error(blocked_git, file_path))
             return
 
         tasks = ci.get_pending_tasks()
         if not tasks:
             _emit_error_ci(ci, "No debugger task returned")
             return
-        task_specs = [adapter.ci_task_to_spec(t) for t in tasks]
-        cmd = _cmd(adapter, file_path, "--ci-check", "--feed", "debugger")
+        task_specs = [harness.spawn(t) for t in tasks]
+        cmd = _cmd(harness, file_path, "--ci-check", "--feed", "debugger")
         feed_dir = str(ci_state.workspace) if ci_state.workspace else "."
         feed_file = f"{feed_dir}/debugger_result.json"
         feed_cmd = f"{cmd} --feed-file {feed_file}"
@@ -673,7 +675,7 @@ def _emit_ci_action(ci: CIOps) -> None:
                     "feed_as": "debugger",
                     "command": feed_cmd,
                     "feed_file": feed_file,
-                    "note": adapter.completion_note(
+                    "note": harness.note(
                         "ci_debugger",
                         feed_file=feed_file,
                         feed_cmd=feed_cmd,
@@ -691,7 +693,7 @@ def _emit_ci_action(ci: CIOps) -> None:
                 "pr_number": ci_state.pr_number,
                 "fix_history": ci_state.fix_history,
                 "workspace": ws,
-                "next_steps": adapter.ci_done_next_steps(ci_state.pr_number),
+                "next_steps": harness.done_next_steps(ci_state.pr_number),
             }
         )
 
@@ -724,18 +726,36 @@ def _write_json(obj: dict[str, Any]) -> None:
 # ── harness-neutral helpers ───────────────────────────────────────
 
 
-def _cmd(adapter, *argv) -> str:
+def _cmd(harness, *argv) -> str:
     """Build an orchestrator command with the harness selector included.
 
     The harness flag must round-trip on resume/feed invocations so a
-    cross-process continuation re-selects the same adapter. The default
-    harness ("claude") adds no flag, keeping legacy commands unchanged.
+    cross-process continuation re-selects the same harness. Emitted for
+    every harness (including the default) so the command is self-describing.
     """
-    parts = ["python", "orchestrator.py"]
-    if adapter.harness_name and adapter.harness_name != "claude":
-        parts.append(f"--harness {adapter.harness_name}")
+    parts = ["python", "orchestrator.py", f"--harness {harness.name}"]
     parts.extend(str(a) for a in argv)
     return " ".join(parts)
+
+
+def _inline_instruction(task, *, feed_file: str, feed_cmd: str) -> str:
+    """Build the executor-facing instruction for a non-delegated AI step.
+
+    Used when the harness cannot delegate a task to a spawned sub-agent
+    (``supports_delegated_agents`` is false): the main agent performs the
+    step itself.
+    """
+    return (
+        f"You are the `{task.agent_name}` agent for the feedback-ingest "
+        "pipeline. Perform the task below YOURSELF with your own tools. "
+        "Do NOT spawn sub-agents, do NOT run `orchestrator.py` again, and "
+        "do NOT wait on other agents. Read any referenced ruleset files "
+        "before deciding.\n\n"
+        f"When done, write your result JSON exactly to:\n{feed_file}\n\n"
+        f"Then run exactly:\n{feed_cmd}\n\n"
+        "## Task\n\n"
+        f"{task.prompt}"
+    )
 
 
 def _rule_context_for(state: RefactorState) -> dict | None:
@@ -787,9 +807,9 @@ def _feed_type_for(state: RefactorState) -> str:
 # ── feedback ingest sidecar ────────────────────────────────────────
 
 
-def _run_ingest(args, adapter) -> None:
+def _run_ingest(args, harness) -> None:
     """Handle --ingest-feedback: harvest + triage + draft, emitting agent tasks."""
-    ops = IngestOps(adapter=adapter)
+    ops = IngestOps()
 
     if args.feed:
         ops.run()
@@ -808,7 +828,7 @@ def _run_ingest(args, adapter) -> None:
         if ops.state.pending_findings:
             _persist_ingest_findings(ops)
 
-    _emit_ingest_action(ops)
+    _emit_ingest_action(ops, harness)
 
 
 def _persist_ingest_findings(ops: "IngestOps") -> None:
@@ -820,28 +840,27 @@ def _persist_ingest_findings(ops: "IngestOps") -> None:
         ingest_mod.write_findings_md(ops.state.pending_findings, workspace)
 
 
-def _emit_ingest_action(ops: "IngestOps") -> None:
+def _emit_ingest_action(ops: "IngestOps", harness) -> None:
     from utils import get_ingest_workspace
 
     sm = ops.state
-    adapter = ops.adapter
     if sm.signal == FlowSignal.SPAWN_SINGLE:
         tasks = ops.get_pending_tasks()
         feed_as = "feedback_triage" if sm.phase == "triage" else "feedback_analyst"
         ws = get_ingest_workspace()
         feed_file = f"{ws}/{feed_as}_result.json"
         cmd = _cmd(
-            adapter, "--ingest-feedback", "--feed", feed_as, "--feed-file", feed_file
+            harness, "--ingest-feedback", "--feed", feed_as, "--feed-file", feed_file
         )
-        inline = adapter.build_ingest_inline_spec(
-            tasks[0], feed_file=feed_file, feed_cmd=cmd
-        )
-        if inline is not None:
+        if not harness.supports_delegated_agents:
             _write_json(
                 {
                     "status": "need_agent",
                     "phase": f"ingest_{sm.phase}",
-                    **inline,
+                    "method": "inline",
+                    "instruction": _inline_instruction(
+                        tasks[0], feed_file=feed_file, feed_cmd=cmd
+                    ),
                     "on_complete": {
                         "feed_as": feed_as,
                         "command": cmd,
@@ -860,12 +879,12 @@ def _emit_ingest_action(ops: "IngestOps") -> None:
             {
                 "status": "need_agent",
                 "phase": f"ingest_{sm.phase}",
-                "tasks": [adapter.ingest_task_to_spec(t) for t in tasks],
+                "tasks": [harness.spawn(t) for t in tasks],
                 "on_complete": {
                     "feed_as": feed_as,
                     "command": cmd,
                     "feed_file": feed_file,
-                    "note": adapter.completion_note(
+                    "note": harness.note(
                         "ingest",
                         feed_file=feed_file,
                         feed_cmd=cmd,
@@ -896,12 +915,15 @@ def _emit_ingest_action(ops: "IngestOps") -> None:
 # ── PR review queue sidecar ─────────────────────────────────────────
 
 
-def _run_review_queue(args, adapter) -> None:
+def _run_review_queue(args, harness) -> None:
     """Handle --review-queue: select + review + publish one daily comment."""
     from review_ops import ReviewOps
     from utils import get_pr_review_workspace
 
-    ops = ReviewOps(adapter=adapter, limit=args.limit)
+    ops = ReviewOps(
+        limit=args.limit,
+        supports_delegated_agents=harness.supports_delegated_agents,
+    )
     try:
         if args.feed:
             ops.run(resume=True)
@@ -922,15 +944,14 @@ def _run_review_queue(args, adapter) -> None:
             }
         )
         return
-    _emit_review_queue_action(ops)
+    _emit_review_queue_action(ops, harness)
 
 
-def _emit_review_queue_action(ops) -> None:
+def _emit_review_queue_action(ops, harness) -> None:
     """Emit the next review-queue action as JSON to stdout."""
     from utils import get_pr_review_workspace
 
     sm = ops.state
-    adapter = ops.adapter
     ws = get_pr_review_workspace()
 
     if (
@@ -940,7 +961,7 @@ def _emit_review_queue_action(ops) -> None:
     ):
         feed_file = f"{ws}/_review_batch_done.json"
         feed_cmd = _cmd(
-            adapter,
+            harness,
             "--review-queue",
             "--feed",
             "reviewer",
@@ -984,14 +1005,14 @@ def _emit_review_queue_action(ops) -> None:
             pr_number = task.context.get("pr_number", 0)
             feed_file = f"{ws}/pr_{pr_number}_result.json"
             feed_cmd = _cmd(
-                adapter,
+                harness,
                 "--review-queue",
                 "--feed",
                 "reviewer",
                 "--feed-file",
                 feed_file,
             )
-            spec = adapter.review_task_to_spec(task)
+            spec = harness.spawn(task)
             spec["feed_file"] = feed_file
             spec["feed_cmd"] = feed_cmd
             task_specs.append(spec)
@@ -1048,7 +1069,7 @@ def _emit_review_queue_action(ops) -> None:
         )
 
 
-def _run_apply_ingest(args, adapter) -> None:
+def _run_apply_ingest(args, harness) -> None:
     """Handle --apply-ingest <file>: apply approved findings to the ruleset."""
     if not Path(args.apply_ingest).exists():
         _write_json(
@@ -1091,12 +1112,12 @@ def _run_apply_ingest(args, adapter) -> None:
         return
 
     prompt = _build_apply_prompt(approved)
-    task = adapter.build_ruleset_editor_task(prompt)
+    task = build_ruleset_editor_task(prompt)
     from utils import get_ingest_workspace
 
     feed_file = f"{get_ingest_workspace()}/ruleset_editor_result.json"
     feed_cmd = _cmd(
-        adapter,
+        harness,
         "--apply-ingest",
         args.apply_ingest,
         "--feed",
@@ -1104,15 +1125,15 @@ def _run_apply_ingest(args, adapter) -> None:
         "--feed-file",
         feed_file,
     )
-    inline = adapter.build_ingest_inline_spec(
-        task, feed_file=feed_file, feed_cmd=feed_cmd
-    )
-    if inline is not None:
+    if not harness.supports_delegated_agents:
         _write_json(
             {
                 "status": "need_agent",
                 "phase": "ingest_apply",
-                **inline,
+                "method": "inline",
+                "instruction": _inline_instruction(
+                    task, feed_file=feed_file, feed_cmd=feed_cmd
+                ),
                 "on_complete": {
                     "feed_as": "ruleset_editor",
                     "command": feed_cmd,
@@ -1132,7 +1153,7 @@ def _run_apply_ingest(args, adapter) -> None:
         {
             "status": "need_agent",
             "phase": "ingest_apply",
-            "tasks": [adapter.ingest_task_to_spec(task)],
+            "tasks": [harness.spawn(task)],
             "on_complete": {
                 "feed_as": "ruleset_editor",
                 "command": feed_cmd,

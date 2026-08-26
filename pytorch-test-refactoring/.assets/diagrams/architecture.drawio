@@ -96,10 +96,10 @@
                 <mxCell id="agent-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;arcSize=16;movable=1;resizable=1;rotatable=1;deletable=1;editable=1;locked=0;connectable=1;" parent="2" vertex="1">
                     <mxGeometry width="260" height="170" as="geometry"/>
                 </mxCell>
-                <mxCell id="agent-title" value="🤖 Agent 适配层" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=15;fontColor=#1a3a6e;fontStyle=1;movable=1;resizable=1;rotatable=1;deletable=1;editable=1;locked=0;connectable=1;" parent="2" vertex="1">
+                <mxCell id="agent-title" value="🤖 任务构建 + Harness 插件" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=15;fontColor=#1a3a6e;fontStyle=1;movable=1;resizable=1;rotatable=1;deletable=1;editable=1;locked=0;connectable=1;" parent="2" vertex="1">
                     <mxGeometry x="10" y="8" width="240" height="30" as="geometry"/>
                 </mxCell>
-                <mxCell id="agent-desc" value="agent/adapter.py — 抽象基类&lt;br&gt;agent/claude_code.py — CC 适配器&lt;br&gt;agent/codex.py — Codex 适配器&lt;br&gt;&lt;hr size=&quot;1&quot; /&gt;&lt;b&gt;AI Prompts:&lt;/b&gt;&lt;br&gt;📋 analyst.md / coder.md / checker.md / debugger.md&lt;br&gt;🔎 reviewer.md / reviewer_batch.md — PR review（Claude / Codex）" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;fontColor=#333;movable=1;resizable=1;rotatable=1;deletable=1;editable=1;locked=0;connectable=1;" parent="2" vertex="1">
+                <mxCell id="agent-desc" value="agent/tasks.py — 共享任务构建&lt;br&gt;agent/harness.py — 协议 + AgentTask&lt;br&gt;agent/harnesses/ — claude.py / codex.py&lt;br&gt;&lt;hr size=&quot;1&quot; /&gt;&lt;b&gt;AI Prompts:&lt;/b&gt;&lt;br&gt;📋 analyst.md / coder.md / checker.md / debugger.md&lt;br&gt;🔎 reviewer.md / reviewer_batch.md — PR review（Claude / Codex）" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;fontColor=#333;movable=1;resizable=1;rotatable=1;deletable=1;editable=1;locked=0;connectable=1;" parent="2" vertex="1">
                     <mxGeometry x="15" y="48" width="235" height="115" as="geometry"/>
                 </mxCell>
                 <mxCell id="3" value="" style="group" parent="1" vertex="1" connectable="0">

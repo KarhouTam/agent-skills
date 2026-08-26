@@ -19,13 +19,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-from agent.adapter import AgentTask, BaseAdapter
-from agent.claude_code import ClaudeCodeAdapter
+from agent.harness import AgentTask
+from agent.tasks import build_reviewer_task, _load_prompt
 from scripts import review_queue
 from state import FlowSignal, PrReviewResult, ReviewOpsState
 from utils import PR_REVIEW_FLOW_STATE_FILE, get_pr_review_workspace
 
-_PROMPT_DIR = Path(__file__).resolve().parent / "agent" / "prompts"
 _REVIEW_SKILL = (
     Path(__file__).resolve().parent
     / "agent"
@@ -37,17 +36,12 @@ WAVE_SIZE = 4
 BATCH_RESULT_FILE = "_review_batch_done.json"
 
 
-def _load_prompt(name: str) -> str:
-    return (_PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8")
-
-
 class ReviewOps:
     """State machine for the daily PR review queue."""
 
-    def __init__(self, adapter: BaseAdapter | None = None, limit: int = 10) -> None:
-        self.adapter = adapter or ClaudeCodeAdapter()
+    def __init__(self, limit: int = 10, supports_delegated_agents: bool = True) -> None:
         self.limit = limit
-        self.mode = "inline" if self.adapter.harness_name == "codex" else "subagents"
+        self.mode = "subagents" if supports_delegated_agents else "inline"
         self.state = ReviewOpsState()
 
     # ── advance ────────────────────────────────────────────────────
@@ -127,7 +121,7 @@ class ReviewOps:
             result_file = str(
                 get_pr_review_workspace() / f"pr_{item.pr_number}_result.json"
             )
-            tasks.append(self.adapter.build_reviewer_task(item, ws, result_file))
+            tasks.append(build_reviewer_task(item, ws, result_file))
         return tasks
 
     # ── inline instruction (Codex mode) ────────────────────────────

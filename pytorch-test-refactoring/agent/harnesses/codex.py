@@ -1,9 +1,10 @@
-"""Codex adapter - the Codex harness implementation of BaseAdapter.
+"""Codex harness — emission and policy only.
 
 Codex exposes spawn_agent / followup_task / wait_agent instead of Claude
-Code's Agent / SendMessage / CronCreate. This adapter owns the
-Codex-specific task-spec shape, completion notes, poll-based cron policy,
-and git preflight. Codex full-history forks inherit the parent model, so
+Code's Agent / SendMessage / CronCreate. This class owns only the
+Codex-specific spec shape, completion notes, poll-based wait policy, and
+(empty) git preflight. Prompt/AgentTask construction is shared via
+``agent/tasks.py``. Codex full-history forks inherit the parent model, so
 spawn specs do not emit model overrides.
 """
 
@@ -11,9 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.adapter import AgentTask
-from agent.claude_code import ClaudeCodeAdapter, _coder_prompt
-from state import FlowSignal
+from agent.harness import AgentTask, Harness
+from agent.tasks import build_respawn_task
 
 
 DEFAULT_TIMEOUT_MS = 1_800_000
@@ -22,38 +22,15 @@ TIMEOUTS = {
 }
 
 
-class CodexAdapter(ClaudeCodeAdapter):
-    harness_name = "codex"
+class CodexHarness(Harness):
+    name = "codex"
+    supports_delegated_agents = False
 
-    def _timeout_for(self, agent_name: str) -> int:
+    @staticmethod
+    def _timeout_for(agent_name: str) -> int:
         return TIMEOUTS.get(agent_name, DEFAULT_TIMEOUT_MS)
 
-    def build_respawn_task(
-        self,
-        message_task: AgentTask,
-        file_path: str,
-        workspace: str,
-        rule_context: dict | None,
-    ) -> AgentTask:
-        """Rebuild the full coder role prompt plus the current assignment."""
-        rc = rule_context or {}
-        prompt = _coder_prompt(
-            file_path=file_path,
-            workspace=workspace,
-            coder_id=rc.get("coder_id", "coder"),
-            rule=rc.get("rule", ""),
-            rule_description=rc.get("rule_description", ""),
-            instructions=rc.get("instructions", ""),
-            total_rules=rc.get("total_rules", 1),
-        )
-        prompt += "\n\n## Current Assignment\n\n" + message_task.prompt
-        return AgentTask(
-            phase="code",
-            agent_name="coder",
-            prompt=prompt,
-        )
-
-    # ── harness-specific emission ───────────────────────────────
+    # ── emission ──────────────────────────────────────────────
 
     def _spawn_spec(self, task: AgentTask) -> dict[str, Any]:
         agent_name = task.agent_name
@@ -70,27 +47,20 @@ class CodexAdapter(ClaudeCodeAdapter):
             },
         }
 
-    def task_to_spec(
+    def spawn(self, task: AgentTask) -> dict[str, Any]:
+        return self._spawn_spec(task)
+
+    def followup(
         self,
         task: AgentTask,
-        signal: FlowSignal,
         *,
         file_path: str = "",
         workspace: str = "",
         rule_context: dict | None = None,
     ) -> dict[str, Any]:
-        method = "spawn"
-        if signal in (FlowSignal.SEND_MESSAGE, FlowSignal.RELAY_FINDINGS):
-            method = "send_message"
-
-        if method == "spawn":
-            return self._spawn_spec(task)
-
-        target_id = getattr(task, "agent_id", "") or task.context.get(
-            "send_message_to", task.agent_name
-        )
+        target = task.context.get("send_message_to", task.agent_name)
         respawn = (
-            self.build_respawn_task(task, file_path, workspace, rule_context)
+            build_respawn_task(task, file_path, workspace, rule_context)
             if rule_context
             else None
         )
@@ -98,11 +68,11 @@ class CodexAdapter(ClaudeCodeAdapter):
             "method": "send_message",
             "tool": "followup_task",
             "agent_name": task.agent_name,
-            "target": target_id,
+            "target": target,
             "message": task.prompt,
             "recovery": {
                 "tool": "followup_task",
-                "target": target_id,
+                "target": target,
                 "note": "Retry followup_task after wait_agent if the target is busy.",
             },
             "fallback": {
@@ -116,56 +86,9 @@ class CodexAdapter(ClaudeCodeAdapter):
             },
         }
 
-    def ci_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
-        return self._spawn_spec(task)
+    # ── policy ────────────────────────────────────────────────
 
-    def ingest_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
-        # Kept for the abstract contract; the orchestrator prefers
-        # build_ingest_inline_spec() for Codex because spawn_agent
-        # mis-delivers task messages (openai/codex#25458).
-        return self._spawn_spec(task)
-
-    def build_ingest_inline_spec(
-        self,
-        task: AgentTask,
-        *,
-        feed_file: str,
-        feed_cmd: str,
-        note: str = "",
-    ) -> dict[str, Any]:
-        """Return an inline (executor-performed) spec for ingest AI steps.
-
-        Codex MultiAgentV2 records the spawn_agent task `message` as an
-        assistant/commentary mailbox envelope rather than a user/task message
-        (openai/codex#25458), so spawned triage/analyst/ruleset-editor agents
-        ignore their assignment and re-run the orchestrator instead. The
-        executor performs the step itself and feeds the result back.
-        """
-        instruction = (
-            f"You are the `{task.agent_name}` agent for the feedback-ingest "
-            "pipeline. Perform the task below YOURSELF with your own tools. "
-            "Do NOT spawn sub-agents, do NOT run `orchestrator.py` again, and "
-            "do NOT wait on other agents. Read any referenced ruleset files "
-            "before deciding.\n\n"
-            f"When done, write your result JSON exactly to:\n{feed_file}\n\n"
-            f"Then run exactly:\n{feed_cmd}\n\n"
-            "## Task\n\n"
-            f"{task.prompt}"
-        )
-        if note:
-            instruction += f"\n\nNote: {note}"
-        return {
-            "method": "inline",
-            "instruction": instruction,
-        }
-
-    def review_task_to_spec(self, task: AgentTask) -> dict[str, Any]:
-        # Kept for the abstract contract; Codex review-queue uses inline
-        # execution instead because spawn_agent mis-delivers task messages
-        # (openai/codex#25458).
-        return self._spawn_spec(task)
-
-    def completion_note(
+    def note(
         self,
         kind: str,
         *,
@@ -218,7 +141,7 @@ class CodexAdapter(ClaudeCodeAdapter):
             )
         return ""
 
-    def ci_wait_on_complete(self, file_path: str) -> dict[str, Any]:
+    def wait_on_complete(self, file_path: str) -> dict[str, Any]:
         return {
             "action": "poll",
             "poll_interval_seconds": 420,
@@ -240,7 +163,7 @@ class CodexAdapter(ClaudeCodeAdapter):
             ),
         }
 
-    def ci_done_next_steps(self, pr_number: int | None) -> str:
+    def done_next_steps(self, pr_number: int | None) -> str:
         return (
             "All CI checks passed. Run `gh pr ready "
             f"{pr_number}`. Stop the poll loop; if you installed the user cron "

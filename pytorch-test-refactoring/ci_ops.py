@@ -25,8 +25,7 @@ from state import (
     RefactorState,
 )
 from scripts import ci as ci_ops_module
-from agent.adapter import BaseAdapter
-from agent.claude_code import ClaudeCodeAdapter
+from agent.tasks import build_debugger_task
 
 _CI_STATE_FILE = "ci_state.json"
 
@@ -34,8 +33,7 @@ _CI_STATE_FILE = "ci_state.json"
 class CIOps:
     """State machine for CI automation. Same pattern as RefactorFlow."""
 
-    def __init__(self, adapter: BaseAdapter | None = None):
-        self.adapter = adapter or ClaudeCodeAdapter()
+    def __init__(self):
         self.state: CIState = CIState()
 
     def run(
@@ -93,16 +91,12 @@ class CIOps:
             # files on demand instead of carrying all data inline.
             ws_path = self.state.workspace
             if ws_path and self.state.failures:
-                ci_ops_module.write_ci_failures_json(
-                    self.state.failures, ws_path
-                )
+                ci_ops_module.write_ci_failures_json(self.state.failures, ws_path)
             if ws_path and self.state.bot_hints:
-                ci_ops_module.write_bot_comment_json(
-                    self.state.bot_hints, ws_path
-                )
+                ci_ops_module.write_bot_comment_json(self.state.bot_hints, ws_path)
 
             return [
-                self.adapter.build_debugger_task(
+                build_debugger_task(
                     file_path=file_path,
                     workspace=workspace,
                 )
@@ -129,7 +123,9 @@ class CIOps:
         try:
             new_sha = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
-                check=True, capture_output=True, text=True,
+                check=True,
+                capture_output=True,
+                text=True,
             ).stdout.strip()
             self.state.head_sha = new_sha
         except Exception:
@@ -166,7 +162,9 @@ class CIOps:
         try:
             current_branch = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                check=True, capture_output=True, text=True,
+                check=True,
+                capture_output=True,
+                text=True,
             ).stdout.strip()
         except Exception:
             return
@@ -179,9 +177,20 @@ class CIOps:
         if not self.state.pr_number and self.state.pr_branch:
             try:
                 result = subprocess.run(
-                    ["gh", "pr", "list", "--head", self.state.pr_branch,
-                     "--json", "number,url", "--jq", ".[0]"],
-                    check=True, capture_output=True, text=True,
+                    [
+                        "gh",
+                        "pr",
+                        "list",
+                        "--head",
+                        self.state.pr_branch,
+                        "--json",
+                        "number,url",
+                        "--jq",
+                        ".[0]",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
                 )
                 if result.stdout.strip():
                     pr_data = json.loads(result.stdout)
@@ -195,7 +204,9 @@ class CIOps:
             try:
                 self.state.head_sha = subprocess.run(
                     ["git", "rev-parse", "HEAD"],
-                    check=True, capture_output=True, text=True,
+                    check=True,
+                    capture_output=True,
+                    text=True,
                 ).stdout.strip()
             except Exception:
                 pass
@@ -291,4 +302,3 @@ class CIOps:
         if self.state.max_fix_rounds == 5:
             self.state.max_fix_rounds = data.get("max_fix_rounds", 5)
         self.state.cron_job_id = data.get("cron_job_id")
-

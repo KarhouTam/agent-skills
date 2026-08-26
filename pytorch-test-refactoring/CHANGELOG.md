@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-08-25 — Harness 插件层重构（任务构建与发射解耦）
+
+将 harness 依赖从"`BaseAdapter` 大接口 + `CodexAdapter(ClaudeCodeAdapter)` 继承链"重构为
+**共享任务构建 + 薄 Harness 协议**，使新增 harness 只写一个模块 + 一行注册表，核心零改动。
+
+- **职责拆分**：原 `agent/adapter.py`（~20 方法）拆成三层——`agent/tasks.py`（harness 无关的
+  `build_*` 任务构建器，全部 harness 复用）、`agent/harness.py`（精简 `AgentTask` + `Harness`
+  协议）、`agent/harnesses/{claude,codex}.py`（发射 + 策略实现）。删除 `adapter.py`/
+  `claude_code.py`/`codex.py`/`registry.py`。
+- **`AgentTask` 精简**：移除 Claude 专属发射提示（`mode`/`run_in_background`/`agent_type`/
+  `model`）与冗余的 `agent_id`（并入 `context["send_message_to"]`），只保留 `phase`/
+  `agent_name`/`prompt`/`context`。per-role 权限模式移入 `ClaudeHarness` 的角色映射表。
+- **发射收敛**：`task_to_spec`/`ci_task_to_spec`/`ingest_task_to_spec`/`review_task_to_spec`
+  四个近重复发射器收敛为 `spawn()`/`followup()`；`build_ingest_inline_spec` 移入 orchestrator
+  的 `_inline_instruction()`，由 `supports_delegated_agents` 能力标志门控。
+- **核心去 harness 化**：`flow.py`/`ci_ops.py`/`ingest_ops.py`/`review_ops.py` 不再持有
+  adapter，直接调用 `agent.tasks` 的 `build_*`；`review_ops` 的
+  `harness_name == "codex"` 分支替换为 `supports_delegated_agents` 能力标志。
+- **选择去硬编码**：`--harness` 的 `choices` 从 `HARNESSES` 注册表自动派生；`_cmd()` 恒写入
+  `--harness <name>`（含默认 `claude`），移除 `!= "claude"` 特判。
+- **测试**：`tests/test_harness.py` 重写为 Harness 协议契约（新增 `supports_delegated_agents`、
+  `AgentTask` 精简、registry choices 自动派生）；其余 5 个测试文件迁移构造签名；全套 58 个测试通过。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `agent/tasks.py` | 新增共享 `build_*` 任务构建器 + prompt/字段 helper（从 claude_code.py 迁入） |
+| `agent/harness.py` | 新增精简 `AgentTask` + `Harness` 协议 |
+| `agent/harnesses/{claude,codex}.py`、`__init__.py` | 新增 harness 发射/策略实现 + `HARNESSES` 注册表 |
+| `agent/adapter.py`、`agent/claude_code.py`、`agent/codex.py`、`agent/registry.py` | 删除 |
+| `flow.py`、`ci_ops.py`、`ingest_ops.py`、`review_ops.py` | 去 harness 化：移除 adapter 注入，改用 `agent.tasks` 构建器 |
+| `orchestrator.py` | `get_harness`、能力标志、`spawn`/`followup`、`_inline_instruction`、`_cmd` 恒写 `--harness`、choices 自动派生 |
+| `tests/*.py` | 迁移到新协议/构造签名；新增能力标志与 choices 派生测试 |
+| `CLAUDE.md`、`README.md` | 更新架构与项目结构描述 |
+
 ## 2026-08-25 — Ingest sidecar 适配 Codex harness（inline 执行）
 
 - **修复**：`--ingest-feedback` 与 `--apply-ingest` 在 Codex harness 下不再

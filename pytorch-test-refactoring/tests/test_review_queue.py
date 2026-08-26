@@ -8,8 +8,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.claude_code import ClaudeCodeAdapter
-from agent.codex import CodexAdapter
 from review_ops import ReviewOps
 from scripts import review_queue
 from state import PrReviewItem, PrReviewResult
@@ -215,7 +213,7 @@ def test_review_ops_inline_flow(tmp_path, monkeypatch):
         return {"comment_url": "https://github.com/.../1#issuecomment-1", "comment_path": "x"}
 
     monkeypatch.setattr(review_queue, "publish_batch", fake_publish)
-    ops = ReviewOps(adapter=CodexAdapter(), limit=10)
+    ops = ReviewOps(limit=10, supports_delegated_agents=False)
     assert ops.mode == "inline"
     ops.run()
     assert ops.state.phase == "review"
@@ -248,7 +246,7 @@ def test_review_ops_skips_missing_or_failed_results(tmp_path, monkeypatch):
     workspace = tmp_path / "agent_space" / "pr_reviews"
     _write_result(workspace, 1000, success=True)
     _write_result(workspace, 1001, success=False)
-    ops = ReviewOps(adapter=CodexAdapter(), limit=10)
+    ops = ReviewOps(limit=10, supports_delegated_agents=False)
     ops.run()
     ops.feed_reviewer_result({})
     ops.run()
@@ -277,7 +275,7 @@ def test_review_ops_subagent_waves(tmp_path, monkeypatch):
         return {"comment_url": "https://github.com/.../1#issuecomment-1", "comment_path": "x"}
 
     monkeypatch.setattr(review_queue, "publish_batch", fake_publish)
-    ops = ReviewOps(adapter=ClaudeCodeAdapter(), limit=10)
+    ops = ReviewOps(limit=10, supports_delegated_agents=True)
     assert ops.mode == "subagents"
     ops.run()
     assert ops.state.phase == "review"

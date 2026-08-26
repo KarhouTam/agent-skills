@@ -1,9 +1,12 @@
-"""RefactorFlow — state machine for test refactoring (Claude Code only).
+"""RefactorFlow — state machine for test refactoring.
 
 7 phases: assess -> analyze -> distribute -> code -> verify -> review -> finalize
 
-The Flow stops on SPAWN_SINGLE/RELAY_FINDINGS signals. Claude reads the
-signal, spawns agents via the Agent tool, feeds results back, and re-enters.
+The Flow stops on SPAWN_SINGLE/SEND_MESSAGE/RELAY_FINDINGS signals. The host
+reads the signal, executes the returned AgentTask(s) via its harness, feeds
+results back, and re-enters. The Flow itself is harness-agnostic: it builds
+AgentTask objects through the shared builders in ``agent.tasks`` and never
+sees a harness.
 
 All events are logged to workspace/audit.jsonl and workspace/status.json
 for team coordination — the Checker and Team Lead read these to understand
@@ -46,8 +49,14 @@ from scripts.report import generate_report
 from scripts.logger import RefactorLogger
 from scripts.linter import check_file, LintSeverity
 from scripts.local_test import run_local_tests
-from agent.adapter import BaseAdapter
-from agent.claude_code import ClaudeCodeAdapter
+from agent.tasks import (
+    build_analyst_task,
+    build_coder_tasks,
+    build_send_message,
+    build_checker_task,
+    build_fix_tasks,
+    build_test_fix_task,
+)
 
 
 def _finding_matches_rule(finding, rule_id: str) -> bool:
@@ -85,12 +94,11 @@ def _is_deferred(failure: LocalTestFailure, deferred: list[LocalTestFailure]) ->
 
 
 class RefactorFlow:
-    """State machine for test file refactoring. Claude Code only."""
+    """State machine for test file refactoring. Harness-agnostic."""
 
     MAX_RETRIES = 3
 
-    def __init__(self, adapter: BaseAdapter | None = None):
-        self.adapter = adapter or ClaudeCodeAdapter()
+    def __init__(self):
         self.state = RefactorState()
         self.log: RefactorLogger | None = None
 
@@ -184,9 +192,7 @@ class RefactorFlow:
             "agent_ids": self.state.agent_ids,
             "test_sub_phase": self.state.test_sub_phase,
             "test_retry_count": self.state.test_retry_count,
-            "deferred_failures": [
-                f.model_dump() for f in self.state.deferred_failures
-            ],
+            "deferred_failures": [f.model_dump() for f in self.state.deferred_failures],
         }
         try:
             (ws / self._FLOW_STATE_FILE).write_text(
@@ -232,6 +238,7 @@ class RefactorFlow:
             self.state.deferred_failures = [
                 LocalTestFailure(**f) for f in data.get("deferred_failures", [])
             ]
+
     # ── End flow state persistence ─────────────────────────────────
 
     def _load_existing_artifacts(self):
@@ -478,7 +485,9 @@ class RefactorFlow:
                 "test",
                 status=self._local_test_status(),
                 total=getattr(local_test, "total", 0),
-                failures=(getattr(local_test, "failed", 0) + getattr(local_test, "errored", 0)),
+                failures=(
+                    getattr(local_test, "failed", 0) + getattr(local_test, "errored", 0)
+                ),
                 skipped=getattr(local_test, "skipped", 0),
                 whole_run_failure=getattr(local_test, "whole_run_failure", ""),
             )
@@ -716,7 +725,10 @@ class RefactorFlow:
 
         deferred_names = {d.test_name for d in self.state.deferred_failures}
         for verdict in verdicts:
-            if verdict.verdict == "deferred" and verdict.test_name not in deferred_names:
+            if (
+                verdict.verdict == "deferred"
+                and verdict.test_name not in deferred_names
+            ):
                 self.state.deferred_failures.append(verdict)
                 deferred_names.add(verdict.test_name)
 
@@ -733,9 +745,7 @@ class RefactorFlow:
         self.state.signal = FlowSignal.DONE
 
         if self.log:
-            deferred_count = sum(
-                1 for v in verdicts if v.verdict == "deferred"
-            )
+            deferred_count = sum(1 for v in verdicts if v.verdict == "deferred")
             fixed_count = len(verdicts) - deferred_count
             self.log.agent_completed(
                 "test",
@@ -1052,7 +1062,7 @@ class RefactorFlow:
 
         if self.state.current_phase == "analyze":
             return [
-                self.adapter.build_analyst_task(
+                build_analyst_task(
                     file_path,
                     workspace,
                     get_reference_dir(self.state.field),
@@ -1070,22 +1080,18 @@ class RefactorFlow:
             if self.state.rule_sub_phase == "code":
                 if idx == 0:
                     # First rule: spawn coder agent (name="coder")
-                    return self.adapter.build_coder_tasks(
+                    return build_coder_tasks(
                         file_path,
                         workspace,
                         [ct],
-                        self.state.analyst_report.strategy_assignments
-                        if self.state.analyst_report
-                        else {},
-                        first_spawn=True,
                         total_rules=len(tasks),
                     )
                 else:
                     # Subsequent rule: message existing coder
                     return [
-                        self.adapter.build_send_message(
+                        build_send_message(
                             to="coder",
-                            agent_id=self.state.agent_ids.get("coder", ""),
+                            target_id=self.state.agent_ids.get("coder", ""),
                             message_type="next_rule",
                             rule=ct.rule,
                             rule_description=ct.rule_description,
@@ -1101,7 +1107,7 @@ class RefactorFlow:
                     else ("; ".join(result.errors[:3]) if result else "no result")
                 )
                 return [
-                    self.adapter.build_checker_task(
+                    build_checker_task(
                         file_path,
                         workspace,
                         get_reference_dir(self.state.field),
@@ -1121,9 +1127,9 @@ class RefactorFlow:
 
             elif self.state.rule_sub_phase == "fix":
                 return [
-                    self.adapter.build_send_message(
+                    build_send_message(
                         to="coder",
-                        agent_id=self.state.agent_ids.get("coder", ""),
+                        target_id=self.state.agent_ids.get("coder", ""),
                         message_type="fix",
                         rule=ct.rule,
                         rule_description=ct.rule_description,
@@ -1144,7 +1150,7 @@ class RefactorFlow:
                 else 0
             )
             return [
-                self.adapter.build_checker_task(
+                build_checker_task(
                     file_path,
                     workspace,
                     get_reference_dir(self.state.field),
@@ -1155,7 +1161,7 @@ class RefactorFlow:
 
         elif self.state.current_phase == "fix":
             if self.state.review_findings:
-                return self.adapter.build_fix_tasks(
+                return build_fix_tasks(
                     file_path,
                     workspace,
                     self.state.review_findings.findings,
@@ -1171,7 +1177,7 @@ class RefactorFlow:
                     if not _is_deferred(f, self.state.deferred_failures)
                 ]
                 return [
-                    self.adapter.build_test_fix_task(
+                    build_test_fix_task(
                         file_path,
                         workspace,
                         actionable,

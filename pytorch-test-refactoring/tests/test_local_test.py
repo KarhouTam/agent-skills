@@ -11,7 +11,6 @@ import pytest
 
 import flow
 import orchestrator
-from agent.codex import CodexAdapter
 from flow import RefactorFlow
 from scripts.local_test import _parse_junit
 from state import (
@@ -111,7 +110,7 @@ def test_local_test_fix_loop(tmp_path, monkeypatch):
 
     monkeypatch.setattr(flow, "run_local_tests", fake_run)
 
-    refactor = RefactorFlow(adapter=CodexAdapter())
+    refactor = RefactorFlow()
     refactor.state.file_path = "test/test_foo.py"
     refactor.state.file_name = "test_foo"
     refactor.state.workspace = workspace
@@ -144,7 +143,7 @@ def test_local_test_resume_reemits_fix(tmp_path, monkeypatch):
 
     monkeypatch.setattr(flow, "run_local_tests", lambda *a, **k: None)
 
-    refactor = RefactorFlow(adapter=CodexAdapter())
+    refactor = RefactorFlow()
     refactor.state.file_path = "test/test_foo.py"
     refactor.state.file_name = "test_foo"
     refactor.state.workspace = workspace

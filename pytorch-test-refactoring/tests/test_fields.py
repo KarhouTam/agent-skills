@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest
 
 import utils
-from agent.claude_code import ClaudeCodeAdapter
+from agent.tasks import build_analyst_task, build_checker_task, build_coder_tasks
 from flow import RefactorFlow
 from state import CoderTask, ReviewFindings
 from utils import (
@@ -71,13 +71,12 @@ def test_non_core_rules_are_cleanup_only():
 
 
 def test_analyst_prompt_is_field_aware():
-    adapter = ClaudeCodeAdapter()
-    core = adapter.build_analyst_task(
+    core = build_analyst_task(
         "test/test_ops.py",
         "agent_space/refactor/core/test_ops",
         get_reference_dir("core"),
     )
-    graph = adapter.build_analyst_task(
+    graph = build_analyst_task(
         "test/dynamo/test_compile.py",
         "agent_space/refactor/graph/test_compile",
         get_reference_dir("graph"),
@@ -88,24 +87,22 @@ def test_analyst_prompt_is_field_aware():
 
 
 def test_coder_and_checker_prompts_are_field_aware():
-    adapter = ClaudeCodeAdapter()
     task = CoderTask(
         coder_id="coder-1",
         rule="cleanup",
         rule_description="Import cleanup and external reference updates",
         instructions="- remove stale imports",
     )
-    prompt = adapter.build_coder_tasks(
+    prompt = build_coder_tasks(
         "test/distributed/test_nccl.py",
         "agent_space/refactor/distributed/test_nccl",
         [task],
-        first_spawn=True,
         total_rules=1,
     )[0].prompt
     assert "**Field:** `distributed`" in prompt
     assert "field-agnostic cleanup baseline" in prompt
 
-    checker = adapter.build_checker_task(
+    checker = build_checker_task(
         "test/distributed/test_nccl.py",
         "agent_space/refactor/distributed/test_nccl",
         get_reference_dir("distributed"),
@@ -117,7 +114,7 @@ def test_coder_and_checker_prompts_are_field_aware():
 
 
 def test_non_core_local_test_is_skipped():
-    flow = RefactorFlow(adapter=ClaudeCodeAdapter())
+    flow = RefactorFlow()
     flow.state.file_path = "test/distributed/test_nccl.py"
     flow.state.field = "distributed"
     flow.state.review_findings = ReviewFindings(all_clear=True, findings=[])

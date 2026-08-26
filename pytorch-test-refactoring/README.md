@@ -31,6 +31,13 @@
 
 **工作流由 `RefactorFlow` 状态机驱动**，通过 `orchestrator.py` 作为 CLI 桥接层输出 JSON 任务规格，Claude Code 作为 AI 运行时——Flow 返回 `FlowSignal` 信号来指示何时需要生成 AI Agent 或向已有 Agent 发送后续指令。Agent ID 在首次生成时注册并被持久化，后续指令通过 `SendMessage(agent_id)` 自动恢复已终止的 Agent（保留完整上下文）。
 
+### 使用方式
+
+在 harness 工具内通过 prompt 显式调用
+```
+/pytorch-test-refactoring refactor <xxx.py>
+```
+
 ### 测试字段
 
 每个测试文件自动归入 `core`（默认）、`distributed` 或 `graph` 三个字段之一：
@@ -54,7 +61,7 @@ orchestrator.py (CLI 桥接层 → JSON 任务规格 ↔ Agent / SendMessage 工
     │
 RefactorFlow (状态机核心)
     │
-    ├── Agent 适配层 (agent/)  → AI Prompts: analyst / coder / checker
+    ├── 任务构建 + Harness 插件 (agent/)  → tasks.py 构建 Prompt，harnesses/ 发射任务规格
     ├── 确定性脚本层 (scripts/) → assess / verify / report / logger / linter
     └── Pydantic 状态模型 (state.py)
               │
@@ -70,7 +77,7 @@ RefactorFlow (状态机核心)
 | **CLI 桥接**   | `orchestrator.py` | 将 Flow 信号转换为 JSON 任务规格，Agent ID 注册与持久化，结果路由          |
 | **状态机**     | `flow.py`    | 7 阶段编排，信号生成，进度恢复，Agent ID 生命周期管理                    |
 | **CI 监控**    | `ci_ops.py`  | CI 监控状态机：监控 CI 状态、分类失败、生成 debugger agent               |
-| **Agent 适配** | `agent/`     | 为每个阶段生成 Agent 任务，包含专业 Prompt                             |
+| **任务构建 / Harness** | `agent/tasks.py`、`agent/harnesses/` | 生成 Agent 任务（Prompt）并按 harness 发射任务规格           |
 | **确定性脚本** | `scripts/`   | 无需 AI 的阶段：评估、验证（含 linter 门禁）、CI 操作、报告生成        |
 | **参考知识**   | `reference/` | API 分类目录、分类指南、设备特性报告                                   |
 | **工具函数**   | `utils.py`   | 路径常量、工作空间、git 工具                                           |
@@ -500,8 +507,11 @@ pytorch-test-refactoring/
 │   ├── review_queue.py          # PR review queue 确定性逻辑（选择/渲染/发布）
 │   └── logger.py                # 审计日志和状态管理
 ├── agent/
-│   ├── adapter.py               # Agent 任务构建抽象基类
-│   ├── claude_code.py           # Claude Code 适配器
+│   ├── tasks.py                 # 共享 AgentTask 构建器（所有 harness 复用）
+│   ├── harness.py               # AgentTask 模型 + Harness 协议
+│   ├── harnesses/               # Harness 实现 + 注册表
+│   │   ├── claude.py            # Claude Code 发射/策略
+│   │   └── codex.py             # Codex 发射/策略
 │   ├── prompts/
 │   │   ├── analyst.md           # 分析师 Prompt
 │   │   ├── coder.md             # 编码者 Prompt
@@ -543,15 +553,13 @@ flow.py
 ├── scripts/report.py (Phase 7)
 ├── scripts/logger.py (日志)
 └── agent/
-    ├── adapter.py    (抽象基类，含 AgentTask.mode)
-    └── claude_code.py (Claude Code 适配器)
+    └── tasks.py      (共享 AgentTask 构建器)
 ci_ops.py
 ├── state.py          (CIState, CICheckRun 等 CI 模型)
 ├── scripts/ci.py     (Phase 8 CI 操作)
 ├── scripts/logger.py (日志)
 └── agent/
-    ├── adapter.py    (抽象基类)
-    └── claude_code.py (Claude Code 适配器)
+    └── tasks.py      (共享 AgentTask 构建器)
 ```
 
 ---

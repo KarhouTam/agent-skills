@@ -6,12 +6,12 @@ This file provides guidance to AI agents (Claude Code / Codex) working in this r
 
 This repo is a **harness-pluggable skill** that orchestrates refactoring PyTorch test files to decouple them from specific hardware accelerators (CUDA, MPS, XPU). Tests are split into three categories across an 8-phase workflow (7 refactoring + 1 CI automation) driven by AI agents.
 
-The skill is not run standalone: it is invoked by the host harness (Claude Code or Codex). `SKILL.md` is the operational entry point; `flow.py` is the state machine core; the host spawns AI agents from the JSON task spec emitted by `orchestrator.py`, selecting the adapter via `--harness {claude,codex}`.
+The skill is not run standalone: it is invoked by the host harness (Claude Code or Codex). `SKILL.md` is the operational entry point; `flow.py` is the state machine core; the host spawns AI agents from the JSON task spec emitted by `orchestrator.py`, selecting the harness via `--harness {claude,codex}`.
 
 ## Architecture
 
 ```
-orchestrator.py  CLI bridge — emits JSON task specs, accepts feed-back; --harness selects the adapter; --ci-check / --ingest-feedback / --apply-ingest / --review-queue
+orchestrator.py  CLI bridge — emits JSON task specs, accepts feed-back; --harness selects the harness; --ci-check / --ingest-feedback / --apply-ingest / --review-queue
 flow.py          RefactorFlow state machine — core orchestrator, phases 1-7
 ci_ops.py        CIOps state machine — CI monitoring & debug, phase 8
 ingest_ops.py    IngestOps state machine — PR feedback ingest sidecar
@@ -19,22 +19,23 @@ review_ops.py    ReviewOps state machine — daily PR review queue sidecar
 ├── state.py     Pydantic models for all workflow data (signals, reports, tasks, results, CI, ingest)
 ├── utils.py     Path constants, workspace helpers, refactoring rule definitions
 ├── scripts/     Deterministic steps (assess, verify, linter, report, ci, ingest, local_test, review_queue, logger)
-├── agent/       Harness adapters, AI agent prompt templates (prompts/), sub-skills (skills/)
+├── agent/       Shared task builders (tasks.py), harness plugins (harnesses/), AI prompt templates (prompts/), sub-skills (skills/)
 └── reference/   Core reference base (default); non-core fields live under reference/<field>/
 ```
 
-The state machines share one pattern: deterministic `scripts/*` steps do the mechanical work (analysis, verification, CI, harvesting, queue selection/publishing); AI agents do the judgment (classification, coding, review, debugging, PR reviewing). The review-queue sidecar is harness-dependent for its review phase: Claude Code uses one reviewer sub-agent per PR, while Codex reviews inline in the executor because Codex MultiAgentV2 mis-delivers `spawn_agent` task messages (openai/codex#25458). Each machine stops on a **flow signal** (`spawn_single` / `spawn_parallel` / `send_message` / `relay_findings` / `waiting` / `done`) and lets the selected harness adapter translate that signal into harness-specific actions.
+The state machines share one pattern: deterministic `scripts/*` steps do the mechanical work (analysis, verification, CI, harvesting, queue selection/publishing); AI agents do the judgment (classification, coding, review, debugging, PR reviewing). The review-queue sidecar is harness-dependent for its review phase — driven by the harness's `supports_delegated_agents` capability, not its name: Claude Code uses one reviewer sub-agent per PR, while Codex reviews inline in the executor because Codex MultiAgentV2 mis-delivers `spawn_agent` task messages (openai/codex#25458). Each machine stops on a **flow signal** (`spawn_single` / `spawn_parallel` / `send_message` / `relay_findings` / `waiting` / `done`) and lets the selected harness translate that signal into harness-specific actions.
 
-### Harness adapter layer
+### Harness plugin layer
 
-Harness differences are isolated in `agent/`. `orchestrator.py` and the state machines never branch on the harness name — they delegate through the `BaseAdapter` interface only.
+Harness differences are isolated in `agent/`. `orchestrator.py` is the only component that touches a harness (to emit task specs and read policy); the state machines are entirely harness-free — they build `AgentTask`s through the shared builders in `agent/tasks.py` and never see a harness.
 
-- `agent/adapter.py` — `BaseAdapter` interface + `AgentTask`; task builders and the harness-specific emission interface (`task_to_spec`/`ci_task_to_spec`/`ingest_task_to_spec`/`review_task_to_spec`, `completion_note`, `ci_wait_on_complete`/`ci_done_next_steps`, `git_preflight`/`git_preflight_error`).
-- `agent/claude_code.py` — `ClaudeCodeAdapter` (`harness_name="claude"`): `Agent`/`SendMessage`/`CronCreate`/`Write` semantics.
-- `agent/codex.py` — `CodexAdapter` (`harness_name="codex"`): `spawn_agent`/`followup_task`/`wait_agent`, full-history forks, `sleep` poll instead of cron.
-- `agent/registry.py` — `HARNESS_ADAPTERS` registry + `get_adapter(name)`. Adding a harness = one adapter module + one registry entry.
+- `agent/tasks.py` — harness-agnostic `AgentTask` builders + prompt/field helpers, shared by every harness.
+- `agent/harness.py` — the slimmed `AgentTask` model (task content only) + the `Harness` protocol (`spawn`/`followup` emission, `note`/`wait_on_complete`/`done_next_steps`/`git_preflight*` policy, `supports_delegated_agents` capability).
+- `agent/harnesses/claude.py` — `ClaudeHarness`: `Agent`/`SendMessage`/`CronCreate`/`Write` semantics, per-role permission mode, settings.json git preflight.
+- `agent/harnesses/codex.py` — `CodexHarness`: `spawn_agent`/`followup_task`/`wait_agent`, full-history forks, poll instead of cron, inline (non-delegated) AI steps.
+- `agent/harnesses/__init__.py` — `HARNESSES` registry + `get_harness(name)`. Adding a harness = one module + one registry entry.
 
-Harness selection (`--harness` or `PYTORCH_TEST_REFACTOR_HARNESS`, default `claude`) is resolved once via `get_adapter()` and injected into the state machines; `_cmd()` writes `--harness` into every `on_complete.command`/`poll_command` so cross-process resume re-selects the same harness.
+Harness selection (`--harness` or `PYTORCH_TEST_REFACTOR_HARNESS`, default `claude`) is resolved once via `get_harness()`; the `--harness` choices derive from the registry, and `_cmd()` writes `--harness <name>` into every `on_complete.command`/`poll_command` so cross-process resume re-selects the same harness.
 
 ## Core concepts
 

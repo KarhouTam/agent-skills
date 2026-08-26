@@ -334,7 +334,7 @@ def test_ingest_ops_resumes_from_persisted_state(monkeypatch, tmp_path):
 
 
 def _triage_task(agent_name: str = "feedback_triage"):
-    from agent.adapter import AgentTask
+    from agent.harness import AgentTask
 
     return AgentTask(
         phase="triage",
@@ -344,40 +344,34 @@ def _triage_task(agent_name: str = "feedback_triage"):
 
 
 def test_ingest_inline_spec_codex_and_claude():
-    from agent.claude_code import ClaudeCodeAdapter
-    from agent.codex import CodexAdapter
+    import orchestrator
+    from agent.harnesses import ClaudeHarness, CodexHarness
 
     task = _triage_task()
-    codex = CodexAdapter()
-    spec = codex.build_ingest_inline_spec(
-        task, feed_file="agent_space/ingest/feedback_triage_result.json", feed_cmd="python orchestrator.py x"
+    codex = CodexHarness()
+    assert codex.supports_delegated_agents is False
+    instruction = orchestrator._inline_instruction(
+        task,
+        feed_file="agent_space/ingest/feedback_triage_result.json",
+        feed_cmd="python orchestrator.py x",
     )
-    assert spec is not None
-    assert spec["method"] == "inline"
-    assert "feedback_triage" in spec["instruction"]
-    assert "Do NOT spawn sub-agents" in spec["instruction"]
-    assert "orchestrator.py" in spec["instruction"]
-    assert "agent_space/ingest/feedback_triage_result.json" in spec["instruction"]
-    assert "python orchestrator.py x" in spec["instruction"]
-    assert "## Task" in spec["instruction"]
-    assert "Classify every comment." in spec["instruction"]
-    # The spawn contract stays available as a fallback.
-    assert codex.ingest_task_to_spec(task)["method"] == "spawn"
+    assert "feedback_triage" in instruction
+    assert "Do NOT spawn sub-agents" in instruction
+    assert "orchestrator.py" in instruction
+    assert "agent_space/ingest/feedback_triage_result.json" in instruction
+    assert "python orchestrator.py x" in instruction
+    assert "## Task" in instruction
+    assert "Classify every comment." in instruction
+    # The spawn contract stays available for delegated harnesses.
+    assert codex.spawn(task)["method"] == "spawn"
 
-    claude = ClaudeCodeAdapter()
-    assert (
-        claude.build_ingest_inline_spec(
-            task,
-            feed_file="agent_space/ingest/feedback_triage_result.json",
-            feed_cmd="python orchestrator.py x",
-        )
-        is None
-    )
+    claude = ClaudeHarness()
+    assert claude.supports_delegated_agents is True
 
 
 def test_emit_ingest_action_codex_inline(monkeypatch, tmp_path):
     import orchestrator
-    from agent.codex import CodexAdapter
+    from agent.harnesses import CodexHarness
 
     c = FeedbackComment(
         comment_id=1,
@@ -390,13 +384,13 @@ def test_emit_ingest_action_codex_inline(monkeypatch, tmp_path):
     monkeypatch.setattr(ingest, "harvest", lambda *a, **k: ([c], IngestState()))
     monkeypatch.setattr(ingest_ops_module, "get_ingest_workspace", lambda: tmp_path)
 
-    ops = IngestOps(adapter=CodexAdapter())
+    ops = IngestOps()
     ops.run()
     assert ops.state.phase == "triage"
 
     emitted = {}
     monkeypatch.setattr(orchestrator, "_write_json", emitted.update)
-    orchestrator._emit_ingest_action(ops)
+    orchestrator._emit_ingest_action(ops, CodexHarness())
 
     assert emitted["status"] == "need_agent"
     assert emitted["phase"] == "ingest_triage"
@@ -410,7 +404,7 @@ def test_emit_ingest_action_codex_inline(monkeypatch, tmp_path):
 
 def test_emit_ingest_action_claude_spawns(monkeypatch, tmp_path):
     import orchestrator
-    from agent.claude_code import ClaudeCodeAdapter
+    from agent.harnesses import ClaudeHarness
 
     c = FeedbackComment(
         comment_id=1,
@@ -423,12 +417,12 @@ def test_emit_ingest_action_claude_spawns(monkeypatch, tmp_path):
     monkeypatch.setattr(ingest, "harvest", lambda *a, **k: ([c], IngestState()))
     monkeypatch.setattr(ingest_ops_module, "get_ingest_workspace", lambda: tmp_path)
 
-    ops = IngestOps(adapter=ClaudeCodeAdapter())
+    ops = IngestOps()
     ops.run()
 
     emitted = {}
     monkeypatch.setattr(orchestrator, "_write_json", emitted.update)
-    orchestrator._emit_ingest_action(ops)
+    orchestrator._emit_ingest_action(ops, ClaudeHarness())
 
     assert emitted["status"] == "need_agent"
     assert emitted["phase"] == "ingest_triage"

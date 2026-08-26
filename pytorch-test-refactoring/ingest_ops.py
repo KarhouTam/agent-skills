@@ -22,8 +22,8 @@ from pydantic import BaseModel
 from state import FlowSignal, FeedbackComment, FeedbackFinding
 from scripts import ingest
 from utils import get_ingest_workspace, INGEST_FLOW_STATE_FILE
-from agent.adapter import AgentTask, BaseAdapter
-from agent.claude_code import ClaudeCodeAdapter
+from agent.harness import AgentTask
+from agent.tasks import build_feedback_triage_task, build_feedback_analyst_task
 
 
 class IngestStateMachine(BaseModel):
@@ -40,9 +40,8 @@ class IngestStateMachine(BaseModel):
 class IngestOps:
     """State machine for the feedback ingest sidecar. Same pattern as CIOps."""
 
-    def __init__(self, adapter: BaseAdapter | None = None) -> None:
+    def __init__(self) -> None:
         self.state = IngestStateMachine()
-        self.adapter = adapter or ClaudeCodeAdapter()
 
     def run(self) -> IngestStateMachine:
         """Advance the state machine through deterministic work until an AI step."""
@@ -74,16 +73,14 @@ class IngestOps:
     def get_pending_tasks(self) -> list[AgentTask]:
         """Return the AgentTask(s) for the current AI step."""
         if self.state.phase == "triage":
-            return [self.adapter.build_feedback_triage_task(self.state.fresh_comments)]
+            return [build_feedback_triage_task(self.state.fresh_comments)]
         if self.state.phase == "draft" and self.state.draft_queue:
             cid = self.state.draft_queue[0]
             comment = self._find_comment(cid)
             if comment is not None:
                 triage = self.state.triaged.get(cid, {})
                 return [
-                    self.adapter.build_feedback_analyst_task(
-                        {"comment": comment, "triage": triage}
-                    )
+                    build_feedback_analyst_task({"comment": comment, "triage": triage})
                 ]
         return []
 

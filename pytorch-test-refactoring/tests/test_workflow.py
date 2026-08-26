@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from agent.codex import CodexAdapter
+from agent.harnesses import get_harness
 from state import (
     AnalystReport,
     AssessmentResult,
@@ -130,7 +130,7 @@ def test_flow_resumes_from_materials(tmp_path, monkeypatch):
         "flow_state.json",
     )
 
-    flow = RefactorFlow(adapter=CodexAdapter())
+    flow = RefactorFlow()
     state = flow.run("test/test_expanded_weights.py", resume=True)
 
     assert state.current_phase == "review"
@@ -161,14 +161,14 @@ def test_full_flow_replay_to_finalize(tmp_path, monkeypatch):
     emitted = []
     monkeypatch.setattr(orchestrator, "_write_json", lambda obj: emitted.append(obj))
 
-    flow = RefactorFlow(adapter=CodexAdapter())
+    flow = RefactorFlow()
     state = flow.run("test/test_expanded_weights.py")
 
     # Phase 1/2 boundary: assessment is deterministic; analysis needs an agent.
     assert state.current_phase == "analyze"
     assert state.signal == FlowSignal.SPAWN_SINGLE
 
-    orchestrator._emit_next_action(flow, state)
+    orchestrator._emit_next_action(flow, state, get_harness("codex"))
     first = emitted[-1]
     assert first["status"] == "need_agent"
     assert first["tasks"][0]["tool"] == "spawn_agent"
