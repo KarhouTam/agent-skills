@@ -1,0 +1,3 @@
+interface:
+  display_name: "Mermaid Diagrams"
+  short_description: "Write mermaid diagrams that parse and read at a glance"
