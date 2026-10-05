@@ -1,0 +1,3 @@
+interface:
+  display_name: "Tavily Web Access"
+  short_description: "Agent-friendly web search and page extraction"
