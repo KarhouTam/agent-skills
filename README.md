@@ -14,6 +14,8 @@ Personal skill collection, also some useful skills from public repos.
   - `triaging-vllm-issues`.
 - **Public skills** are fetched from upstream repos at pinned commits and are
   deliberately untracked. The manifest is [skills.json](skills.json).
+- **Overlays** ([overlays/](overlays)) are tracked local adaptations of public
+  skills, re-applied by the sync script after each fetch.
 
 ## Syncing
 
@@ -26,7 +28,8 @@ python3 sync_skills.py --force          # refresh to the pinned revisions
 python3 sync_skills.py --only handoff   # one skill (repeatable)
 ```
 
-`--force` overwrites the target directories, discarding any local edits. Where
+`--force` overwrites the target directories, discarding any local edits made in
+place — tracked adaptations in `overlays/` are re-applied afterwards. Where
 upstream ships no `agents/openai.yaml`, the script generates one from the
 manifest.
 

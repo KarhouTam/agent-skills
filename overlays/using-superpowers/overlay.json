@@ -1,0 +1,9 @@
+{
+  "insertAfter": [
+    {
+      "file": "SKILL.md",
+      "after": "- Muse: `references/muse-tools.md`",
+      "text": "- DeepSeek Harness: `references/deepseek-harness-tools.md`"
+    }
+  ]
+}

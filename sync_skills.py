@@ -2,7 +2,9 @@
 """Fetch the pinned public skills listed in skills.json into this directory.
 
 Fetched skills are deliberately untracked; see .gitignore. Self-developed
-skills are version-controlled and are never touched by this script.
+skills are version-controlled and are never touched by this script. Local
+adaptations of a public skill live in overlays/<skill>/ and are re-applied to
+every install or refresh, so --force does not discard them.
 
     python3 sync_skills.py --list          # show the manifest
     python3 sync_skills.py                 # install anything missing
@@ -25,6 +27,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 MANIFEST = ROOT / "skills.json"
+OVERLAYS = ROOT / "overlays"
+OVERLAY_RULES = "overlay.json"
 CODELOAD = "https://codeload.github.com/{repo}/tar.gz/{ref}"
 TIMEOUT = 30
 RETRIES = 3
@@ -124,20 +128,62 @@ def escape(value):
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
+def insert_after(dest, rule):
+    """Apply one overlay.json insertAfter rule to dest, once."""
+    if not isinstance(rule, dict) or {"file", "after", "text"} - set(rule):
+        raise RuntimeError(f"overlay rule needs 'file', 'after', and 'text': {rule!r}")
+
+    path = dest / rule["file"]
+    text = path.read_text(encoding="utf-8")
+    if rule["text"] in text:
+        return f"{rule['file']} (already applied)"
+    if rule["after"] not in text:
+        raise RuntimeError(f"overlay anchor missing in {rule['file']}: {rule['after']!r}")
+    path.write_text(text.replace(rule["after"], f"{rule['after']}\n{rule['text']}", 1), encoding="utf-8")
+    return rule["file"]
+
+
+def apply_overlay(name, dest):
+    """Re-apply this repo's tracked adaptations to a freshly fetched skill.
+
+    Files under overlays/<name>/ mirror the skill's own layout and are copied
+    over it; overlay.json inserts lines into upstream text that must keep its
+    upstream shape. Returns the touched paths.
+    """
+    source = OVERLAYS / name
+    if not source.is_dir():
+        return []
+
+    applied = []
+    for path in sorted(source.rglob("*")):
+        if path.is_file() and path.name != OVERLAY_RULES:
+            target = dest / path.relative_to(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+            applied.append(str(path.relative_to(source)))
+
+    rules = source / OVERLAY_RULES
+    if rules.is_file():
+        for rule in json.loads(rules.read_text(encoding="utf-8")).get("insertAfter", []):
+            applied.append(insert_after(dest, rule))
+    return applied
+
+
 def install(name, repo, ref, entry, force):
-    """Install one skill. Returns (status, metadata_generated)."""
+    """Install one skill. Returns (status, metadata_generated, overlay_paths)."""
     dest = ROOT / name
     if dest.exists() and not force:
-        return "skipped", False
+        return "skipped", False, []
 
     with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
         staged = Path(tmp) / name
         extract(download(repo, ref), entry["path"], staged)
         generated = write_interface(staged, entry.get("interface"))
+        overlaid = apply_overlay(name, staged)
         if dest.exists():
             shutil.rmtree(dest)
         staged.rename(dest)
-    return "installed", generated
+    return "installed", generated, overlaid
 
 
 def iter_skills(manifest):
@@ -173,12 +219,14 @@ def main(argv=None):
     failures = 0
     for name, repo, ref, entry in skills:
         try:
-            status, generated = install(name, repo, ref, entry, args.force)
+            status, generated, overlaid = install(name, repo, ref, entry, args.force)
         except Exception as exc:
             failures += 1
             print(f"{'FAIL':<9} {name}: {exc}", flush=True)
             continue
         suffix = " (+agents/openai.yaml)" if generated else ""
+        if overlaid:
+            suffix += f" (+overlay: {', '.join(overlaid)})"
         print(f"{status.upper():<9} {name}{suffix}", flush=True)
 
     if failures:

@@ -43,10 +43,33 @@ python3 sync_skills.py --only handoff   # one skill (repeatable)
 
 `--force` overwrites the destination directories. Public skill directories are pure upstream
 copies — never edit them in place, since the next sync replaces them. To diverge from
-upstream, promote the skill to the self-developed tier and drop it from the manifest.
+upstream, add a local overlay (below); to take the skill over entirely, promote it to the
+self-developed tier and drop it from the manifest.
 
 Stdlib only: no `git`, `jq`, `gh`, or PyYAML required. Downloads carry a 30s timeout and
 retry, because codeload connections here have been observed to stall.
+
+## Local overlays on public skills
+
+A public skill that needs local adaptation keeps the adaptation in `overlays/<skill>/`,
+which is version-controlled (`.gitignore` whitelists `!/overlays/`) and mirrors the skill's
+own layout. `sync_skills.py` copies it over the fetched skill on every install or refresh,
+so `--force` restores the adaptation instead of discarding it. `using-superpowers` is the
+only one today: a DeepSeek Harness reference plus its line in the Platform Adaptation list.
+
+Edits to upstream *text* cannot be expressed by a mirror copy, so `overlays/<skill>/overlay.json`
+carries declarative rules:
+
+```json
+{ "insertAfter": [
+  { "file": "SKILL.md", "after": "<an exact upstream line>", "text": "<line to insert after it>" } ] }
+```
+
+Rules are idempotent — one whose `text` is already present is skipped, which is also how an
+upstream that adopts the same line avoids a duplicate — and they fail loudly when the anchor
+disappears, so bumping a `ref` surfaces a reshaped file instead of silently dropping the
+adaptation. An overlay is applied only when the script writes the skill; a plain sync of an
+already-present skill reports `SKIPPED` and touches nothing.
 
 ## `skills.json`
 
