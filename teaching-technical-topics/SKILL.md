@@ -1,0 +1,231 @@
+---
+name: teaching-technical-topics
+description: Use when the user wants to learn or understand how or why something works — "教我", "讲讲", "原理", "explain X", "how does X work", "why is X designed this way", "step by step", "give me an example", or pasting code/logs and asking why they behave that way — especially system internals (PyTorch dispatcher / Dynamo / autograd, vLLM scheduler / paged attention), and whenever a question follows on from something already taught. Skip for quick factual lookups and pure coding tasks.
+---
+
+# Teaching Technical Topics
+
+## Overview
+
+A teaching answer is a **build**, not a dump: pick a mode, answer in a fixed shape,
+then register one linked note. Steps 0–2 always run; the answer shape below applies
+to Standard and Deep.
+
+Resolve `<base>` from the base directory the harness reports for this skill —
+normally `~/.agents/skills/teaching-technical-topics/`, also reachable as
+`~/.claude/skills/teaching-technical-topics/`.
+
+## Step 0 — Locate the notes root
+
+```bash
+for d in "${TEACHING_NOTES_DIR:-}" "<base>/memory" "${XDG_DATA_HOME:-$HOME/.local/share}/teaching-notes"; do
+  [ -n "$d" ] || continue
+  if mkdir -p "$d" 2>/dev/null && [ -w "$d" ]; then echo "NOTES=$d"; break; fi
+done
+```
+
+The first writable candidate wins and is called `<notes>` below. `$TEACHING_NOTES_DIR`
+overrides everything; `<base>/memory` is the default. If **none** is writable, still
+answer, print the note inline in a fenced block instead of saving it, and say plainly
+that it was not saved.
+
+`<project>` is the ecosystem the question lives in — `pytorch`, `vllm`, `k8s`, …
+
+## Step 1 — Read before answering
+
+Read `<notes>/INDEX.md`, then `<project>/_project.md` (including its **Learner
+model**), then the note of any topic the question builds on.
+
+**Treat every note as a hypothesis, not a fact.** A note records what was true for
+the version in its `verified_against`. If that differs from what is installed now,
+re-verify before repeating the claim; if the source contradicts the note, fix the
+note and tell the user what changed. For fast-moving internals an unrefreshed note
+is worse than no note.
+
+## Step 2 — Pick a mode
+
+| Mode | When | Shape |
+|---|---|---|
+| **Quick** | A follow-up or small clarification ("那 X 呢?", "what about Y?") | ≤ ~150 words, still opens with the nutshell; no notebook, no new note |
+| **Standard** | The default for a new topic | The full answer shape below |
+| **Deep** | "walk me through end to end", or a mechanism the user will act on | Standard + a source dive with `file::symbol` + a notebook |
+
+**Already taught?** Two-line recap, then a new angle worth the user's time, then
+update the existing note. Never open a duplicate note for a topic `<notes>` covers.
+
+## Answer shape (Standard / Deep, fixed order)
+
+1. **`## In a nutshell`** — one sentence, in Chinese, the whole thing. Not a
+   definition list, not a preamble. If it needs two sentences, you have not decided
+   what it is.
+2. **正文** — Chinese prose, English technical terms (`scheduler`, `dispatcher`,
+   `prefix caching`). Code identifiers stay English; comments may be Chinese. Its
+   internal shape depends on what was asked — see the next section.
+3. **关键图** — 1–2 mermaid diagrams, placed in the prose where they carry the
+   mechanism.
+4. **Demo** — only when running something teaches more than prose can. Default to a
+   notebook (see Notebooks). A plain `.py` is acceptable when a notebook genuinely
+   cannot run (needs a GPU, a server, or a CLI); say which and why.
+5. **`## 来源`** — for each load-bearing claim: `file::symbol` plus the version it
+   was checked against, or the literal word `unverified`. Doc links and blog posts
+   go here.
+6. **`## 和前文的联系`** — required as soon as `<notes>` holds a related topic: name
+   the note and the mechanism-level link. For a genuinely first topic, say so in one
+   line instead.
+7. **`## 延伸`** — 0–4 next topics, each with why *this* user would care.
+
+## 正文 shape by question type
+
+| The user asked | 正文 does this |
+|---|---|
+| *how* it works | Trace one concrete input end to end — one real call, in order |
+| *why* it is designed this way | Constraint → chosen design → one rejected alternative → where it breaks |
+| *step by step* | The state after each step, plus the failure that motivates the next one |
+| *an example* | Real numbers first (`block_size=16`, a 40-token prompt → 3 blocks), then a harder variant |
+
+Every Standard answer carries at least one running example with real numbers, not
+an abstract sketch.
+
+## Diagrams
+
+One diagram per load-bearing mechanism. A second is allowed only for a genuinely
+different mechanism; a table or plain prose covers everything else.
+
+| The thing being explained | Mermaid form |
+|---|---|
+| Control flow, where a decision is made | `flowchart TD` |
+| Ordering across components over time | `sequenceDiagram` |
+| Lifecycle, states, preemption | `stateDiagram-v2` |
+| Data structures and their relations | `classDiagram`, or a table |
+| Landscape of a subsystem | `mindmap` |
+
+Start from `reference/diagram-templates.md` — every snippet there parses. Two
+measured traps: an unquoted ASCII `(` or `)` in a label is a parse error (full-width
+`（）` is fine), and `end` is reserved, so it cannot be a node id.
+
+**REQUIRED SUB-SKILL:** use mermaid-diagrams for syntax questions and to validate
+before sending:
+
+```bash
+node <mermaid-diagrams-base>/scripts/check-mermaid.mjs <file-with-the-diagram>
+```
+
+## Notes layout
+
+```
+<notes>/
+  INDEX.md                 # generated from note frontmatter — never hand-edit
+  <project>/
+    _project.md            # learning map: taught, dependencies, Learner model, open threads
+    <topic>.md             # one note per topic taught
+    notebooks/<topic>.py   # percent-format source, the editable copy
+    notebooks/<topic>.ipynb
+```
+
+A note's id is `project/topic`. Topic note — frontmatter is the machine-readable
+part, so `nutshell` lives there and the body does not repeat it:
+
+```markdown
+---
+project: pytorch
+topic: dispatcher
+date: 2026-02-14
+nutshell: <the same sentence the answer opened with>
+related: [pytorch/autograd]
+verified_against: torch@2.12.1
+confidence: verified
+---
+# PyTorch Dispatcher
+
+## 讲了什么
+- <3–6 bullets: mechanism, not restatement>
+
+## 关键图
+<mermaid source>
+
+## 已建立的连接
+<`note.py add` writes and maintains the `- → [...]` bullets here>
+
+## 待深入
+- <threads worth pursuing next>
+
+## 自测
+- <2–3 questions, answers withheld; optional, but keep them if you add them>
+```
+
+`confidence` is `verified` (a source or a run confirmed it) or `background` (model
+knowledge only). `verified_against` is `<pkg>@<version>`, or `unverified`.
+
+## Registering the note (scripted — do not hand-edit INDEX)
+
+```bash
+python3 <base>/scripts/note.py add <notes>/pytorch/dispatcher.md --related vllm/scheduler
+python3 <base>/scripts/note.py check <notes>
+```
+
+`add` is idempotent and does the whole pass at once: normalises frontmatter,
+regenerates `INDEX.md` from frontmatter, creates `_project.md` if missing, and makes
+every `related` link bidirectional in both frontmatter and body bullets. `check`
+fails on dangling or one-way links, broken relative links, missing frontmatter, and
+INDEX drift. **Both commands must pass before you send the answer.**
+
+## Notebooks
+
+Write the demo as percent-format `.py` (`# %%` code cells, `# %% [markdown]`
+markdown cells), then build, execute and link it:
+
+```bash
+python3 <base>/scripts/build_notebook.py <notes>/pytorch/notebooks/<topic>.py --link-dir <workspace>
+```
+
+The script converts, **executes** the notebook and embeds the outputs, so a demo
+that raises exits non-zero and you must fix it rather than ship a dead cell. If the
+demo genuinely cannot run here, build it with `--no-execute` and say in the answer
+that it was not executed — never write expected outputs by hand. Keep demos seeded
+and CPU-runnable: a toy simulator of the mechanism beats a real cluster.
+
+Choose `--link-dir` from the workspace's own convention for agent-generated files
+(its `AGENTS.md`, `.wolf/anatomy.md`, a `docs/` layout); when there is none, use
+`<workspace>/.teaching-notes/` and make sure that directory is ignored — prefer
+`.git/info/exclude` over editing a tracked ignore file — so the link stays out of
+the user's `git status`. Re-running is idempotent; `--force` replaces a foreign file.
+
+## 延伸 rules
+
+Recommend what the user's *phrasing* implies they are circling, not the next chapter
+of a syllabus: "why designed like that" wants a competing design and its trade-off;
+"step by step" wants the failure mode that motivates the next step; "give me an
+example" wants the same mechanism under a harder input. One line of why per item.
+Return fewer than 4 items rather than padding to a count — 0 is a valid answer when
+the topic is genuinely closed.
+
+## Learner model
+
+`_project.md` records what the user *knows and got wrong*, not just what was taught:
+assumed background, confusions they voiced, preferred depth. Update it when they
+push back, misread something, or ask for more/less detail. At Step 1, resurface one
+question from an older note's `## 自测` when it is relevant to the new topic.
+
+## Common mistakes
+
+| Mistake | Correction |
+|---|---|
+| Answering in English because the question was | 正文 and the nutshell are Chinese whatever language the question used |
+| Background before the point | `## In a nutshell` is the first thing in the answer |
+| Same 正文 shape for every question | *how* / *why* / *step by step* / *example* take different shapes |
+| Full ceremony for a small follow-up | Quick mode: nutshell plus answer, no note, no notebook |
+| ASCII-art diagram inside a code fence | Mermaid, fence language `mermaid`, validated with `check-mermaid.mjs` |
+| One diagram per section | One per load-bearing mechanism |
+| Confident claims with no provenance | Every load-bearing claim is `file::symbol` or says `unverified` |
+| Repeating a note's claim without re-checking | Notes are hypotheses; a version mismatch means re-verify |
+| Hand-editing `INDEX.md` | Run `note.py add`; INDEX is generated |
+| Shipping a notebook with empty outputs | Let `build_notebook.py` execute it, or say it was not executed |
+
+## Red flags
+
+- The answer has no `## In a nutshell`.
+- `<notes>` was neither read before answering nor written after.
+- `note.py check` was not run, or was run and failed.
+- `<notes>` holds a related topic but `## 和前文的联系` is missing.
+- A claim about internals carries no `file::symbol` and no `unverified` marker.
+- Every question starts a new project directory instead of extending one.
