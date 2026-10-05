@@ -3,9 +3,15 @@
 Personal skill collection, also some useful skills from public repos.
 ## Layout
 
-- **Self-developed skills** are version-controlled: `adversarial-review`,
-  `context7-mcp`, `gh-github-cli`, `pytorch-test-refactoring`,
-  `triaging-vllm-issues`.
+- **Self-developed skills** are version-controlled: 
+  - `adversarial-review`
+  - `context7-mcp`
+  - `gh-github-cli`
+  - `mermaid-diagrams`
+  - `pytorch-test-refactoring`
+  - `tavily-web-access`
+  - `teaching-technical-topics`
+  - `triaging-vllm-issues`.
 - **Public skills** are fetched from upstream repos at pinned commits and are
   deliberately untracked. The manifest is [skills.json](skills.json).
 
