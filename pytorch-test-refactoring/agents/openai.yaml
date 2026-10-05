@@ -1,0 +1,3 @@
+interface:
+  display_name: "PyTorch Test Refactoring"
+  short_description: "Decouple PyTorch tests from accelerators"

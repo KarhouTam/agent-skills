@@ -1,0 +1,5 @@
+interface:
+  display_name: "Adversarial Review"
+  short_description: "Iterative challenger-driven review loop"
+policy:
+  allow_implicit_invocation: false

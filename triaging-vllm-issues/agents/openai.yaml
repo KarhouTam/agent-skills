@@ -1,0 +1,3 @@
+interface:
+  display_name: "Triaging vLLM Issues"
+  short_description: "Find vLLM issues this machine can verify"

@@ -1,0 +1,134 @@
+{
+  "sources": [
+    {
+      "repo": "openai/skills",
+      "ref": "49f948faa9258a0c61caceaf225e179651397431",
+      "skills": {
+        "gh-address-comments": { "path": "skills/.curated/gh-address-comments" },
+        "gh-fix-ci": { "path": "skills/.curated/gh-fix-ci" }
+      }
+    },
+    {
+      "repo": "mattpocock/skills",
+      "ref": "24fe0ef7737efae15c87225755e9f6f5965e4888",
+      "skills": {
+        "domain-modeling": { "path": "skills/engineering/domain-modeling" },
+        "grill-with-docs": { "path": "skills/engineering/grill-with-docs" },
+        "grill-me": { "path": "skills/productivity/grill-me" },
+        "grilling": { "path": "skills/productivity/grilling" },
+        "handoff": { "path": "skills/productivity/handoff" }
+      }
+    },
+    {
+      "repo": "obra/superpowers",
+      "ref": "8ca22dba9a94f28898bbce59f2537ff4d87c747d",
+      "skills": {
+        "brainstorming": {
+          "path": "skills/brainstorming",
+          "interface": {
+            "display_name": "Brainstorming",
+            "short_description": "Turn ideas into designs before coding"
+          }
+        },
+        "diagnosing-superpowers": {
+          "path": "skills/diagnosing-superpowers",
+          "interface": {
+            "display_name": "Diagnosing Superpowers",
+            "short_description": "Diagnose why a superpowers session went wrong"
+          }
+        },
+        "dispatching-parallel-agents": {
+          "path": "skills/dispatching-parallel-agents",
+          "interface": {
+            "display_name": "Dispatching Parallel Agents",
+            "short_description": "Run independent tasks in parallel"
+          }
+        },
+        "executing-plans": {
+          "path": "skills/executing-plans",
+          "interface": {
+            "display_name": "Executing Plans",
+            "short_description": "Execute an implementation plan inline"
+          }
+        },
+        "finishing-a-development-branch": {
+          "path": "skills/finishing-a-development-branch",
+          "interface": {
+            "display_name": "Finishing a Development Branch",
+            "short_description": "Merge, PR, or clean up finished work"
+          }
+        },
+        "receiving-code-review": {
+          "path": "skills/receiving-code-review",
+          "interface": {
+            "display_name": "Receiving Code Review",
+            "short_description": "Evaluate review feedback with rigor"
+          }
+        },
+        "requesting-code-review": {
+          "path": "skills/requesting-code-review",
+          "interface": {
+            "display_name": "Requesting Code Review",
+            "short_description": "Verify work before merging"
+          }
+        },
+        "subagent-driven-development": {
+          "path": "skills/subagent-driven-development",
+          "interface": {
+            "display_name": "Subagent-Driven Development",
+            "short_description": "Execute plans with subagents"
+          }
+        },
+        "systematic-debugging": {
+          "path": "skills/systematic-debugging",
+          "interface": {
+            "display_name": "Systematic Debugging",
+            "short_description": "Root-cause bugs before proposing fixes"
+          }
+        },
+        "test-driven-development": {
+          "path": "skills/test-driven-development",
+          "interface": {
+            "display_name": "Test-Driven Development",
+            "short_description": "Write tests before implementation"
+          }
+        },
+        "using-git-worktrees": {
+          "path": "skills/using-git-worktrees",
+          "interface": {
+            "display_name": "Using Git Worktrees",
+            "short_description": "Isolate feature work in a git worktree"
+          }
+        },
+        "using-superpowers": {
+          "path": "skills/using-superpowers",
+          "interface": {
+            "display_name": "Using Superpowers",
+            "short_description": "Find and apply the right skill"
+          }
+        },
+        "verification-before-completion": {
+          "path": "skills/verification-before-completion",
+          "interface": {
+            "display_name": "Verification Before Completion",
+            "short_description": "Back completion claims with evidence"
+          }
+        },
+        "writing-plans": {
+          "path": "skills/writing-plans",
+          "interface": {
+            "display_name": "Writing Plans",
+            "short_description": "Turn specs into step-by-step plans"
+          }
+        },
+        "writing-skills": {
+          "path": "skills/writing-skills",
+          "interface": {
+            "display_name": "Writing Skills",
+            "short_description": "Create and verify new skills"
+          }
+        }
+      }
+    }
+  ]
+}

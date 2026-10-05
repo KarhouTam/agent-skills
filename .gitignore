@@ -1,0 +1,13 @@
+# Only self-developed skills and repo tooling are version-controlled.
+# Public skills are fetched into this directory by sync_skills.py and are
+# deliberately untracked.
+/*
+!/.gitignore
+!/README.md
+!/skills.json
+!/sync_skills.py
+!/adversarial-review/
+!/context7-mcp/
+!/gh-github-cli/
+!/pytorch-test-refactoring/
+!/triaging-vllm-issues/

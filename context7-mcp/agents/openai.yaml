@@ -1,0 +1,3 @@
+interface:
+  display_name: "Context7 MCP"
+  short_description: "Fetch current library docs via Context7"
