@@ -3,6 +3,8 @@
 # deliberately untracked.
 /*
 !/.gitignore
+!/AGENTS.md
+!/CLAUDE.md
 !/README.md
 !/skills.json
 !/sync_skills.py
