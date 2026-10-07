@@ -36,6 +36,11 @@ if it lives somewhere unusual.
 | Quick mode stays short and writes nothing to the notes root | quick |
 | `note.py check` passes (links, frontmatter, INDEX) | all |
 | Every notebook ran — each code cell has outputs | all |
+| The lesson is still a draft, not promoted, before the user confirms | `--stage draft --topic project/topic` |
+| After confirmation the note is active, in INDEX, and the draft is gone | `--stage promoted --topic project/topic` |
+
+The two lifecycle assertions are the point of the draft step: an unconfirmed lesson
+must never reach `INDEX.md`, and a confirmation must actually consume the draft.
 
 ## Recorded no-skill baseline
 

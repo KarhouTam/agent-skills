@@ -5,7 +5,14 @@ A note is `<notes>/<project>/<topic>.md` with flat YAML frontmatter. Its id is
 `project/topic` (bare slugs collide across projects).
 
     python3 note.py add <notes>/<project>/<topic>.md [--related vllm/scheduler]...
+    python3 note.py promote <notes>/.drafts/<project>/<topic>.md [--related ...]...
     python3 note.py check <notes>
+
+A lesson is taught into a **draft** under `<notes>/.drafts/` and only becomes
+reference material once the user confirms it was any good and that the lesson is
+over. `promote` is that archiving step: it moves the draft into place and runs the
+full `add` pass. Drafts are invisible to `check`'s link graph and to readers, so an
+unconfirmed or later-revised explanation can never poison a future lesson.
 
 `add` is idempotent and does all of the bookkeeping in one pass:
   - normalises frontmatter (date defaults to today)
@@ -28,6 +35,7 @@ import sys
 
 REQUIRED = ("project", "topic", "date", "nutshell", "related", "verified_against", "confidence")
 CONFIDENCE = ("verified", "background")
+DRAFT_DIR = ".drafts"
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 
@@ -82,9 +90,10 @@ def normalize_id(nid: str, project: str) -> str:
 
 
 def load_notes(root: str) -> dict[str, tuple[dict, str]]:
-    """Map every topic id -> (fields, body). Skips INDEX.md and _project.md."""
+    """Map every *active* topic id -> (fields, body). Drafts are not reference."""
     notes: dict[str, tuple[dict, str]] = {}
-    for dirpath, _, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != DRAFT_DIR]
         for name in sorted(filenames):
             if not name.endswith(".md") or name in ("INDEX.md", "_project.md"):
                 continue
@@ -95,6 +104,32 @@ def load_notes(root: str) -> dict[str, tuple[dict, str]]:
             except ValueError as exc:
                 raise SystemExit(f"error: {path}: {exc}")
     return notes
+
+
+def draft_path(root: str, nid: str) -> str:
+    return os.path.join(root, DRAFT_DIR, *nid.split("/")) + ".md"
+
+
+def find_drafts(root: str) -> dict[str, str]:
+    """Map topic id -> draft path. Drafts await the user's confirmation."""
+    base = os.path.join(root, DRAFT_DIR)
+    drafts: dict[str, str] = {}
+    for dirpath, _, filenames in os.walk(base):
+        for name in sorted(filenames):
+            if name.endswith(".md") and name != "_project.md":
+                path = os.path.join(dirpath, name)
+                drafts[note_id(path, base)] = path
+    return drafts
+
+
+def missing_note_error(root: str, nid: str) -> str:
+    hint = ""
+    if os.path.exists(draft_path(root, nid)):
+        hint = (
+            f" — it is still a draft at {draft_path(root, nid)}. Ask the user to confirm"
+            " that lesson too, then `note.py promote` it."
+        )
+    return f"error: related id {nid!r} has no active note at {note_path(root, nid)}{hint}"
 
 
 def write(path: str, fields: dict, body: str) -> None:
@@ -187,9 +222,8 @@ def command_add(args: argparse.Namespace) -> int:
     fields["related"] = related
 
     for target in related:
-        tpath = note_path(root, target)
-        if not os.path.exists(tpath):
-            raise SystemExit(f"error: related id {target!r} has no note at {tpath}")
+        if not os.path.exists(note_path(root, target)):
+            raise SystemExit(missing_note_error(root, target))
 
     write(path, fields, body)
 
@@ -215,6 +249,46 @@ def command_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_promote(args: argparse.Namespace) -> int:
+    """Move a confirmed draft into the notes proper and run the full add pass.
+
+    Everything is validated before the draft is touched, so a failure here leaves
+    the draft where it was instead of half-promoting it.
+    """
+    draft = os.path.abspath(args.draft)
+    parts = draft.split(os.sep)
+    if DRAFT_DIR not in parts or not os.path.exists(draft):
+        raise SystemExit(f"error: {draft} is not an existing draft inside a {DRAFT_DIR}/ directory")
+    root = os.sep.join(parts[: parts.index(DRAFT_DIR)]) or os.sep
+    nid = note_id(draft, os.path.join(root, DRAFT_DIR))
+    target = note_path(root, nid)
+    project = project_of(nid)
+
+    fields, body = parse_frontmatter(open(draft, encoding="utf-8").read())
+    merged = [
+        normalize_id(r, project)
+        for r in list(fields.get("related") or []) + list(args.related or [])
+    ]
+    related = list(dict.fromkeys(merged))
+    for target_id in related:
+        if not os.path.exists(note_path(root, target_id)):
+            raise SystemExit(missing_note_error(root, target_id))
+    if os.path.exists(target):
+        raise SystemExit(f"error: {target} already exists — refusing to overwrite an active note")
+
+    fields["project"] = project
+    fields["topic"] = nid.split("/", 1)[1]
+    fields["related"] = related
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    write(target, fields, body)
+    os.remove(draft)
+    draft_project_dir = os.path.dirname(draft)
+    if not os.listdir(draft_project_dir):
+        os.rmdir(draft_project_dir)
+    print(f"promoted {nid}")
+    return command_add(argparse.Namespace(note=target, notes_root=root, related=args.related))
+
+
 def command_check(args: argparse.Namespace) -> int:
     root = args.notes_root
     problems: list[str] = []
@@ -223,8 +297,11 @@ def command_check(args: argparse.Namespace) -> int:
     except SystemExit as exc:
         print(exc, file=sys.stderr)
         return 1
-    if not notes:
-        problems.append(f"{root}: no notes found")
+    if not os.path.isdir(root):
+        problems.append(f"{root}: notes root does not exist")
+    elif not notes and not find_drafts(root):
+        print(f"note: {root} is empty — nothing to check yet")
+        return 0
 
     for nid, (fields, body) in sorted(notes.items()):
         for key in REQUIRED:
@@ -241,7 +318,10 @@ def command_check(args: argparse.Namespace) -> int:
             problems.append(f"{nid}: related lists {dup!r} more than once")
         for target in related:
             if target not in notes:
-                problems.append(f"{nid}: related id {target!r} has no note (dangling)")
+                problems.append(
+                    f"{nid}: related id {target!r} has no active note"
+                    + (" (still a draft)" if os.path.exists(draft_path(root, target)) else " (dangling)")
+                )
             elif nid not in (notes[target][0].get("related") or []):
                 problems.append(f"{nid}: related {target!r} is one-way (missing the reverse edge)")
         for _, target in LINK_RE.findall(body):
@@ -256,7 +336,8 @@ def command_check(args: argparse.Namespace) -> int:
     }
     index = os.path.join(root, "INDEX.md")
     if not os.path.exists(index):
-        problems.append("INDEX.md is missing — run `note.py add` on a note")
+        if notes:
+            problems.append("INDEX.md is missing — run `note.py add` on a note")
     else:
         text = open(index, encoding="utf-8").read()
         for row in sorted(expected_rows):
@@ -265,7 +346,10 @@ def command_check(args: argparse.Namespace) -> int:
 
     for problem in problems:
         print(f"FAIL {problem}")
+    drafts = find_drafts(root)
     print(f"{len(notes)} note(s), {len(problems)} problem(s)")
+    if drafts:
+        print(f"{len(drafts)} draft(s) awaiting the user's confirmation: {', '.join(sorted(drafts))}")
     return 1 if problems else 0
 
 
@@ -282,6 +366,11 @@ def main() -> int:
     chk = sub.add_parser("check", help="verify frontmatter, links and INDEX")
     chk.add_argument("notes_root")
     chk.set_defaults(func=command_check)
+
+    pro = sub.add_parser("promote", help="archive a confirmed draft as a reference note")
+    pro.add_argument("draft", help="path to <notes>/.drafts/<project>/<topic>.md")
+    pro.add_argument("--related", action="append", default=[], help="related note id, e.g. vllm/scheduler")
+    pro.set_defaults(func=command_promote)
 
     args = ap.parse_args()
     if args.command == "add" and not args.notes_root:

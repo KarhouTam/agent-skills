@@ -8,8 +8,9 @@ description: Use when the user wants to learn or understand how or why something
 ## Overview
 
 A teaching answer is a **build**, not a dump: pick a mode, answer in a fixed shape,
-then register one linked note. Steps 0–2 always run; the answer shape below applies
-to Standard and Deep.
+and teach into a draft that only becomes reference material once the user confirms
+the lesson landed. Steps 0–2 always run; the answer shape below applies to Standard
+and Deep.
 
 Resolve `<base>` from the base directory the harness reports for this skill —
 normally `~/.agents/skills/teaching-technical-topics/`, also reachable as
@@ -35,6 +36,10 @@ that it was not saved.
 
 Read `<notes>/INDEX.md`, then `<project>/_project.md` (including its **Learner
 model**), then the note of any topic the question builds on.
+
+Only notes that reached the project folder are reference material. `<notes>/.drafts/`
+holds lessons the user has not signed off on yet — read a draft only to continue
+that same unfinished lesson, never to ground an answer to a new question.
 
 **Treat every note as a hypothesis, not a fact.** A note records what was true for
 the version in its `verified_against`. If that differs from what is installed now,
@@ -115,9 +120,10 @@ node <mermaid-diagrams-base>/scripts/check-mermaid.mjs <file-with-the-diagram>
 ```
 <notes>/
   INDEX.md                 # generated from note frontmatter — never hand-edit
+  .drafts/<project>/<topic>.md   # in-progress lesson, NOT reference material
   <project>/
     _project.md            # learning map: taught, dependencies, Learner model, open threads
-    <topic>.md             # one note per topic taught
+    <topic>.md             # one *confirmed* note per topic taught
     notebooks/<topic>.py   # percent-format source, the editable copy
     notebooks/<topic>.ipynb
 ```
@@ -156,18 +162,55 @@ confidence: verified
 `confidence` is `verified` (a source or a run confirmed it) or `background` (model
 knowledge only). `verified_against` is `<pkg>@<version>`, or `unverified`.
 
-## Registering the note (scripted — do not hand-edit INDEX)
+## Note lifecycle: draft → promote
+
+**Nothing a lesson produced becomes reference material until the user says it was
+good.** An explanation that lands badly, or that the user is still pushing back on,
+must never be read back as fact six sessions later.
+
+**1. Teach into a draft.** After the answer, write
+`<notes>/.drafts/<project>/<topic>.md` (same frontmatter and body as a note). Drafts
+are excluded from `INDEX.md`, from `related` links, and from Step 1 — an unconfirmed
+draft cannot poison anything.
+
+The **notebook is not drafted**: it goes straight to
+`<notes>/<project>/notebooks/<topic>.py` and gets linked into the workspace, because
+the user runs it during the lesson. It is executed, not asserted, so it carries no
+claim that could rot; only the note's prose needs the user's sign-off.
+
+**2. Ask, in one line, at the end of the answer.** Something like:
+
+> 这节讲清楚了吗？确认没问题我就归档成 `pytorch/dynamo` 的笔记；要补的地方我先改草稿。
+
+**3. React to what the user does:**
+
+| The user | You |
+|---|---|
+| Asks a follow-up, or says part of it was wrong | Revise *the same draft* — no second note. Then ask again |
+| Says it was good **and** that the lesson is over (懂了 / 没问题 / 归档吧 / 清楚了) | Promote |
+| Never comes back to it | The draft stays a draft. Mention it once when it becomes relevant again |
+| Says to skip the ceremony (直接归档 / 不用问) | Promote immediately — the user's instruction wins |
+
+**4. Promote:**
 
 ```bash
-python3 <base>/scripts/note.py add <notes>/pytorch/dispatcher.md --related vllm/scheduler
+python3 <base>/scripts/note.py promote <notes>/.drafts/pytorch/dynamo.md --related vllm/scheduler
 python3 <base>/scripts/note.py check <notes>
 ```
 
-`add` is idempotent and does the whole pass at once: normalises frontmatter,
+`promote` validates first and only then moves the file, so a rejected promotion
+leaves the draft untouched. It then runs the `add` pass: normalises frontmatter,
 regenerates `INDEX.md` from frontmatter, creates `_project.md` if missing, and makes
 every `related` link bidirectional in both frontmatter and body bullets. `check`
 fails on dangling or one-way links, broken relative links, missing frontmatter, and
-INDEX drift. **Both commands must pass before you send the answer.**
+INDEX drift, and lists the drafts still awaiting confirmation.
+
+**A lesson that links to another unconfirmed lesson fails promotion.** That is the
+point: ask the user about the whole chain at once ("dynamo 可以归档了，它引用的
+dispatcher 还是草稿，一起归档吗？") rather than leaving a note pointing at nothing.
+
+**Run `check` after promoting — that is the gate before you send.** A draft alone
+needs no gate; a promotion does.
 
 ## Notebooks
 
@@ -218,14 +261,17 @@ question from an older note's `## 自测` when it is relevant to the new topic.
 | One diagram per section | One per load-bearing mechanism |
 | Confident claims with no provenance | Every load-bearing claim is `file::symbol` or says `unverified` |
 | Repeating a note's claim without re-checking | Notes are hypotheses; a version mismatch means re-verify |
-| Hand-editing `INDEX.md` | Run `note.py add`; INDEX is generated |
+| Hand-editing `INDEX.md` | Run `note.py promote`; INDEX is generated |
+| Promoting a note the user never confirmed | Ask first; a draft is not reference material |
+| Writing a second note for a follow-up | Revise the same draft and ask again |
 | Shipping a notebook with empty outputs | Let `build_notebook.py` execute it, or say it was not executed |
 
 ## Red flags
 
 - The answer has no `## In a nutshell`.
 - `<notes>` was neither read before answering nor written after.
-- `note.py check` was not run, or was run and failed.
+- A note was promoted without the user confirming the lesson landed.
+- `note.py check` was not run after a promotion, or was run and failed.
 - `<notes>` holds a related topic but `## 和前文的联系` is missing.
 - A claim about internals carries no `file::symbol` and no `unverified` marker.
 - Every question starts a new project directory instead of extending one.

@@ -46,9 +46,18 @@ def section(text: str, heading: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def drop_sections(text: str, headings: list[str]) -> str:
+    for heading in headings:
+        m = re.search(rf"^{re.escape(heading)}\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
+        if m:
+            text = text[: m.start()] + text[m.end() :]
+    return text
+
+
 def check_answer(path: str, mode: str, checker: str) -> None:
     text = open(path, encoding="utf-8").read()
-    prose = strip_code(text)
+    # Prose only: fenced code, inline code and the 来源 identifier list are Latin by design.
+    prose = re.sub(r"`[^`]*`", "", drop_sections(strip_code(text), ["## 来源"]))
 
     headings = re.findall(r"^## .+$", text, re.M)
     record(bool(headings) and headings[0].strip() == "## In a nutshell",
@@ -99,6 +108,26 @@ def check_answer(path: str, mode: str, checker: str) -> None:
         record(len(items) <= 4, "延伸 has at most 4 items", f"found {len(items)}")
 
 
+def check_lifecycle(root: str, topic: str | None, stage: str) -> None:
+    """A lesson stays a draft until the user confirms it; only then is it reference."""
+    if not topic:
+        return
+    active = os.path.join(root, *topic.split("/")) + ".md"
+    draft = os.path.join(root, ".drafts", *topic.split("/")) + ".md"
+    index_path = os.path.join(root, "INDEX.md")
+    index = open(index_path, encoding="utf-8").read() if os.path.exists(index_path) else ""
+    topic_slug = topic.split("/")[-1]
+
+    if stage == "draft":
+        record(os.path.exists(draft), f"{topic} is kept as a draft before confirmation")
+        record(not os.path.exists(active), f"{topic} was NOT promoted without confirmation")
+        record(topic_slug not in index, f"{topic} is absent from INDEX.md before confirmation")
+    elif stage == "promoted":
+        record(os.path.exists(active), f"{topic} is an active note after confirmation")
+        record(topic_slug in index, f"{topic} appears in INDEX.md after confirmation")
+        record(not os.path.exists(draft), f"{topic} draft was consumed by the promotion")
+
+
 def check_notes(root: str, base: str, before: str | None) -> None:
     note_py = os.path.join(base, "scripts", "note.py")
     proc = subprocess.run([sys.executable, note_py, "check", root], capture_output=True, text=True)
@@ -141,6 +170,9 @@ def main() -> int:
     ap.add_argument("--notes", required=True, help="notes root produced by the run")
     ap.add_argument("--mode", default="standard", choices=("quick", "standard", "deep"))
     ap.add_argument("--notes-before", help="copy of the notes root taken before the run (for Quick mode)")
+    ap.add_argument("--topic", help="the topic the run taught, as project/topic")
+    ap.add_argument("--stage", default="none", choices=("none", "draft", "promoted"),
+                    help="assert the lesson is still a draft, or was promoted after confirmation")
     ap.add_argument("--mermaid-check", default=DEFAULT_CHECKER)
     args = ap.parse_args()
 
@@ -153,6 +185,7 @@ def main() -> int:
 
     check_answer(args.answer, args.mode, args.mermaid_check)
     check_notes(args.notes, os.path.dirname(os.path.dirname(os.path.abspath(__file__))), args.notes_before)
+    check_lifecycle(args.notes, args.topic, args.stage)
 
     failed = [label for ok, label in results if not ok]
     print(f"\n{len(results) - len(failed)}/{len(results)} checks passed")
