@@ -6,6 +6,7 @@ Personal skill collection, also some useful skills from public repos.
 - **Self-developed skills** are version-controlled: 
   - `adversarial-review`
   - `context7-mcp`
+  - `deepwiki`
   - `gh-github-cli`
   - `mermaid-diagrams`
   - `pytorch-test-refactoring`

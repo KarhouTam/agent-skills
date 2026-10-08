@@ -1,0 +1,3 @@
+interface:
+  display_name: "DeepWiki"
+  short_description: "Read a public repo's wiki map, then verify in source"
