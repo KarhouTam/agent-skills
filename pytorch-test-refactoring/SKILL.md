@@ -246,6 +246,18 @@ The AI steps are harness-dependent, same as the review queue:
   JSON to the `feed_file` path, then run `on_complete.command`. Do NOT spawn
   sub-agents.
 
+**What the two stages decide:** the triage stage dedups the harvested
+comments to their root cause — grouped by the rule each would change, not by
+comment text — so several comments proposing the same rule change become ONE
+item carrying several comment ids. The analyst then drafts one edit per
+`intent`, each citing its comment id(s), naming the exact rule it targets in
+`review-test-refactoring/SKILL.md` (a Part I section or a Part II
+sub-section) or the deterministic check it implies, and stating the
+consequence of not making the change. A comment that maps to a
+deterministically-decidable rule drafts a `verify.py` check rather than
+prose, and a draft that cannot point at BOTH a rule and a comment is dropped
+rather than guessed at.
+
 **Daily cron:** `CronCreate` with a durable prompt:
 
 ```
@@ -274,8 +286,9 @@ execution. The executor therefore performs triage/analyst/apply steps itself.
 ## PR Review Queue (sidecar)
 
 Review open PyTorch test-decoupling PRs listed in
-`agent_space/pr_needs_review.txt` in daily batches and post the results as
-one issue comment per day to
+`agent_space/pr_needs_review.txt` in daily batches, applying the review
+criteria of `agent/skills/review-test-refactoring/SKILL.md`, and post the
+results as one issue comment per day to
 `cosdt/pytorch-initial-pr-reviews#1`. Runs independently of the 8-phase
 refactoring workflow.
 
@@ -290,8 +303,18 @@ python orchestrator.py --review-queue --harness <claude|codex> [--limit N]
    Open PRs with changed test files (`test/**` or `torch/testing/**`) fill
    the review queue up to `--limit`; merged/closed PRs and PRs without test
    changes are marked not-applicable; PRs whose metadata cannot be fetched
-   are silently skipped and stay pending.
-2. **Review** (AI, harness-dependent):
+   are silently skipped and stay pending. PRs previously reviewed as
+   `changes_requested` are re-admitted ahead of the pending list when their
+   head commit has moved (see Re-admit below).
+2. **Pre-pass** (deterministic, before any reviewer): the four
+   machine-decidable critera of the review skill (II.12) are run over each
+   PR's ADDED diff lines and written to
+   `agent_space/pr_reviews/pr_<n>_prepass.json`. A reviewer takes those
+   findings as given instead of re-deriving them; when `gh pr diff` fails the
+   file records `ran: false` and the reviewer checks those critera itself.
+3. **Review** (AI, harness-dependent). Each reviewer applies BOTH parts of
+   `agent/skills/review-test-refactoring/SKILL.md` — Part I (decoupling
+   criteria) and Part II (general test-scope criteria) — in diff-based mode:
    - **Claude Code**: one `reviewer` sub-agent per PR, emitted in waves of up
      to 4 concurrent tasks. Each sub-agent runs the diff-based mode of the
      `review-test-refactoring` skill and writes a structured result to
@@ -299,9 +322,12 @@ python orchestrator.py --review-queue --harness <claude|codex> [--limit N]
    - **Codex**: ONE inline instruction for the harness executor (main agent),
      which reviews every PR itself with its own tools (no sub-agents) and
      writes the same per-PR result files.
-3. **Publish** (deterministic): render one comment with a collapsed
-   `<details>` block per PR (full Blocker/Major/Minor findings, `@author`
-   mention), post it to the tracking issue, archive processed PRs in
+4. **Publish** (deterministic): render one comment with a collapsed
+   `<details>` block per PR — the per-PR verdict (`通过` / `需修改`, derived
+   from the finding severities: any Blocker or Major means `需修改`), the
+   severity counts, the full findings tagged `[Severity/Category]`, and an
+   `@author` mention — post it to the tracking issue, archive processed PRs
+   with their verdict and head SHA in
    `agent_space/pr_reviews/pr_reviewed.json`, and rewrite
    `agent_space/pr_needs_review.txt` (processed PRs removed, failures kept).
 
@@ -336,6 +362,14 @@ Failure semantics: a reviewer that fails (or a PR whose metadata cannot be
 fetched) is **not mentioned in the comment** and stays in the pending list
 for the next run. Not-applicable PRs (merged/closed or no test changes) ARE
 listed in the comment as `不适用` and archived.
+
+**Re-admit:** an archived PR whose verdict was `changes_requested` is watched
+for a new head commit — `head_oid` is recorded in
+`agent_space/pr_reviews/pr_reviewed.json` at publish time. When the head has
+moved and the PR is still open, it re-enters the queue at the front, so an
+author's fix is reviewed in the next batch instead of being lost forever.
+At most the 30 most recent `changes_requested` records are probed, to bound
+the extra `gh` calls.
 
 Why Codex differs: Codex MultiAgentV2 records the `spawn_agent` task `message`
 as an assistant/commentary mailbox envelope rather than a user/task message
@@ -373,7 +407,8 @@ The orchestrator loads all artifacts from the workspace and continues from where
 2. **Analyze** — AI agent (analyst): classify every test, identify stale imports, review skip decorators
 3. **Distribute** — deterministic: convert strategy assignments into per-rule coder tasks
 4. **Code + Check** — AI loop: coder applies one rule → checker verifies → next rule (single coder, per-rule iteration, max 3 fix retries)
-5. **Verify** — deterministic: automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, import audit, lint). A **lint hard gate** runs after verify — if the test linter reports error-severity messages, the flow synthesizes findings and routes them to the coder to fix before the final review (max 3 retries).
+5. **Verify** — deterministic: automated checks (syntax, test count, class structure, DecorateInfo alignment, external refs, stale patterns, review mechanics (the II.12 checks, over the lines this change added), import
+audit, lint). A **lint hard gate** runs after verify — if the test linter reports error-severity messages, the flow synthesizes findings and routes them to the coder to fix before the final review (max 3 retries).
 6. **Final Review** — AI agent (checker): **mandatory** full-file quality review; findings → coder fix → re-verify (max 3 retries)
 6.5 **Local test gate** — deterministic: run the whole refactored file on CPU (and CUDA when available) via `--use-pytest --junitxml`, parse JUnit XML, relay `FAIL`/`ERROR` to the coder to fix-or-defer (pre-existing/environmental), re-run, bounded soft-fail at 3 rounds
 7. **Finalize** — deterministic: generate `final_summary.md`

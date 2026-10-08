@@ -20,18 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from agent.harness import AgentTask
-from agent.tasks import build_reviewer_task, _load_prompt
+from agent.tasks import REVIEW_SKILL_PATH, build_reviewer_task, _load_prompt
 from scripts import review_queue
 from state import FlowSignal, PrReviewResult, ReviewOpsState
 from utils import PR_REVIEW_FLOW_STATE_FILE, get_pr_review_workspace
 
-_REVIEW_SKILL = (
-    Path(__file__).resolve().parent
-    / "agent"
-    / "skills"
-    / "review-test-refactoring"
-    / "SKILL.md"
-)
 WAVE_SIZE = 4
 BATCH_RESULT_FILE = "_review_batch_done.json"
 
@@ -85,6 +78,7 @@ class ReviewOps:
         self.state.failed = sel.failed
         if self.state.review_queue:
             self.state.phase = "review"
+            self._run_pre_pass()
             if self.mode == "subagents":
                 self._take_wave()
             else:
@@ -95,6 +89,17 @@ class ReviewOps:
         else:
             self.state.phase = "done"
             self.state.signal = FlowSignal.DONE
+
+    def _run_pre_pass(self) -> None:
+        """Run the deterministic review pre-pass over each selected PR's diff.
+
+        Writes `pr_<number>_prepass.json` beside the result files; the reviewer
+        prompts read it (II.12 of the review skill). Deterministic, so it runs
+        in the select phase before any reviewer is spawned.
+        """
+        workspace = get_pr_review_workspace()
+        for item in self.state.review_queue:
+            review_queue.write_pre_pass(item, workspace)
 
     def _review_tick(self) -> None:
         if self.state.in_flight:
@@ -135,7 +140,7 @@ class ReviewOps:
         return _load_prompt("reviewer_batch").format(
             pr_list=pr_list,
             workspace=str(get_pr_review_workspace()),
-            review_skill_path=str(_REVIEW_SKILL),
+            review_skill_path=REVIEW_SKILL_PATH,
             feed_file=feed_file,
             feed_cmd=feed_cmd,
         )
@@ -162,6 +167,7 @@ class ReviewOps:
                 item.pr_number,
             )
             if result is not None and result.success:
+                result.head_oid = item.head_oid
                 self.state.results[str(item.pr_number)] = result
         self.state.review_queue = []
         self.state.phase = "publish"
@@ -170,6 +176,10 @@ class ReviewOps:
     def _feed_subagent_result(self, data: dict[str, Any], feed_file: str) -> None:
         result = self._parse_result(data, feed_file)
         if result.pr_number and result.success:
+            for item in self.state.in_flight:
+                if item.pr_number == result.pr_number:
+                    result.head_oid = item.head_oid
+                    break
             self.state.results[str(result.pr_number)] = result
         if result.pr_number:
             self.state.in_flight = [

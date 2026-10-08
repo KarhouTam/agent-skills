@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from review_ops import ReviewOps
-from scripts import review_queue
+from scripts import review_queue, verify
 from state import PrReviewItem, PrReviewResult
 
 
@@ -154,10 +154,69 @@ def test_render_comment():
     assert "<details>" in body
     assert "pytorch/pytorch#189387" in body
     assert "@can-gaa-hou" in body
-    assert "结论：1 Blocker" in body
-    assert "[Blocker] `test/test_ops.py:42`" in body
+    assert "结论：需修改（1 Blocker）" in body
+    assert "**Verdict**: changes_requested" in body
+    assert "[Blocker/classification] `test/test_ops.py:42`" in body
     assert "不适用（已 merged/closed）" in body
     assert "_本批 2 个：reviewed 1 · 不适用 1_" in body
+
+
+def test_pre_pass_walks_added_lines_only():
+    """A patch line the PR did not add is not this author's to fix."""
+    patch = "\n".join(
+        [
+            "diff --git a/test/test_ops.py b/test/test_ops.py",
+            "index 111..222 100644",
+            "--- a/test/test_ops.py",
+            "+++ b/test/test_ops.py",
+            "@@ -10,4 +10,5 @@",
+            " pre_existing = print('old')",
+            " another = True",
+            "+    print('added')",
+            "+    # print('in a comment')",
+            "+    tor.load('m', weights_only=False)",
+        ]
+    )
+    findings = verify.pre_pass_patch(patch)
+    # Two context lines precede the first added one, so the new-file numbers
+    # are 12 and 14 — the walker counts context and added lines alike.
+    assert [(f["check"], f["line_number"]) for f in findings] == [
+        ("bare-print", 12),
+        ("weights_only-false", 14),
+    ]
+    # The file-level gate passes the review set alone; the onlyCUDA rule has
+    # its own whole-file check, so it is not repeated here.
+    assert verify.pre_pass_patch(patch, verify._REVIEW_MECHANICS) == findings
+
+
+def test_verdict_of_maps_finding_severities():
+    """Blocker and Major cross the Approve boundary; Minor does not."""
+    bloker = {
+        "severity": "Blocker",
+        "category": "code-quality",
+        "file": "test/test_ops.py",
+        "line_number": 1,
+    }
+    major = {
+        "severity": "Major",
+        "category": "code-quality",
+        "file": "test/test_ops.py",
+        "line_number": 2,
+    }
+    minor = {
+        "severity": "Minor",
+        "category": "code-quality",
+        "file": "test/test_ops.py",
+        "line_number": 3,
+    }
+
+    def result(findings):
+        return PrReviewResult(pr_number=1, findings=findings)
+
+    assert review_queue.verdict_of(result([])) == "ready_for_human_review"
+    assert review_queue.verdict_of(result([minor])) == "ready_for_human_review"
+    assert review_queue.verdict_of(result([bloker])) == "changes_requested"
+    assert review_queue.verdict_of(result([minor, major])) == "changes_requested"
 
 
 def test_publish_batch_posts_archives_rewrites(tmp_path, monkeypatch):

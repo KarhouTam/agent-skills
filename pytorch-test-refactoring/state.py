@@ -351,6 +351,7 @@ class PrReviewItem(BaseModel):
     has_test_changes: bool = False
     status: str = "review"  # "review" | "na" | "failed"
     reason: str = ""  # e.g. "merged/closed" | "no_test_changes" | "fetch_failed"
+    head_oid: str = ""  # head commit at selection, for the re-admit comparison
 
 
 class PrReviewFinding(BaseModel):
@@ -373,6 +374,8 @@ class PrReviewResult(BaseModel):
     state: str = ""
     success: bool = True
     all_clear: bool = False
+    verdict: str = ""  # "ready_for_human_review" | "changes_requested" | ""
+    head_oid: str = ""  # head commit the review saw, filled from the queue item
     reviewed_files: list[str] = []
     findings: list[PrReviewFinding] = []
     summary: str = ""

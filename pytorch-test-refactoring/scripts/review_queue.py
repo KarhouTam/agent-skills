@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from state import PrReviewItem, PrReviewResult
+from scripts.verify import pre_pass_patch
 from utils import (
     PR_QUEUE_FILE,
     PR_REVIEW_ISSUE_NUMBER,
@@ -68,7 +69,7 @@ def gh_pr_info(pr_number: int) -> dict | None:
             "--repo",
             "pytorch/pytorch",
             "--json",
-            "number,title,author,state,url,files",
+            "number,title,author,state,url,files,headRefOid",
         )
         data = json.loads(out)
     except (subprocess.CalledProcessError, json.JSONDecodeError):
@@ -81,6 +82,7 @@ def gh_pr_info(pr_number: int) -> dict | None:
         "author": author.get("login", ""),
         "state": data.get("state", ""),
         "url": data.get("url", f"https://github.com/pytorch/pytorch/pull/{pr_number}"),
+        "head_oid": data.get("headRefOid", "") or "",
         "paths": [f.get("path", "") for f in files],
     }
 
@@ -136,6 +138,34 @@ def save_pending(urls: list[str], path: Path | str | None = None) -> None:
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
+_RE_ADMIT_MAX = 30
+
+
+def readmitted_urls(workspace: Path | str | None = None) -> list[str]:
+    """Archived PRs whose head moved since the review that asked them to iterate.
+
+    Only records whose verdict was `changes_requested` are re-checked, and only
+    the most recent `_RE_ADMIT_MAX` of them. A PR the author has not touched
+    stays quiet; a PR that came back `需修改` and then got a new commit returns
+    to the queue. Without this the verdict line would ask the author to iterate
+    and nothing would ever watch for the iteration.
+    """
+    archive = load_archive(workspace)
+    records = [
+        rec
+        for rec in archive.get("records", [])
+        if rec.get("verdict") == "changes_requested" and rec.get("pr_number")
+    ][-_RE_ADMIT_MAX:]
+    urls: list[str] = []
+    for rec in records:
+        info = gh_pr_info(rec["pr_number"])
+        if info is None or info.get("state") != "OPEN":
+            continue
+        if info.get("head_oid") and info["head_oid"] != rec.get("head_oid", ""):
+            urls.append(info["url"])
+    return urls
+
+
 def select_pending(
     limit: int = 10,
     pending_path: Path | str | None = None,
@@ -151,7 +181,13 @@ def select_pending(
     stays pending untouched.
     """
     result = SelectResult()
-    pending = load_pending(pending_path)
+    seen: set[str] = set()
+    pending: list[str] = []
+    for url in readmitted_urls() + load_pending(pending_path):
+        if url in seen:
+            continue
+        seen.add(url)
+        pending.append(url)
     for url in pending:
         if len(result.review_queue) >= limit:
             break
@@ -216,24 +252,78 @@ def save_archive(archive: dict, path: Path | str | None = None) -> None:
     path.write_text(json.dumps(archive, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+# ── pre-pass ────────────────────────────────────────────────────────
+
+# The four machine-decidable criteria of II.12 and the walker over a diff's
+# added lines are defined once, in scripts/verify.py (`pre_pass_patch`), which
+# also runs them as the `review_mechanics` check of the 8-phase workflow.
+# Nothing is redefined here, so the two entry points cannot drift apart.
+
+_PRE_PASS_FILE = "pr_{}_prepass.json"
+
+
+def write_pre_pass(item: PrReviewItem, workspace: Path | str | None = None) -> dict:
+    """Run the pre-pass over one PR's diff and write it beside the result files.
+
+    Writes `pr_<number>_prepass.json`, which the reviewer prompt reads. A failed
+    diff fetch is recorded as `ran: false` rather than raising: the reviewer
+    falls back to checking the four criteria itself, and the run continues.
+    """
+    root = Path(workspace) if workspace else PR_REVIEW_WORKSPACE_ROOT
+    path = root / _PRE_PASS_FILE.format(item.pr_number)
+    try:
+        patch = _run_gh(
+            "pr",
+            "diff",
+            str(item.pr_number),
+            "--repo",
+            "pytorch/pytorch",
+        )
+    except subprocess.CalledProcessError:
+        data: dict = {"ran": False, "reason": "diff_failed", "findings": []}
+    else:
+        data = {"ran": True, "findings": pre_pass_patch(patch)}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return data
+
+
 # ── comment rendering ───────────────────────────────────────────────
 
 
-def _verdict(result: PrReviewResult) -> str:
+def verdict_of(result: PrReviewResult) -> str:
+    """Per-PR verdict: `changes_requested` iff any Blocker/Major finding.
+
+    Mirrors the severity-to-verdict mapping of the `pr-review-readiness`
+    wrapper: Blocker and Major both cross the Approve boundary, Minor does not.
+    A reviewer-supplied verdict wins, so a human override survies.
+    """
+    if result.verdict:
+        return result.verdict
     if result.all_clear:
-        return "通过"
+        return "ready_for_human_review"
+    return (
+        "changes_requested"
+        if any(f.severity in ("Blocker", "Major") for f in result.findings)
+        else "ready_for_human_review"
+    )
+
+
+def _verdict(result: PrReviewResult) -> str:
+    """Render the per-PR verdict and its severity counts for the daily comment."""
+    truth = "通过" if verdict_of(result) == "ready_for_human_review" else "需修改"
     counts: dict[str, int] = {}
     for f in result.findings:
         counts[f.severity] = counts.get(f.severity, 0) + 1
     parts = [f"{counts[k]} {k}" for k in ("Blocker", "Major", "Minor") if counts.get(k)]
-    return " · ".join(parts) if parts else "有发现（未分类）"
+    return truth + (f"（{' · '.join(parts)}）" if parts else "")
 
 
 def _render_reviewed(result: PrReviewResult) -> str:
     files = ", ".join(result.reviewed_files) if result.reviewed_files else "（无）"
     if result.findings:
         items = "\n".join(
-            f"  - [{f.severity}] `{f.file}:{f.line_number}`：{f.description}"
+            f"  - [{f.severity}/{f.category}] `{f.file}:{f.line_number}`：{f.description}"
             + (f"（修复：{f.fix}）" if f.fix else "")
             for f in result.findings
         )
@@ -247,6 +337,7 @@ def _render_reviewed(result: PrReviewResult) -> str:
         f"- **URL**: https://github.com/pytorch/pytorch/pull/{result.pr_number}\n"
         f"- **State**: {result.state}\n"
         f"- **Review mode**: diff-based（review-test-refactoring）\n"
+        f"- **Verdict**: {verdict_of(result)}\n"
         f"- **Reviewed files**: {files}\n"
         f"- **Summary**: {summary}\n"
         f"- **Findings**:\n{items}\n"
@@ -337,6 +428,8 @@ def publish_batch(
                 "comment_url": comment_url,
                 "status": "reviewed",
                 "reason": "",
+                "verdict": verdict_of(r),
+                "head_oid": r.head_oid or "",
                 "findings_count": len(r.findings),
                 "all_clear": r.all_clear,
                 "summary": r.summary,
@@ -354,6 +447,8 @@ def publish_batch(
                 "comment_url": comment_url,
                 "status": "na",
                 "reason": item.reason,
+                "verdict": "",
+                "head_oid": item.head_oid,
                 "findings_count": 0,
                 "all_clear": None,
                 "summary": "",

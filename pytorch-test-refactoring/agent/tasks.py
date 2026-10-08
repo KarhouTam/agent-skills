@@ -20,6 +20,13 @@ _SKILL_DIR = _PROMPT_DIR.parent.parent
 _CORE_REF_DIR = str(_SKILL_DIR / "reference")
 _NON_CORE_FIELDS = {"distributed", "graph"}
 
+# The review criteria both reviewer harnesses read. Defined once here, because
+# the task builders and the review-queue state machine must point at the same
+# document.
+REVIEW_SKILL_PATH = str(
+    _SKILL_DIR / "agent" / "skills" / "review-test-refactoring" / "SKILL.md"
+)
+
 
 def _load_prompt(name: str) -> str:
     return (_PROMPT_DIR / f"{name}.md").read_text()
@@ -271,9 +278,8 @@ def build_reviewer_task(
         state=item.state,
         result_file=result_file,
         workspace=workspace,
-        review_skill_path=str(
-            _SKILL_DIR / "agent" / "skills" / "review-test-refactoring" / "SKILL.md"
-        ),
+        pre_pass_file=str(Path(workspace) / f"pr_{item.pr_number}_prepass.json"),
+        review_skill_path=REVIEW_SKILL_PATH,
     )
     return AgentTask(
         phase="review",

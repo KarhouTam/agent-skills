@@ -46,6 +46,7 @@ def verify(
         checks.append(_check_dtype_integrity(file_path))
         checks.append(_check_accelerator_safety(file_path))
         checks.append(_check_coverage_preservation(file_path, workspace))
+        checks.append(_check_review_mechanics(file_path))
         checks.append(_check_class_split(file_path, original_classes, workspace))
         checks.append(_check_skipifmps_coverage(file_path, workspace))
         checks.append(_check_lint(file_path))
@@ -718,7 +719,250 @@ def _check_accelerator_safety(file_path: str) -> VerificationCheck:
     )
 
 
+# ── M12: Review mechanics (shared with the review-queue pre-pass) ──────
+#
+# These are the machine-decidable rules of Part II of the review criteria.
+# Defined once, here, so the 8-phase Verify phase and the PR review queue's
+# pre-pass cannot drift apart: the queue applies the patch walker to a PR's
+# ADDED lines, this file applies the file walker to a refactored test file.
+# Every other rule of Part II needs judgment or the whole file and stays with
+# the reviewer.
+
+_REVIEW_MECHANICS = (
+    (
+        "bare-print",
+        re.compile(r"(?<![\w.])print\s*\("),
+        "Major",
+        "a bare print() in test code; use the framework's artifact path",
+    ),
+    (
+        "bare-assertRaises",
+        re.compile(r"assertRaises\s*\("),
+        "Major",
+        "bare assertRaises() with no message pattern; use assertRaisesRegex()",
+    ),
+    (
+        "weights_only-false",
+        re.compile(r"weights_only\s*=\s*False"),
+        "Blocker",
+        "torch.load(..., weights_only=False) re-enables arbitrary code execution",
+    ),
+)
+
+# Run by the review-queue pre-pass alone: the refactored-file path already
+# covers this ground in _check_onlycuda_residual().
+_PRE_PASS_ONLY_MECHANICS = (
+    (
+        "residual-onlyCUDA",
+        re.compile(r"@onlyCUDA|device\s*=\s*['\"]cuda['\"]"),
+        "Major",
+        'residual @onlyCUDA / device="cuda" in code being generalized',
+    ),
+)
+
+
+def _scan_review_mechanics(
+    lines: list[str],
+    pattern_set: tuple,
+    path: str = "",
+    line_offset: int = 0,
+) -> list[dict]:
+    """Scan source lines against a review-mechanics pattern set."""
+    findings: list[dict] = []
+    for offset, line in enumerate(lines):
+        for name, pattern, severity, note in pattern_set:
+            if pattern.search(line):
+                findings.append(
+                    {
+                        "check": name,
+                        "severity": severity,
+                        "file": path,
+                        "line_number": offset + 1 + line_offset,
+                        "evidence": line.strip()[:200],
+                        "note": note,
+                    }
+                )
+    return findings
+
+
+def pre_pass_patch(
+    patch_text: str,
+    pattern_set: tuple = _REVIEW_MECHANICS + _PRE_PASS_ONLY_MECHANICS,
+) -> list[dict]:
+    """Run the machine-decidable review rules over the ADDED lines of a diff.
+
+    Only added lines are scanned: a line the PR did not touch is not this
+    author's to fix. Comment lines are skipped, but a `print` inside a
+    docstring is still reported — the walker does not track docstring state
+    across a patch.
+
+    The default is the pre-pass set. The file-level gate passes
+    `_REVIEW_MECHANICS` alone: the residual-onlyCUDA rule has its own
+    whole-file check.
+    """
+    findings: list[dict] = []
+    path = ""
+    line_no = 0
+    for raw in patch_text.splitlines():
+        if raw.startswith("diff ") or raw.startswith("index ") or raw.startswith("--- "):
+            continue
+        if raw.startswith("+++ "):
+            path = raw[4:].strip().split("\t")[0]
+            continue
+        if raw.startswith("@@"):
+            m = re.search(r"\+(\d+)", raw)
+            if m:
+                line_no = int(m.group(1)) - 1
+            continue
+        if raw.startswith("+"):
+            line_no += 1
+            text = raw[1:]
+        elif raw.startswith(" "):
+            line_no += 1
+            continue
+        else:
+            continue  # a removal, or a patch line this scan does not read
+        if text.strip().startswith("#"):
+            continue
+        for name, pattern, severity, note in pattern_set:
+            if pattern.search(text):
+                findings.append(
+                    {
+                        "check": name,
+                        "severity": severity,
+                        "file": path,
+                        "line_number": line_no,
+                        "evidence": text.strip()[:200],
+                        "note": note,
+                    }
+                )
+    return findings
+
+
+def _repo_relative(path: Path) -> Path | None:
+    """Resolve `path` to a path relative to its repository root, or None.
+
+    `git show` and `git diff` need a path relative to the repository root, but
+    `verify` is handed whatever the caller typed — absolute, or relative to the
+    process CWD. Every git accessor below goes through here, so none of them
+    silently no-ops on an absolute path.
+    """
+    try:
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            cwd=str(path.parent),
+            timeout=5,
+        )
+        if root.returncode != 0:
+            return None
+        return path.relative_to(Path(root.stdout.strip()))
+    except Exception:
+        return None
+
+
+def _commited_file_text(file_path: str) -> str | None:
+    """Return HEAD's version of `file_path`, or None when it cannot be read."""
+    path = Path(file_path).resolve()
+    rel_path = _repo_relative(path)
+    if rel_path is None:
+        return None
+    try:
+        proc = subprocess.run(
+            ["git", "show", f"HEAD:{rel_path}"],
+            capture_output=True,
+            text=True,
+            cwd=str(path.parent),
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def _review_mechanics_diff(file_path: str) -> str | None:
+    """Return the diff of `file_path` against HEAD, or None when unavailable.
+
+    The review-mechanics rules are dif-scoped (II.12): a `print` the change
+    never touched is not this author's to fix. The refactor leaves its work in
+    the working tree, so `git diff HEAD -- <path>` is exactly the change under
+    review.
+    """
+    path = Path(file_path).resolve()
+    rel_path = _repo_relative(path)
+    if rel_path is None:
+        return None
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "-U0", "HEAD", "--", str(rel_path)],
+            capture_output=True,
+            text=True,
+            cwd=str(path.parent),
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def _check_review_mechanics(file_path: str) -> VerificationCheck:
+    """Run the machine-decidable review rules over the lines this change added.
+
+    Falls back to the whole file when the diff cannot be read (no git, file
+    untracked, timeouts) and says so in `details` — reporting an untouched
+    debug print is the smaller error than skipping the check.
+    """
+    patch = _review_mechanics_diff(file_path)
+    if patch is None:
+        content = Path(file_path).read_text()
+        lines: list[str] = []
+        in_quotes = False
+        for line in content.splitlines():
+            quotes = line.count('"""') + line.count("'''")
+            if in_quotes:
+                if quotes % 2:
+                    in_quotes = False
+                continue
+            if quotes % 2:
+                in_quotes = True
+                continue
+            if line.strip().startswith("#"):
+                continue
+            lines.append(line)
+
+        findings = _scan_review_mechanics(lines, _REVIEW_MECHANICS)
+        scope = "whole file (diff unavailable)"
+    else:
+        findings = pre_pass_patch(patch, _REVIEW_MECHANICS)
+        scope = "changed lines"
+
+    details = [
+        f"line {f['line_number']}: [{f['severity']}] {f['check']} — {f['note']}"
+        for f in findings
+    ]
+    passed = len(details) == 0
+    return VerificationCheck(
+        name="review_mechanics",
+        passed=passed,
+        details="No issues found in the " + scope
+        if passed
+        else f"[{scope}] " + "; ".join(details[:10]),
+    )
+
+
 # ── M9: Coverage preservation check ────────────────────────────────────
+
+# Device-named blacklist skips document a known hardware gap and are
+# preserved (Part II II.4d), so losing one is a coverage regression. A
+# GENERIC `@skipIf`/`@unittest.skip` is the opposite: Part II requires a
+# deterministic failure to become an expected failure, which removes the
+# generic skip. Only the device-named family counts as a broadening.
+_BLACKLIST_SKIP_RE = re.compile(r"@skip(If)?(MPS|XPU|CUDA|HPU|MTIA|XLA|Meta)\b")
 
 
 def _check_coverage_preservation(file_path: str, workspace: Path) -> VerificationCheck:
@@ -730,26 +974,12 @@ def _check_coverage_preservation(file_path: str, workspace: Path) -> Verificatio
     """
     content = Path(file_path).read_text()
 
-    # Retrieve original file content from git
-    try:
-        proc = subprocess.run(
-            ["git", "show", f"HEAD:{file_path}"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if proc.returncode != 0:
-            return VerificationCheck(
-                name="coverage_preservation",
-                passed=True,
-                details="Could not retrieve original file from git",
-            )
-        original_content = proc.stdout
-    except (subprocess.TimeoutExpired, OSError):
+    original_content = _commited_file_text(file_path)
+    if original_content is None:
         return VerificationCheck(
             name="coverage_preservation",
             passed=True,
-            details="Could not retrieve original file from git (timeout/error)",
+            details="Could not retrieve original file from git",
         )
 
     original_decorators = _extract_method_decorators(original_content)
@@ -765,7 +995,7 @@ def _check_coverage_preservation(file_path: str, workspace: Path) -> Verificatio
         only_removed = [
             d
             for d in (orig_set - curr_set)
-            if d.startswith("@only") or d.startswith("@skip")
+            if d.startswith("@only") or _BLACKLIST_SKIP_RE.match(d)
         ]
         if only_removed:
             broadenings.append(
@@ -1070,26 +1300,12 @@ def _check_skipifmps_coverage(
     runs on MPS for the first time.  This check ensures @skipIfMPS is
     added as a safety measure on those tests.
     """
-    # Try to get original file from git for comparison
-    try:
-        proc = subprocess.run(
-            ["git", "show", f"HEAD:{file_path}"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if proc.returncode != 0:
-            return VerificationCheck(
-                name="skipifmps_coverage",
-                passed=True,
-                details="Could not retrieve original file from git",
-            )
-        original_content = proc.stdout
-    except (subprocess.TimeoutExpired, OSError):
+    original_content = _commited_file_text(file_path)
+    if original_content is None:
         return VerificationCheck(
             name="skipifmps_coverage",
             passed=True,
-            details="Could not retrieve original file from git (timeout/error)",
+            details="Could not retrieve original file from git",
         )
 
     current_content = Path(file_path).read_text()

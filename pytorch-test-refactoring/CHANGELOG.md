@@ -1,5 +1,92 @@
 # Changelog
 
+## 2026-09-30 — 评审标准统一：侧车评审对齐 pr-review 通用标准
+
+将 `--review-queue` 与 `--ingest-feedback` 两侧车的评审标准，从「仅解耦检查清单」
+统一为 `agent/skills/review-test-refactoring/SKILL.md` 的 **Part I**（解耦标准）+
+**Part II**（通用测试范围标准，改编自 `/root/pytorch/.claude/skills/pr-review`）；
+此前两处标准完全无交集。
+
+- **Part II 新增**（II.1–II.13）：评审哲学 9 条（按测试文件 diff 重述）、5 步流程
+  （新增「先归并再起草」与「落笔前核对」）、范围外清单（kernel/codegen/autograd/
+  nn internals/FX/dtype 提升表/张量子类/C++ 线程安全/CI job 位置）、测试模式与质量
+  （存在性、框架一致性、错误条件、xfail 与 skip、共享逻辑）、通用代码质量、向后兼容、
+  安全、线程安全、性能、归并优先阶梯（一段一 finding）、严重度与结论映射、
+  机器可判检查、输出格式。
+- **结论映射**：任一 Blocker/Major → `changes_requested`（需修改），否则
+  `ready_for_human_review`（通过）；结论按 PR 计算，不按 finding、不按批。
+- **机器可判子集唯一来源**：II.12 的四条（裸 `print`、裸 `assertRaises`、
+  `weights_only=False`、残留 `@onlyCUDA`）在 `scripts/verify.py` 中定义一次——
+  review-queue 以 `pre_pass_patch` 对 diff 新增行执行，Phase 5 的 `review_mechanics`
+  改为对「本次改动行」执行（`git diff HEAD`，路径先折算为仓库相对，以同时支持相对
+  与绝对路径），两者共用同一 pattern set，不再各自重复；diff 不可得时回退整文件并
+  在 `details` 中写明范围。
+- **独立盘点复核**（workflow `part-ii-inventory`：6 个 sweeper 覆盖 162 条清单 +
+  完备性 critic）：修订 3 处，补入 3 条。修订——机器可判检查由「整体文件」收窄为
+  「改动行」，不再把 PR 未触碰的既有 debug print 记在作者名下；II.4b 的 dtype 列表行
+  仅在「与既有 helper 的集合相同」时判违规，刻意收窄的子集（双 dtype 设备对）不判；
+  II.3 范围外补入 workflow/CI YAML（含其中 token）。补入——测试确定性（II.4c：期望值
+  不得来自墙钟、无种子随机、无序 set/dict 迭代）、显式 `dtype=` 行、跨文件重复用例行
+  （II.4e）、标签与所调 API 一致性（II.4b）。II.10 阶梯随之把 II.4c 的确定性/显式 dtype
+  两行归入 Test Patterns。critic 其余 4 项经核对已符合（重命名的一致性检查见 II.6，
+  helper 模块级状态见 II.8）。
+- **xfail 与 skip 调和**：`coverage_preservation` 只把「设备命名的黑名单 skip」
+  （`@skipIfMPS` 等）的消失判为覆盖率回退；通用条件 skip 转为 xfail 属标准要求，
+  不再误报为回退。
+- **review-queue**：新增 pre-pass（每 PR 写 `pr_<n>_prepass.json`，`gh pr diff` 失败
+  记 `ran: false`）、结论行与严重度计数、finding 标注 `[Severity/Category]`、归档
+  记录写入 `verdict` 与 `head_oid`；新增 **re-admit**（结论为 `需修改` 的归档 PR 在
+  head commit 变化后回到队首，至多回查最近 30 条）。
+- **ingest-feedback**：triage 按「会改哪条规则」归并到根因，多条评论合并为一条
+  decision（`comment_id` 可为 list）；analyst 每条 `intent` 必须引用评论 id、指明目标
+  规则（Part I 节或 Part II 子节）、说明不改的后果；机器可判规则改以 `verify.py`
+  检查（`check_name` + `detection`）形式起草；无法同时指向规则与评论的草案丢弃而非猜测。
+- **验收：13 个归档 PR 全量重放 + 逐 PR 对账 + 综合**（workflow `review-queue-acceptence`）。
+  机制面 13/13 通过（II.10 八段枚举、II.11 严重度→结论映射无一例外）；
+  191294 / 192200 / 192585 / 192890 / 192981 / 193525 的差异可由两条既定窄化（II.12 只算
+  改动行、II.3 范围外）或新 Part II 规则解释。但标准整体未通过（综合判 `criteria_hold: false`，
+  7 项无窄化可解释）：191419 / 192482 / 193326 / 193654 对**同一构造**——
+  `instantiate_device_type_tests` 的加速器参数三元组——给出三种结论（误报 / 放行 / 漏报），
+  说明结论由单遍判读而非标准决定；综合把「缺少决定论控制」列为本验收最弱点，并给出两步
+  补救（对该构造补一条统一规则 + 对该构造重跑一遍）。
+- **新增 II.4f「Accelator coverage accounting」**（对上述最弱点的第一步补救）：类的标签所声称
+  的加速器集合 = 它实际实例化的集合（缺 `allow_mps` 的不完整声称 → Minor / Test Patterns；
+  同目录兄弟也只用单个 flag 只能收窄影响面，不能把不完整声称变完整）；黑名单不得使集合为空
+  （`except_for=("cpu",)` 本身是 Part I §9 的规定形式，不判；只有剩余加速器被平台门控、类可整体
+  离场时才判 → Major / Testing）；扩大范围不是缺陷（§1b 的白名单放大，仅当放大的变体跑不动时判）。
+  II.10 阶梯第 5/6 段随之引用；II.12 说明该项不做机器可判（需类标签与整段实参，非行内可判）。
+- **复核纠错**：对账 pass 对 192482 断言「`inductor_utils.py:202` 已失效、实为 178」是错的——树中
+  202 正是 `requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")`。
+  另已核实两个安全分类器未审读的 agent（`replay:pr_192981`、`replay:pr_192482`）的 finding 锚点在
+  树中成立（`def test_fsdp_training_state` 3975 与其上方 3974 的 `@unittest.skipIf(not HAS_GPU, …)`；
+  `requires_triton` 定义与全仓 `@requires_triton()` 用法；`scripts/linter.py:115` 的 `_is_test_class`），
+  且 replay 目录外无任何写入。
+- **II.4f 验证**（workflow `review-queue-amendment-check`，重放 191419 / 192482 / 193326 / 193654,
+  与归档基线对账）：加速器覆盖一族在四次重放中判法一致——一律 II.4f 的 incomplete-claim 行
+  （Minor / Test Patterns）。上一轮 191419 无规则支撑的 finding 消失、192482 与 193326 的
+  `allow_mps` 缺口由「丢失」转为「保留」、193654 从零 finding 转为报出该 Minor，摆动收敛。
+  剩余未解释项不在该族内（192482 的 `_triton` 命名残留、193654 的 Major@50——注入了 `device`
+  形参却从 `self.device_type` 取值、193654 的 Minor@115 的 `_cpu` 残留、一处
+  `except_for="cpu"` 风格 nit 被误报），综合仍判 `criteria_hold: false`，并把「缺重跑/方差基线」
+  列为最弱点。脚本自身缺陷（已修）：`replace_all` 只改到 Reconcile 的读路径（第 101 行），
+  Replay 的写路径（第 80 行）未改，故 reconciler 被指向不存在的 `_result2.json`；四个 reconciler
+  均自查后改读真实文件并在 `note` 里报告该不一致，故结论仍成立。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `agent/skills/review-test-refactoring/SKILL.md` | 新增 Part II（II.1–II.13）与两段式引用；输出格式改为八段 finding + 结论；验收后补 II.4f（加速器覆盖记账）并接入 II.10 阶梯 |
+| `agent/prompts/reviewer.md`、`agent/prompts/reviewer_batch.md` | 重写为两段式评审、pre-pass 读入、结论字段、八段 category 枚举 |
+| `scripts/review_queue.py` | pre-pass 调用（复用 `pre_pass_patch`）、结论映射与渲染、`head_oid`、re-admit |
+| `scripts/verify.py` | 新增 II.12 检查（唯一来源，`pre_pass_patch` 与 `review_mechanics` 共用同一 pattern set）；`review_mechanics` 按改动行（`git diff HEAD`）扫描，diff 不可得时回退整文件；新增 `_repo_relative` / `_commited_file_text` 共享 git 取路（绝对路径下不再静默空过）；`coverage_preservation` 与 xfail/skip 调和 |
+| `state.py` | `PrReviewItem.head_oid`、`PrReviewResult.verdict` / `head_oid` |
+| `review_ops.py` | select 阶段运行 pre-pass；回填 `head_oid`；`REVIEW_SKILL_PATH` 取自 `agent.tasks` |
+| `agent/tasks.py` | 新增 `REVIEW_SKILL_PATH`；reviewer 任务传 pre-pass 文件与标准路径 |
+| `agent/prompts/checker.md` | 两段式引用 + 机器可判检查小节 + 只报问题 |
+| `agent/prompts/feedback_triage.md`、`agent/prompts/feedback_analyst.md` | 根因归并、规则绑定、机器可判检查起草 |
+| `tests/test_review_queue.py` | 结论映射测试；pre-pass 只走新增行（含未触碰行带 print 的反例），60 项全通过 |
+
 ## 2026-08-26 — 策略术语替换：S1/S2/S3 → CPU-only / device-agnostic / device-specific
 
 移除 S1/S2/S3 及 `Strategy1/2/3` 策略代号，统一为自解释术语：**CPU-only**（原 S1，

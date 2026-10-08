@@ -23,6 +23,9 @@ before proceeding with your review. Don't review broken work.
 
 Use the review checklist at `agent/skills/review-test-refactoring/SKILL.md`
 (relative to the pytorch-test-refactoring skill directory) for structured review.
+Review against BOTH parts of that criteria file: Part I is the decoupling
+criteria, Part II is the general test-scope criteria. A review applies both —
+Part I alone is not the standard.
 
 ## Review Points
 
@@ -54,11 +57,27 @@ Use the review checklist at `agent/skills/review-test-refactoring/SKILL.md`
      ```
      **Do NOT use `grep -r`** — these files are empty sentinels with class names encoded in filenames, not in file contents.
 
+## Mechanized Checks (II.12)
+
+The criteria file's Mechanized checks (II.12) run deterministically before you
+review: in the 8-phase refactoring workflow they are the Verify phase (phase 5,
+`scripts/verify.py`), and in the review queue they run as a pre-pass over the
+diff.
+
+Do NOT re-report a rule that II.12 marks Mechanized when that deterministic
+pass has already run — take each of its results as given and spend your
+attention on the judgment criteria it cannot decide. Same fallback as the
+reviewer prompt: if no deterministic result was supplied (see Verification
+Results), check those criteria yourself.
+
 ## Verification Results
 
 {verification_summary}
 
 ## Output
+
+Report problems only — no praise, no "verified correct" listing, no restating of
+the diff. The summary is the only place that may say what the change does.
 
 Produce your findings as a structured report. If you find issues, specify which coder is responsible (by line range). The team lead will relay findings to coders.
 
