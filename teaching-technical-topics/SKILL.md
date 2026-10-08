@@ -9,8 +9,9 @@ description: Use when the user wants to learn or understand how or why something
 
 A teaching answer is a **build**, not a dump: pick a mode, answer in a fixed shape,
 and teach into a draft that only becomes reference material once the user confirms
-the lesson landed. Steps 0–2 always run; the answer shape below applies to Standard
-and Deep.
+the lesson landed. Steps 0–2 always run; a Standard or Deep lesson about a public
+repo also fetches that repo's DeepWiki map first (Step 1) — as a reading list, never
+as a source. The answer shape below applies to Standard and Deep.
 
 Resolve `<base>` from the base directory the harness reports for this skill —
 normally `~/.agents/skills/teaching-technical-topics/`, also reachable as
@@ -47,11 +48,28 @@ re-verify before repeating the claim; if the source contradicts the note, fix th
 note and tell the user what changed. For fast-moving internals an unrefreshed note
 is worse than no note.
 
+### External map: DeepWiki (one lookup for Standard / Deep; skipped in Quick)
+
+When the question sits inside a **public GitHub repository** (PyTorch, vLLM, k8s…),
+take that repo's wiki map before drafting.
+
+**REQUIRED SUB-SKILL:** `deepwiki`. What to query, in what order, and which answers may not be trusted all live there; do not re-derive them here.
+
+Three consequences that belong to teaching:
+
+- The page tree is where `## 延伸` candidates come from, and the wiki is cited as
+  `deepwiki:<owner>/<repo>` in `## 来源` — it never replaces a `file::symbol`, never
+  raises `confidence` to `verified`, and never becomes `verified_against`; a claim
+  only it supports is `unverified`.
+- Settle `<owner>/<repo>` from the checkout (`upstream`, not a fork's `origin`) and
+  record `repo: <owner>/<repo>` in `<project>/_project.md` for the next lesson.
+- Not indexed, private, or offline: one line saying so, then teach as usual.
+
 ## Step 2 — Pick a mode
 
 | Mode | When | Shape |
 |---|---|---|
-| **Quick** | A follow-up or small clarification ("那 X 呢?", "what about Y?") | ≤ ~150 words, still opens with the nutshell; no notebook, no new note |
+| **Quick** | A follow-up or small clarification ("那 X 呢?", "what about Y?") | ≤ ~150 words, still opens with the nutshell; no notebook, no new note, no DeepWiki lookup |
 | **Standard** | The default for a new topic | The full answer shape below |
 | **Deep** | "walk me through end to end", or a mechanism the user will act on | Standard + a source dive with `file::symbol` + a notebook |
 
@@ -73,7 +91,8 @@ update the existing note. Never open a duplicate note for a topic `<notes>` cove
    cannot run (needs a GPU, a server, or a CLI); say which and why.
 5. **`## 来源`** — for each load-bearing claim: `file::symbol` plus the version it
    was checked against, or the literal word `unverified`. Doc links and blog posts
-   go here.
+   go here; a DeepWiki pointer is written `deepwiki:<owner>/<repo>` and never
+   replaces the `file::symbol`.
 6. **`## 和前文的联系`** — required as soon as `<notes>` holds a related topic: name
    the note and the mechanism-level link. For a genuinely first topic, say so in one
    line instead.
@@ -260,6 +279,7 @@ question from an older note's `## 自测` when it is relevant to the new topic.
 | ASCII-art diagram inside a code fence | Mermaid, fence language `mermaid`, validated with `check-mermaid.mjs` |
 | One diagram per section | One per load-bearing mechanism |
 | Confident claims with no provenance | Every load-bearing claim is `file::symbol` or says `unverified` |
+| Treating DeepWiki prose as a conclusion | It is only a map: every `file::symbol` it names gets opened in the local source, and wiki-only claims are `unverified` |
 | Repeating a note's claim without re-checking | Notes are hypotheses; a version mismatch means re-verify |
 | Hand-editing `INDEX.md` | Run `note.py promote`; INDEX is generated |
 | Promoting a note the user never confirmed | Ask first; a draft is not reference material |
@@ -274,4 +294,6 @@ question from an older note's `## 自测` when it is relevant to the new topic.
 - `note.py check` was not run after a promotion, or was run and failed.
 - `<notes>` holds a related topic but `## 和前文的联系` is missing.
 - A claim about internals carries no `file::symbol` and no `unverified` marker.
+- A Standard/Deep lesson about a public repo's internals that never consulted DeepWiki, and never said why not.
+- A wiki-sourced claim wearing a local `file::symbol`, or `verified_against` naming DeepWiki.
 - Every question starts a new project directory instead of extending one.

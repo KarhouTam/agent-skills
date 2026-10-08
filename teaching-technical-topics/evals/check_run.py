@@ -9,6 +9,9 @@ be told apart from a regression:
     python3 evals/check_run.py --answer run.md --notes <notes-root> --mode quick \
         --notes-before <copy-of-notes-taken-before-the-run>
 
+With `--expect-deepwiki` the run was made with DeepWiki reachable, so the answer
+must show it was used as a map and not as a source.
+
 Exit codes: 0 = every check passed, 1 = at least one failed, 2 = bad usage.
 """
 
@@ -54,7 +57,7 @@ def drop_sections(text: str, headings: list[str]) -> str:
     return text
 
 
-def check_answer(path: str, mode: str, checker: str) -> None:
+def check_answer(path: str, mode: str, checker: str, expect_deepwiki: bool = False) -> None:
     text = open(path, encoding="utf-8").read()
     # Prose only: fenced code, inline code and the 来源 identifier list are Latin by design.
     prose = re.sub(r"`[^`]*`", "", drop_sections(strip_code(text), ["## 来源"]))
@@ -107,6 +110,12 @@ def check_answer(path: str, mode: str, checker: str) -> None:
         items = re.findall(r"^\s*(?:\d+\.|[-*])\s+\S", section(text, "## 延伸"), re.M)
         record(len(items) <= 4, "延伸 has at most 4 items", f"found {len(items)}")
 
+    if expect_deepwiki:
+        source = section(text, "## 来源") or ""
+        record("deepwiki:" in source.lower(), "来源 points at the DeepWiki map this run used")
+        record(bool(re.search(r"\w+::\w+", source)),
+               "a DeepWiki-assisted answer still carries a local `file::symbol`")
+
 
 def check_lifecycle(root: str, topic: str | None, stage: str) -> None:
     """A lesson stays a draft until the user confirms it; only then is it reference."""
@@ -132,6 +141,18 @@ def check_notes(root: str, base: str, before: str | None) -> None:
     note_py = os.path.join(base, "scripts", "note.py")
     proc = subprocess.run([sys.executable, note_py, "check", root], capture_output=True, text=True)
     record(proc.returncode == 0, "`note.py check` passes", (proc.stdout + proc.stderr).strip()[-400:])
+
+    # A generated wiki is a map, not provenance: it can never be what a note was
+    # verified against, however plausible its prose looked.
+    wiki_claims = []
+    for dp, _, fs in os.walk(root):
+        for f in fs:
+            path = os.path.join(dp, f)
+            if f.endswith(".md") and re.search(
+                r"^verified_against:.*deepwiki", open(path, encoding="utf-8").read(), re.M | re.I
+            ):
+                wiki_claims.append(os.path.relpath(path, root))
+    record(not wiki_claims, "no note names DeepWiki in its `verified_against`", f"claimed by {wiki_claims}")
 
     notebooks = [
         os.path.join(dp, f)
@@ -174,6 +195,8 @@ def main() -> int:
     ap.add_argument("--stage", default="none", choices=("none", "draft", "promoted"),
                     help="assert the lesson is still a draft, or was promoted after confirmation")
     ap.add_argument("--mermaid-check", default=DEFAULT_CHECKER)
+    ap.add_argument("--expect-deepwiki", action="store_true",
+                    help="the run had DeepWiki reachable: 来源 must point at it, and a local file::symbol must remain")
     args = ap.parse_args()
 
     if not os.path.exists(args.answer):
@@ -183,7 +206,7 @@ def main() -> int:
         print(f"error: notes root {args.notes} not found", file=sys.stderr)
         return 2
 
-    check_answer(args.answer, args.mode, args.mermaid_check)
+    check_answer(args.answer, args.mode, args.mermaid_check, args.expect_deepwiki)
     check_notes(args.notes, os.path.dirname(os.path.dirname(os.path.abspath(__file__))), args.notes_before)
     check_lifecycle(args.notes, args.topic, args.stage)
 
