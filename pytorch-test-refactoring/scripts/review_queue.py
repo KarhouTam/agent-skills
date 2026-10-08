@@ -26,6 +26,7 @@ from utils import (
     PR_REVIEW_TEST_PREFIXES,
     PR_REVIEW_WORKSPACE_ROOT,
     PR_REVIEWED_ARCHIVE_FILE,
+    run_gh as _run_gh,
 )
 
 _PR_URL_RE = re.compile(r"pull[s]?/(\d+)")
@@ -46,17 +47,6 @@ class SelectResult:
 
 
 # ── gh helpers ──────────────────────────────────────────────────────
-
-
-def _run_gh(*args: str) -> str:
-    """Run a gh CLI command and return stdout (raises on non-zero exit)."""
-    result = subprocess.run(
-        ["gh", *args],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout
 
 
 def gh_pr_info(pr_number: int) -> dict | None:
@@ -150,7 +140,9 @@ def readmitted_urls(workspace: Path | str | None = None) -> list[str]:
     to the queue. Without this the verdict line would ask the author to iterate
     and nothing would ever watch for the iteration.
     """
-    archive = load_archive(workspace)
+    archive = load_archive(
+        Path(workspace) / PR_REVIEWED_ARCHIVE_FILE if workspace else None
+    )
     records = [
         rec
         for rec in archive.get("records", [])
@@ -212,6 +204,7 @@ def select_pending(
             author=info["author"],
             state=info["state"],
             has_test_changes=has_test_changes(info["paths"]),
+            head_oid=info.get("head_oid", ""),
         )
         if item.state != "OPEN":
             item.status = "na"
@@ -300,7 +293,9 @@ def verdict_of(result: PrReviewResult) -> str:
     """
     if result.verdict:
         return result.verdict
-    if result.all_clear:
+    if result.all_clear and not any(
+        f.severity in ("Blocker", "Major") for f in result.findings
+    ):
         return "ready_for_human_review"
     return (
         "changes_requested"

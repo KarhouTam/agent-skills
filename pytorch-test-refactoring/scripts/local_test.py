@@ -150,11 +150,15 @@ def _classify_whole_run(exit_code: int, stderr: str) -> str:
         return "oom"
     if "segmentation fault" in lowered or "segfault" in lowered:
         return "segfault"
+    if exit_code < 0:
+        # The child died from a signal, so it wrote nothing to stderr:
+        # SIGSEGV (-11) is a segfault; SIGKILL (-9) is typically the OOM killer.
+        return "segfault" if exit_code == -11 else "oom"
     return "import" if exit_code != 0 else ""
 
 
 def _parse_junit(
-    xml_path: Path, exit_code: int
+    xml_path: Path, exit_code: int, stderr: str = ""
 ) -> tuple[dict[str, int], list[LocalTestFailure], str]:
     """Parse JUnit XML into counts + failures; return whole-run failure text."""
     counts = {
@@ -171,7 +175,7 @@ def _parse_junit(
     try:
         tree = ET.parse(xml_path)
     except Exception:
-        return counts, failures, _classify_whole_run(exit_code, "")
+        return counts, failures, _classify_whole_run(exit_code, stderr)
 
     for testcase in tree.iter("testcase"):
         counts["total"] += 1
@@ -186,7 +190,11 @@ def _parse_junit(
 
         if failure_el is not None:
             message = (failure_el.get("message") or "") + "\n" + (failure_el.text or "")
-            if "XPASS" in (failure_el.get("message") or "").upper():
+            # unittest.expectedFailure that passes reports "Unexpected success";
+            # pytest's strict xfail reports "[XPASS(strict)]". Neither is a
+            # regression, so neither is relayed to the coder.
+            failure_message = (failure_el.get("message") or "").upper()
+            if "XPASS" in failure_message or "UNEXPECTED SUCCESS" in failure_message:
                 counts["unexpected_successes"] += 1
             else:
                 counts["failed"] += 1
@@ -218,7 +226,7 @@ def _parse_junit(
 
     whole_run_failure = ""
     if counts["total"] == 0 and exit_code != 0:
-        whole_run_failure = "import"
+        whole_run_failure = _classify_whole_run(exit_code, stderr)
     return counts, failures, whole_run_failure
 
 
@@ -237,6 +245,7 @@ def _run_once(
             cmd,
             capture_output=True,
             text=True,
+            errors="replace",
             cwd=str(repo_root),
             timeout=timeout,
         )
@@ -260,7 +269,10 @@ def run_local_tests(
         test_file = str(test_file_abs.relative_to(repo_root))
     except ValueError:
         test_file = str(test_file_abs)
-    xml_path = report_dir / "local_test_results.xml"
+    # The child runs with cwd=repo_root, so the report path must be absolute:
+    # a relative --junitxml would be written under repo_root and then read
+    # back relative to this process's CWD (a different directory).
+    xml_path = (report_dir / "local_test_results.xml").resolve()
 
     def one_run() -> LocalTestResult:
         xml_path.unlink(missing_ok=True)
@@ -286,7 +298,7 @@ def run_local_tests(
                 accelerator_available=accelerator_available,
             )
 
-        counts, failures, whole_run_failure = _parse_junit(xml_path, exit_code)
+        counts, failures, whole_run_failure = _parse_junit(xml_path, exit_code, stderr)
         if whole_run_failure == "" and not xml_path.exists():
             whole_run_failure = _classify_whole_run(exit_code, stderr)
 

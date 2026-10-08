@@ -15,14 +15,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import pytest
-
 from agent.harnesses import get_harness
 from state import (
     AnalystReport,
     AssessmentResult,
     CoderTask,
     FlowSignal,
+    ReviewFinding,
+    ReviewFindings,
     VerificationResult,
 )
 from flow import RefactorFlow
@@ -237,3 +237,89 @@ def test_full_flow_replay_to_finalize(tmp_path, monkeypatch):
         "flow_state.json",
     ):
         assert (ws / artifact).exists(), f"missing artifact {artifact}"
+
+
+# ── 4. Transient state and review outcome survive a process boundary ─
+
+
+def test_flow_state_roundtrip_preserves_pending_fix(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+
+    first = RefactorFlow()
+    first.state.workspace = ws
+    first.state.current_phase = "fix"
+    first.state.signal = FlowSignal.RELAY_FINDINGS
+    first.state.lint_gate_pending = True
+    first.state.lint_retry_count = 2
+    first.state.agent_ids = {"coder": "c1"}
+    first._save_flow_state()
+
+    second = RefactorFlow()
+    second.state.workspace = ws
+    second._load_flow_state()
+
+    assert second.state.current_phase == "fix"
+    assert second.state.signal == FlowSignal.RELAY_FINDINGS
+    assert second.state.lint_gate_pending is True
+    assert second.state.lint_retry_count == 2
+    assert second.state.agent_ids == {"coder": "c1"}
+
+
+def test_review_findings_persist_and_resolve(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    flow = RefactorFlow()
+    flow.state.workspace = ws
+    flow.state.file_path = "test/test_x.py"
+    flow.state.current_phase = "review"
+
+    flow.feed_review_findings(
+        ReviewFindings(
+            all_clear=False,
+            findings=[
+                ReviewFinding(severity="Major", category="lint", description="d")
+            ],
+        )
+    )
+    assert flow.state.current_phase == "fix"
+    assert flow.state.signal == FlowSignal.RELAY_FINDINGS
+    path = ws / "review_findings.json"
+    assert path.exists()
+
+    def fake_verify():
+        flow.state.current_phase = "verify"
+        flow.state.verification = VerificationResult(
+            all_passed=True,
+            checks=[],
+            original_test_count=1,
+            current_test_count=1,
+            test_count_match=True,
+        )
+
+    monkeypatch.setattr(flow, "_phase_verify", fake_verify)
+    flow.feed_fix_complete()
+
+    assert flow.state.review_findings.all_clear is True
+    assert len(flow.state.review_findings.findings) == 1
+    assert json.loads(path.read_text())["all_clear"] is True
+
+
+def test_assess_captures_git_dirty(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from scripts import assess as assess_mod
+
+    monkeypatch.setattr(assess_mod, "_check_git_dirty", lambda path: True)
+    (tmp_path / "test").mkdir()
+    (tmp_path / "test" / "test_x.py").write_text(
+        "class TestX(TestCase):\n    def test_a(self):\n        pass\n"
+    )
+    flow = RefactorFlow()
+    flow.state.file_path = "test/test_x.py"
+    flow.state.workspace = Path("agent_space/refactor/core/test_x")
+    flow.state.workspace.mkdir(parents=True)
+
+    flow._phase_assess()
+    assert flow.state.git_dirty is True

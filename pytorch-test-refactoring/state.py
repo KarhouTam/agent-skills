@@ -31,7 +31,6 @@ class ClassInfo(BaseModel):
     name: str
     line_number: int
     end_line: int = 0
-    base_class: str = "TestCase"
     test_count: int = 0
 
 
@@ -210,28 +209,14 @@ class CICheckRun(BaseModel):
     status: str  # queued | in_progress | completed
     conclusion: str  # success | failure | neutral | cancelled | timed_out | skipped
     html_url: str = ""
-    log_snippet: str = ""  # truncated log for failed checks
 
 
 class CIFailure(BaseModel):
     """A classified CI failure."""
 
     check_name: str
-    log_excerpt: str
+    log_excerpt: str = ""
     bot_label: str = ""  # best-effort hint from bot
-    debugger_verdict: str = ""  # "caused_by_us" | "unrelated" | ""
-    debugger_rationale: str = ""
-    fix_applied: str = ""  # description of the fix, if any
-
-
-class CIDebuggerResult(BaseModel):
-    """Parsed output from the debugger agent."""
-
-    agent_id: str = ""
-    agent_name: str = "debugger"
-    fixes_applied: list[dict] = []
-    unrelated: list[dict] = []
-    summary: str = ""
 
 
 class CIState(BaseModel):
@@ -262,6 +247,7 @@ class RefactorState(BaseModel):
     file_size: int = 0
     coder_count: int = 0
     total_test_count: int = 0
+    git_dirty: bool = False
     line_ranges: list[BoundedRange] = []
     class_layout: list[ClassInfo] = []
     workspace: Optional[Path] = None
@@ -299,7 +285,6 @@ class FeedbackComment(BaseModel):
 
     comment_id: int
     pr_number: int
-    pr_title: str = ""
     author: str  # GitHub login, e.g. "can-gaa-hou" or "claude[bot]"
     body: str
     html_url: str

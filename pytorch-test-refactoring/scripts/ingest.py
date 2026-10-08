@@ -14,26 +14,32 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from state import FeedbackComment, IngestState
-from utils import get_ingest_workspace
-
-CLAUDE_BOT_LOGIN = "claude[bot]"  # mirror of utils.CLAUDE_BOT_LOGIN
-
-
-def _run_gh(*args: str) -> str:
-    """Run a gh CLI command and return stdout."""
-    result = subprocess.run(
-        ["gh", *args], check=True, capture_output=True, text=True
-    )
-    return result.stdout
+from utils import CLAUDE_BOT_LOGIN, get_ingest_workspace, run_gh as _run_gh
 
 
 def _gh_json(endpoint: str, *extra_args: str) -> list[dict]:
-    """Call `gh api <endpoint>` and return parsed JSON as a list."""
+    """Call `gh api <endpoint>` and return parsed JSON as a flat list.
+
+    ``--paginate --slurp`` is required: without it only the first page is
+    fetched, and GitHub returns comment endpoints oldest-first, so the newest
+    comments are invisible. ``--slurp`` wraps the pages in one outer array,
+    which is flattened here.
+    """
     try:
-        out = _run_gh("api", endpoint, *extra_args)
-        return json.loads(out) if out.strip() else []
-    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        out = _run_gh("api", endpoint, "--paginate", "--slurp", *extra_args)
+    except subprocess.CalledProcessError:
         return []
+    if not out.strip():
+        return []
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    if data and all(isinstance(page, list) for page in data):
+        return [item for page in data for item in page]
+    return data
 
 
 def discover_merged_prs(author: str = "KarhouTam", title_prefix: str = "[Test]") -> list[dict]:
@@ -174,7 +180,7 @@ def filter_new(comments: list[FeedbackComment], state: IngestState) -> list[Feed
         if c.comment_id in state.processed_comment_ids:
             continue
         cursor = _parse_iso(state.pr_timestamps.get(str(c.pr_number), ""))
-        if _parse_iso(c.created_at) <= cursor:
+        if _parse_iso(c.created_at) < cursor:
             continue
         fresh.append(c)
     return fresh
@@ -212,13 +218,20 @@ def finalize_harvest(comments: list[FeedbackComment]) -> IngestState:
     Called once the ingest pipeline reaches DONE. Bumps the cursor even
     when a comment yielded no finding, so the next run does not rescan
     the backlog.
+
+    The cursor advances to the newest harvested comment, NOT to the
+    current time: the triage/draft pipeline runs across separate
+    invocations, and a comment posted during that window must still be
+    picked up by the next harvest.
     """
     workspace = get_ingest_workspace()
     state = load_state(workspace)
     now = datetime.now(timezone.utc).isoformat()
     for c in comments:
         state.processed_comment_ids.add(c.comment_id)
-        state.pr_timestamps[str(c.pr_number)] = now
+        key = str(c.pr_number)
+        if _parse_iso(c.created_at) > _parse_iso(state.pr_timestamps.get(key, "")):
+            state.pr_timestamps[key] = c.created_at
     state.last_run_at = now
     save_state(state, workspace)
     return state
@@ -253,36 +266,48 @@ _FINDING_TEMPLATE = """### Finding {fid} ({tier})
 
 
 def write_findings_md(findings: list[FeedbackFinding], workspace: Path) -> Path:
-    """Write findings to workspace/findings/PR-<pr>.md. Returns the file path."""
+    """Write findings to one workspace/findings/PR-<pr>.md per PR.
+
+    A harvest can span many PRs, so grouping by PR keeps each reviewable
+    file scoped to its own pull request. Returns the last file written.
+    """
     findings_dir = workspace / "findings"
     findings_dir.mkdir(parents=True, exist_ok=True)
     if not findings:
         return findings_dir / "empty.md"
-    pr_number = findings[0].pr_number
-    body_parts = []
+
+    by_pr: dict[int, list[FeedbackFinding]] = {}
     for f in findings:
-        edits = "\n".join(
-            f"  - `{e.get('layer', '?')}`: {e.get('intent', '')}" for e in f.proposed_edits
-        )
-        body_parts.append(
-            _FINDING_TEMPLATE.format(
-                fid=f.id, tier=f.tier, author=f.author, html_url=f.html_url,
-                summary=f.summary,
-                target_layers=", ".join(f.target_layers),
-                edits=edits,
+        by_pr.setdefault(f.pr_number, []).append(f)
+
+    last_path = findings_dir / "empty.md"
+    for pr_number, pr_findings in by_pr.items():
+        body_parts = []
+        for f in pr_findings:
+            edits = "\n".join(
+                f"  - `{e.get('layer', '?')}`: {e.get('intent', '')}"
+                for e in f.proposed_edits
             )
+            body_parts.append(
+                _FINDING_TEMPLATE.format(
+                    fid=f.id, tier=f.tier, author=f.author, html_url=f.html_url,
+                    summary=f.summary,
+                    target_layers=", ".join(f.target_layers),
+                    edits=edits,
+                )
+            )
+        path = findings_dir / f"PR-{pr_number}.md"
+        path.write_text(
+            _FINDINGS_TEMPLATE.format(
+                pr_number=pr_number,
+                pr_url=f"https://github.com/pytorch/pytorch/pull/{pr_number}",
+                findings_path=path,
+                findings_body="\n".join(body_parts),
+            ),
+            encoding="utf-8",
         )
-    path = findings_dir / f"PR-{pr_number}.md"
-    path.write_text(
-        _FINDINGS_TEMPLATE.format(
-            pr_number=pr_number,
-            pr_url=f"https://github.com/pytorch/pytorch/pull/{pr_number}",
-            findings_path=path,
-            findings_body="\n".join(body_parts),
-        ),
-        encoding="utf-8",
-    )
-    return path
+        last_path = path
+    return last_path
 
 
 def append_changelog(findings: list[FeedbackFinding], changelog_path: Path) -> None:

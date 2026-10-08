@@ -468,3 +468,88 @@ def test_append_changelog_writes_entry(tmp_path):
     text = changelog.read_text()
     assert "192760-1001" in text
     assert "class rename breaks skips" in text
+
+
+def test_gh_json_flattens_paginated_pages(monkeypatch):
+    seen = {}
+
+    def fake_run_gh(*args, **kwargs):
+        seen["args"] = args
+        return json.dumps([[{"id": 1}], [{"id": 2}]])
+
+    monkeypatch.setattr(ingest, "_run_gh", fake_run_gh)
+    assert ingest._gh_json("/repos/x/comments") == [{"id": 1}, {"id": 2}]
+    assert "--paginate" in seen["args"]
+    assert "--slurp" in seen["args"]
+
+
+def test_finalize_harvest_cursor_is_newest_comment(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "get_ingest_workspace", lambda: tmp_path)
+    c = FeedbackComment(
+        comment_id=7,
+        pr_number=185881,
+        author="x",
+        body="b",
+        html_url="u",
+        created_at="2026-08-13T10:00:00Z",
+    )
+    state = ingest.finalize_harvest([c])
+    assert state.pr_timestamps["185881"] == "2026-08-13T10:00:00Z"
+
+    # A comment posted while the pipeline ran must still be new next harvest.
+    later = FeedbackComment(
+        comment_id=8,
+        pr_number=185881,
+        author="x",
+        body="b",
+        html_url="u",
+        created_at="2026-08-13T10:02:00Z",
+    )
+    assert ingest.filter_new([later], state) == [later]
+
+
+def test_write_findings_md_splits_by_pr(tmp_path):
+    findings = [
+        FeedbackFinding(
+            id="111-1",
+            comment_id=1,
+            pr_number=111,
+            author="a",
+            html_url="u/1",
+            tier="Major",
+            summary="first",
+        ),
+        FeedbackFinding(
+            id="222-2",
+            comment_id=2,
+            pr_number=222,
+            author="b",
+            html_url="u/2",
+            tier="Minor",
+            summary="second",
+        ),
+    ]
+    ingest.write_findings_md(findings, tmp_path)
+    first = (tmp_path / "findings" / "PR-111.md").read_text()
+    second = (tmp_path / "findings" / "PR-222.md").read_text()
+    assert "first" in first and "second" not in first
+    assert "second" in second and "first" not in second
+
+
+def test_triage_accepts_list_comment_id(tmp_path, monkeypatch):
+    """The triage prompt allows comment_id to be a list[int]."""
+    monkeypatch.setattr(ingest_ops_module, "get_ingest_workspace", lambda: tmp_path)
+    ops = IngestOps()
+    ops.state.phase = "triage"
+    ops.state.fresh_comments = [
+        FeedbackComment(
+            comment_id=1, pr_number=5, author="a", body="b", html_url="u", created_at="t"
+        ),
+        FeedbackComment(
+            comment_id=2, pr_number=5, author="a", body="b", html_url="u", created_at="t"
+        ),
+    ]
+    ops.feed_triage_result(
+        {"decisions": [{"comment_id": [1, 2], "relevant": True, "already_fixed": False}]}
+    )
+    assert ops.state.draft_queue == [1, 2]

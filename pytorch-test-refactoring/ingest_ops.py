@@ -89,12 +89,16 @@ class IngestOps:
         decisions = data.get("decisions", [])
         relevant_ids: list[int] = []
         for d in decisions:
-            cid = d.get("comment_id", 0)
-            if cid:
-                self.state.triaged[cid] = d
-            if d.get("relevant") and not d.get("already_fixed"):
-                if self._find_comment(cid) is not None:
-                    relevant_ids.append(cid)
+            # The triage prompt allows comment_id to be a list when several
+            # comments collapse into one decision; normalize before keying.
+            raw_cid = d.get("comment_id", 0)
+            cids = raw_cid if isinstance(raw_cid, list) else [raw_cid]
+            for cid in cids:
+                if cid:
+                    self.state.triaged[cid] = d
+                if d.get("relevant") and not d.get("already_fixed"):
+                    if self._find_comment(cid) is not None:
+                        relevant_ids.append(cid)
         self.state.draft_queue = relevant_ids
         if relevant_ids:
             self.state.phase = "draft"

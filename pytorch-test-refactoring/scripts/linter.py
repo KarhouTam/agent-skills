@@ -43,14 +43,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
-from pathlib import Path
 from typing import NamedTuple
 
 
 LINTER_CODE = "TEST_LINTER"
 HW_CLASSIFICATION_ATTR = "hw_classification"
 INSTANTIATE_FN_NAME = "instantiate_device_type_tests"
-REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _KWARG_UNKNOWN = object()  # sentinel: kwarg present but not a literal
 
@@ -377,12 +375,12 @@ def _check_no_device_param(ctx: RuleContext) -> list[LintMessage]:
 # ---------------------------------------------------------------------------
 
 
-@_register(HardwareClassification.ACCELERATOR)
+@_register(HardwareClassification.ACCELERATOR, *DEVICE_SPECIFIC_CLASSIFICATIONS)
 def _check_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
     return _check_instantiation(ctx, required=True)
 
 
-@_register(HardwareClassification.ACCELERATOR)
+@_register(HardwareClassification.ACCELERATOR, *DEVICE_SPECIFIC_CLASSIFICATIONS)
 def _check_has_device_param(ctx: RuleContext) -> list[LintMessage]:
     return _check_device_param(ctx, required=True)
 
@@ -451,16 +449,6 @@ def _check_no_only_for(ctx: RuleContext) -> list[LintMessage]:
 
 
 @_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
-def _check_must_be_instantiated(ctx: RuleContext) -> list[LintMessage]:
-    return _check_instantiation(ctx, required=True)
-
-
-@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
-def _check_has_device_param(ctx: RuleContext) -> list[LintMessage]:
-    return _check_device_param(ctx, required=True)
-
-
-@_register(*DEVICE_SPECIFIC_CLASSIFICATIONS)
 def _check_no_except_for(ctx: RuleContext) -> list[LintMessage]:
     """Device-specific classes: instantiate_device_type_tests must not use except_for."""
     if ctx.instantiation is not None and ctx.instantiation.except_for is not None:
@@ -512,6 +500,45 @@ def _check_only_for_matches_device(ctx: RuleContext) -> list[LintMessage]:
     return []
 
 
+def _declares_hw_classification(node: ast.ClassDef) -> bool:
+    """True if *node* itself assigns the hw_classification attribute."""
+    for stmt in node.body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            target = stmt.targets[0]
+            if isinstance(target, ast.Name) and target.id == HW_CLASSIFICATION_ATTR:
+                return True
+        elif isinstance(stmt, ast.AnnAssign):
+            target = stmt.target
+            if isinstance(target, ast.Name) and target.id == HW_CLASSIFICATION_ATTR:
+                return True
+    return False
+
+
+def _inherited_hw_classification(
+    class_name: str,
+    own: dict[str, "HardwareClassification | None"],
+    bases: dict[str, list[str]],
+) -> "HardwareClassification | None":
+    """Resolve hw_classification through same-file base classes.
+
+    Upstream reads the attribute with ``getattr``, so a subclass that defines
+    test_* methods but inherits from a same-file test class is valid and must
+    not be flagged as missing.
+    """
+    seen: set[str] = set()
+    stack = list(bases.get(class_name, []))
+    while stack:
+        name = stack.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        inherited = own.get(name)
+        if inherited is not None:
+            return inherited
+        stack.extend(bases.get(name, []))
+    return None
+
+
 def check_file(filename: str) -> list[LintMessage]:
     if not _is_test_file(filename):
         return []
@@ -520,7 +547,7 @@ def check_file(filename: str) -> list[LintMessage]:
         with open(filename, encoding="utf-8") as f:
             source = f.read()
         tree = ast.parse(source, filename=filename)
-    except (OSError, SyntaxError) as e:
+    except (OSError, SyntaxError, UnicodeDecodeError) as e:
         return [
             error_msg(
                 name="[parse_error]",
@@ -531,11 +558,23 @@ def check_file(filename: str) -> list[LintMessage]:
         ]
 
     messages: list[LintMessage] = []
+    class_defs = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+    own_classification = {n.name: _get_hw_classification(n) for n in class_defs}
+    declared = {n.name: _declares_hw_classification(n) for n in class_defs}
+    bases = {
+        n.name: [b.id for b in n.bases if isinstance(b, ast.Name)]
+        for n in class_defs
+    }
+
     for node in tree.body:
         if not isinstance(node, ast.ClassDef) or not _is_test_class(node):
             continue
 
-        classification = _get_hw_classification(node)
+        classification = own_classification.get(node.name)
+        if classification is None and not declared.get(node.name, False):
+            classification = _inherited_hw_classification(
+                node.name, own_classification, bases
+            )
         if classification is None:
             messages.append(
                 error_msg(

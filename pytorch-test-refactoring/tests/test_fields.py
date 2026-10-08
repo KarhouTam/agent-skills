@@ -15,6 +15,7 @@ from flow import RefactorFlow
 from state import CoderTask, ReviewFindings
 from utils import (
     compute_applicable_rules,
+    compute_line_ranges,
     get_reference_dir,
     get_workspace,
     resolve_field,
@@ -121,3 +122,14 @@ def test_non_core_local_test_is_skipped():
     flow._phase_local_test()
     assert flow.state.test_sub_phase == "done"
     assert flow.state.local_test is None
+
+
+def test_compute_line_ranges_never_emits_zero_width_range():
+    """A tiny file has fewer lines than its size-derived coder count."""
+    assert compute_line_ranges(1, 2) == [(1, 1)]
+    assert compute_line_ranges(0, 2) == []
+
+    ranges = compute_line_ranges(3, 5)
+    assert all(start <= end for start, end in ranges)
+    assert ranges[0][0] == 1
+    assert ranges[-1][1] == 3

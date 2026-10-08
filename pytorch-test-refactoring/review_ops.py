@@ -26,7 +26,6 @@ from state import FlowSignal, PrReviewResult, ReviewOpsState
 from utils import PR_REVIEW_FLOW_STATE_FILE, get_pr_review_workspace
 
 WAVE_SIZE = 4
-BATCH_RESULT_FILE = "_review_batch_done.json"
 
 
 class ReviewOps:
@@ -223,6 +222,13 @@ class ReviewOps:
             reviewed = [
                 self.state.results[key] for key in sorted(self.state.results, key=int)
             ]
+            if not reviewed and not self.state.not_applicable:
+                # Every reviewer failed, or the batch was empty: a "0 reviewed"
+                # comment is noise, and leaving publish unrun keeps the PRs
+                # pending for the next batch.
+                self.state.phase = "done"
+                self.state.signal = FlowSignal.DONE
+                return
             published = review_queue.publish_batch(
                 workspace,
                 reviewed,

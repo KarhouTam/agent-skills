@@ -177,3 +177,11 @@ def test_harness_choices_derive_from_registry(monkeypatch):
         orchestrator.sys, "argv", ["orchestrator.py", "test.py", "--harness", "foo"]
     )
     assert orchestrator._parse_args().harness == "foo"
+
+
+def test_notes_use_real_newlines():
+    """Notes are rendered for a human; an escaped \\n would ship as literal text."""
+    for harness in (ClaudeHarness(), CodexHarness()):
+        for kind in ("refactor", "ci_debugger", "ingest"):
+            note = harness.note(kind, feed_file="f.json", feed_cmd="python x")
+            assert "\\n" not in note

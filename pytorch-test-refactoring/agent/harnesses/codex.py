@@ -32,7 +32,7 @@ class CodexHarness(Harness):
 
     # ── emission ──────────────────────────────────────────────
 
-    def _spawn_spec(self, task: AgentTask) -> dict[str, Any]:
+    def spawn(self, task: AgentTask) -> dict[str, Any]:
         agent_name = task.agent_name
         return {
             "method": "spawn",
@@ -46,9 +46,6 @@ class CodexHarness(Harness):
                 "timeout_ms": self._timeout_for(agent_name),
             },
         }
-
-    def spawn(self, task: AgentTask) -> dict[str, Any]:
-        return self._spawn_spec(task)
 
     def followup(
         self,

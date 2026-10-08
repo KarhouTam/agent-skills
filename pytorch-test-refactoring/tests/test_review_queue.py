@@ -363,3 +363,39 @@ def test_review_ops_subagent_waves(tmp_path, monkeypatch):
     assert sorted(published["reviewed"]) == [1000, 1001, 1002, 1003, 1004, 1005]
     ops.finalize()
     assert not (tmp_path / "agent_space" / "pr_reviews" / "flow_state.json").exists()
+
+
+def test_select_pending_keeps_head_oid(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        review_queue,
+        "gh_pr_info",
+        lambda n: {
+            "url": "https://github.com/pytorch/pytorch/pull/7",
+            "title": "t",
+            "author": "a",
+            "state": "OPEN",
+            "paths": ["test/test_ops.py"],
+            "head_oid": "deadbeef",
+        },
+    )
+    monkeypatch.setattr(
+        review_queue,
+        "load_pending",
+        lambda p=None: ["https://github.com/pytorch/pytorch/pull/7"],
+    )
+    monkeypatch.setattr(review_queue, "readmitted_urls", lambda *a, **k: [])
+
+    sel = review_queue.select_pending()
+    assert [item.head_oid for item in sel.review_queue] == ["deadbeef"]
+
+
+def test_verdict_of_does_not_trust_contradictory_all_clear():
+    blocker = {
+        "severity": "Blocker",
+        "category": "code-quality",
+        "file": "test/test_ops.py",
+        "line_number": 1,
+    }
+    result = PrReviewResult(pr_number=1, all_clear=True, findings=[blocker])
+    assert review_queue.verdict_of(result) == "changes_requested"

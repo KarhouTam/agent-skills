@@ -155,3 +155,71 @@ def test_local_test_resume_reemits_fix(tmp_path, monkeypatch):
     assert refactor.state.test_sub_phase == "fix"
     assert refactor.state.signal == FlowSignal.SEND_MESSAGE
     assert refactor.state.local_test is None
+
+
+def test_parse_junit_unexpected_success_is_warning_not_failure(tmp_path):
+    """unittest.expectedFailure that passes must not be relayed as a failure."""
+    xml = tmp_path / "report.xml"
+    xml.write_text(
+        """<?xml version="1.0"?>
+<testsuite name="x">
+  <testcase classname="test_x.TestFoo" name="test_xpass">
+    <failure message="Failed: Unexpected success">trace</failure>
+  </testcase>
+</testsuite>"""
+    )
+    counts, failures, whole = _parse_junit(xml, 0)
+    assert counts["unexpected_successes"] == 1
+    assert failures == []
+    assert whole == ""
+
+
+def test_classify_whole_run_detects_signals_and_stderr():
+    from scripts.local_test import _classify_whole_run
+
+    assert _classify_whole_run(-11, "") == "segfault"
+    assert _classify_whole_run(-9, "") == "oom"
+    assert _classify_whole_run(137, "Killed\n") == "oom"
+    assert _classify_whole_run(1, "ImportError: no module named x") == "import"
+
+
+def test_parse_junit_missing_report_uses_stderr(tmp_path):
+    counts, failures, whole = _parse_junit(tmp_path / "nope.xml", -11, "")
+    assert counts["total"] == 0
+    assert failures == []
+    assert whole == "segfault"
+
+
+def test_run_local_tests_resolves_relative_report_dir(tmp_path, monkeypatch):
+    """The child runs in repo_root, so the report path must be absolute."""
+    monkeypatch.chdir(tmp_path)
+    import scripts.local_test as lt
+
+    repo = tmp_path / "repo"
+    (repo / "torch").mkdir(parents=True)
+    (repo / "torch" / "__init__.py").write_text("")
+    test_file = repo / "test" / "test_x.py"
+    test_file.parent.mkdir()
+    test_file.write_text("")
+    (tmp_path / "out").mkdir()
+
+    captured = {}
+
+    def fake_run_once(py, test, xml_path, repo_root, timeout):
+        captured["xml"] = xml_path
+        xml_path.write_text(
+            '<?xml version="1.0"?><testsuite>'
+            '<testcase classname="c" name="test_a"/></testsuite>'
+        )
+        return 0, "", 0.0, False
+
+    monkeypatch.setattr(lt, "_find_repo_root", lambda path: repo)
+    monkeypatch.setattr(lt, "resolve_interpreter", lambda path, root: sys.executable)
+    monkeypatch.setattr(lt, "_probe_accelerator", lambda py, root: False)
+    monkeypatch.setattr(lt, "_run_once", fake_run_once)
+
+    result = lt.run_local_tests(str(test_file), Path("out"))
+
+    assert captured["xml"] == (tmp_path / "out" / "local_test_results.xml").resolve()
+    assert result.total == 1
+    assert result.passed == 1

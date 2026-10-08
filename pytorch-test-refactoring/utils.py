@@ -6,20 +6,16 @@ from pathlib import Path
 REFACTOR_WORKSPACE_ROOT = Path("agent_space/refactor")
 
 REFERENCE_ROOT = Path(__file__).resolve().parent / "reference"
-SUPPORTED_FIELDS = ("core", "distributed", "graph")
 NON_CORE_FIELDS = ("distributed", "graph")
 FIELD_TEST_LIST_FILE = "test_list.txt"
 
 ASSESSMENT_FILE = "assessment.json"
-ANALYST_REPORT_MD = "analyst_report.md"
 ANALYST_REPORT_JSON = "analyst_report.json"
 CODER_TASKS_FILE = "coder_tasks.json"
 VERIFICATION_FILE = "verification.json"
 REVIEW_FINDINGS_FILE = "review_findings.json"
 LOCAL_TEST_FILE = "local_test.json"
 FINAL_SUMMARY_FILE = "final_summary.md"
-AUDIT_LOG = "audit.jsonl"
-STATUS_FILE = "status.json"
 
 COMMON_METHODS_INVOCATIONS = "torch/testing/_internal/common_methods_invocations.py"
 DYNAMO_SKIPS_DIR = "test/dynamo_skips"
@@ -45,33 +41,6 @@ REFACTOR_RULES: dict[str, str] = {
     "remove stale TEST_CUDA/TEST_MPS/TEST_XPU/onlyOn imports, "
     "update DecorateInfo references in common_methods_invocations.py, "
     "rename stale entries in test/dynamo_skips/ and test/dynamo_expected_failures/",
-}
-
-RULE_ORDER = ["cpu_only", "device_agnostic", "device_specific", "cleanup"]
-
-# HardwareClassification mapping — strategy → (hw_classification_value, import_line)
-# Maps refactoring strategy + optional device to the correct HardwareClassification enum member.
-# Reference: torch/testing/_internal/common_utils.py
-HW_CLASSIFICATION_IMPORT = (
-    "from torch.testing._internal.common_utils import HardwareClassification"
-)
-HW_CLASSIFICATION_MAP: dict[str, str] = {
-    # CPU-only — no device dependency
-    "GENERIC": "HardwareClassification.GENERIC",  # plain TestCase or @instantiate_parametrized_tests
-    "CPU": "HardwareClassification.CPU",  # instantiate_device_type_tests(only_for="cpu")
-    # device-agnostic (any accelerator)
-    "ACCELERATOR": "HardwareClassification.ACCELERATOR",  # instantiate_device_type_tests(except_for=...)
-    # device-specific
-    "CUDA": "HardwareClassification.CUDA",  # Category C CUDA APIs
-    "MPS": "HardwareClassification.MPS",  # Category C MPS APIs
-    "XPU": "HardwareClassification.XPU",  # Category C XPU APIs
-}
-
-# Mapping from strategy assignment to recommended hw_classification key
-STRATEGY_TO_HW_CLASSIFICATION: dict[str, str] = {
-    "cpu_only": "GENERIC",
-    "device_agnostic": "ACCELERATOR",
-    "device_specific": "CUDA",  # default for device-specific; overridden per device (CUDA/MPS/XPU)
 }
 
 
@@ -183,7 +152,6 @@ def get_workspace(file_name: str, field: str = "core") -> Path:
 # ── PR feedback ingest sidecar ──────────────────────────────────────
 
 INGEST_WORKSPACE_ROOT = Path("agent_space/ingest")
-INGEST_STATE_FILE = "state.json"
 INGEST_FLOW_STATE_FILE = "flow_state.json"
 INGEST_FINDINGS_DIR = "findings"
 INGEST_RAW_DIR = "raw"
@@ -222,6 +190,17 @@ def run_git(repo: Path | str, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
         cwd=str(repo),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def run_gh(*args: str) -> str:
+    """Run a gh CLI command and return stdout (raises on non-zero exit)."""
+    result = subprocess.run(
+        ["gh", *args],
         check=True,
         capture_output=True,
         text=True,
@@ -278,6 +257,12 @@ def compute_line_ranges(
     When class_layout is provided, boundaries are adjusted to avoid
     splitting test classes across coder assignments.
     """
+    if file_size <= 0:
+        return []
+
+    # A size-derived coder count can exceed the number of lines in a tiny
+    # file; clamp it so no zero-width (start > end) range is emitted.
+    coder_count = max(1, min(coder_count, file_size))
     chunk_size = file_size // coder_count
     ranges = []
     for i in range(coder_count):

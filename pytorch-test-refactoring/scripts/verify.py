@@ -12,7 +12,6 @@ from utils import (
     DYNAMO_EXPECTED_FAILURES_DIR,
     get_workspace,
     VERIFICATION_FILE,
-    ASSESSMENT_FILE,
 )
 from state import VerificationResult, VerificationCheck
 from scripts.linter import check_file, LintSeverity
@@ -27,28 +26,27 @@ def verify(
     """Run all verification checks against the refactored file."""
     checks: list[VerificationCheck] = []
 
-    # Derive workspace and load assessment for checks that need them
+    # Workspace is needed by the checks that read workspace artifacts.
     file_name = Path(file_path).stem
     workspace = get_workspace(file_name, field)
-    assessment = _load_assessment(workspace)
 
     if field == "core":
         checks.append(_check_syntax(file_path))
         checks.append(_check_test_count(file_path, original_test_count))
         checks.append(_check_class_structure(file_path, original_classes))
         checks.append(_check_decorateinfo(file_path, original_classes))
-        checks.append(_check_external_refs(file_path, original_classes, workspace))
-        checks.append(_check_stale_patterns(file_path, workspace, assessment))
+        checks.append(_check_external_refs(file_path, original_classes))
+        checks.append(_check_stale_patterns(file_path))
         checks.append(_check_onlycuda_residual(file_path))
         checks.append(_check_imports(file_path))
 
         # New Phase-5 checks
         checks.append(_check_dtype_integrity(file_path))
         checks.append(_check_accelerator_safety(file_path))
-        checks.append(_check_coverage_preservation(file_path, workspace))
+        checks.append(_check_coverage_preservation(file_path))
         checks.append(_check_review_mechanics(file_path))
         checks.append(_check_class_split(file_path, original_classes, workspace))
-        checks.append(_check_skipifmps_coverage(file_path, workspace))
+        checks.append(_check_skipifmps_coverage(file_path))
         checks.append(_check_lint(file_path))
     else:
         # Non-core fields use only the field-agnostic safety net until a
@@ -79,17 +77,6 @@ def verify(
     )
 
     return result
-
-
-def _load_assessment(workspace: Path) -> dict | None:
-    """Load assessment.json from the workspace if it exists."""
-    assessment_path = workspace / ASSESSMENT_FILE
-    if assessment_path.exists():
-        try:
-            return json.loads(assessment_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            return None
-    return None
 
 
 def _check_syntax(file_path: str) -> VerificationCheck:
@@ -167,24 +154,25 @@ def _check_test_count(file_path: str, original: int) -> VerificationCheck:
     )
 
 
+def _class_names(content: str) -> list[str]:
+    """Return the names of TestCase-ish class definitions in `content`."""
+    names: list[str] = []
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if not stripped.startswith("class "):
+            continue
+        name = stripped.split("class ")[1].split("(")[0].split(":")[0]
+        if "TestCase" in stripped or name.startswith("Test"):
+            names.append(name)
+    return names
+
+
 def _check_class_structure(
     file_path: str, original_classes: list[str]
 ) -> VerificationCheck:
     """Verify no classes were lost; check for expected naming patterns."""
     content = Path(file_path).read_text()
-    current_classes = [
-        l.strip().split("class ")[1].split("(")[0].split(":")[0]
-        for l in content.split("\n")
-        if l.strip().startswith("class ")
-        and (
-            "TestCase" in l
-            or l.strip()
-            .split("class ")[1]
-            .split("(")[0]
-            .split(":")[0]
-            .startswith("Test")
-        )
-    ]
+    current_classes = _class_names(content)
     cmd = f"grep '^class ' {file_path}"
 
     unmatched = []
@@ -225,19 +213,7 @@ def _check_decorateinfo(
         )
 
     file_content = Path(file_path).read_text()
-    current_classes = [
-        l.strip().split("class ")[1].split("(")[0].split(":")[0]
-        for l in file_content.split("\n")
-        if l.strip().startswith("class ")
-        and (
-            "TestCase" in l
-            or l.strip()
-            .split("class ")[1]
-            .split("(")[0]
-            .split(":")[0]
-            .startswith("Test")
-        )
-    ]
+    current_classes = _class_names(file_content)
 
     # Collect test method names from the refactored file for renamed classes
     renamed_classes = {orig for orig in original_classes if orig not in current_classes}
@@ -286,7 +262,7 @@ def _check_decorateinfo(
 
 
 def _check_external_refs(
-    file_path: str, original_classes: list[str], workspace: Path | None = None
+    file_path: str, original_classes: list[str]
 ) -> VerificationCheck:
     """Check dynamo_skips/ and dynamo_expected_failures/ for stale class references.
 
@@ -300,19 +276,7 @@ def _check_external_refs(
     flagged as a mismatch (M2).
     """
     file_content = Path(file_path).read_text()
-    current_classes = [
-        l.strip().split("class ")[1].split("(")[0].split(":")[0]
-        for l in file_content.split("\n")
-        if l.strip().startswith("class ")
-        and (
-            "TestCase" in l
-            or l.strip()
-            .split("class ")[1]
-            .split("(")[0]
-            .split(":")[0]
-            .startswith("Test")
-        )
-    ]
+    current_classes = _class_names(file_content)
 
     renamed_classes = [orig for orig in original_classes if orig not in current_classes]
 
@@ -332,18 +296,17 @@ def _check_external_refs(
         if not dir_path.exists() or not dir_path.is_dir():
             continue
         for orig in renamed_classes:
-            # Use prefix without trailing dot to catch device-variant
-            # filenames created by instantiate_device_type_tests.
-            # E.g. TestShapeOps renames to TestShapeOpsDevice, and
-            # file "TestShapeOpsCUDA.test_foo" must be renamed to
-            # "TestShapeOpsDeviceCUDA.test_foo". A prefix of
-            # "TestShapeOps." would miss it because the dot comes
-            # AFTER "CUDA", not after "TestShapeOps".
-            prefix = f"{orig}"
+            # A renamed class keeps the original name as a prefix, because the
+            # convention appends a suffix (TestShapeOps -> TestShapeOpsDevice).
+            # A file that already starts with the NEW name is migrated, not
+            # stale; only files still naming the old class are flagged.
+            new_names = [c for c in current_classes if c.startswith(orig)]
             matches = sorted(
                 f.name
                 for f in dir_path.iterdir()
-                if f.is_file() and f.name.startswith(prefix)
+                if f.is_file()
+                and f.name.startswith(orig)
+                and not any(f.name.startswith(new_name) for new_name in new_names)
             )
             for m in matches:
                 stale.append(f"{label}/{m}")
@@ -421,11 +384,7 @@ def _check_external_refs(
     )
 
 
-def _check_stale_patterns(
-    file_path: str,
-    workspace: Path | None = None,
-    assessment: dict | None = None,
-) -> VerificationCheck:
+def _check_stale_patterns(file_path: str) -> VerificationCheck:
     """Scan for remaining device-specific patterns.
 
     Uses word boundaries and context to avoid false positives:
@@ -517,7 +476,9 @@ def _check_stale_patterns(
             stale_counts[key] = stale_counts.get(key, 0) + 1
 
         # ── m2: Module-level device_type global variable assignments ──
-        if re.match(r"device_type\s*=", stripped) and not stripped.startswith("#"):
+        # Match the raw line so indented local variables are not flagged, and
+        # reject `==` comparisons.
+        if re.match(r"device_type\s*=(?!=)", line):
             key = "Module-level device_type global variable (should use local variable)"
             stale_counts[key] = stale_counts.get(key, 0) + 1
 
@@ -617,8 +578,7 @@ def _check_dtype_integrity(file_path: str) -> VerificationCheck:
                         and not k_stripped.startswith("@")
                         and not k_stripped.startswith("#")
                     ):
-                        if k_stripped:
-                            break
+                        break
                     body_lines.append(lines[k])
 
                 body = "\n".join(body_lines)
@@ -907,6 +867,11 @@ def _review_mechanics_diff(file_path: str) -> str | None:
         return None
     if proc.returncode != 0:
         return None
+    if not proc.stdout and _commited_file_text(file_path) is None:
+        # An untracked file also yields an empty `git diff HEAD`; without this
+        # the caller would scan zero lines and pass vacuously instead of
+        # falling back to the whole file.
+        return None
     return proc.stdout
 
 
@@ -965,7 +930,7 @@ def _check_review_mechanics(file_path: str) -> VerificationCheck:
 _BLACKLIST_SKIP_RE = re.compile(r"@skip(If)?(MPS|XPU|CUDA|HPU|MTIA|XLA|Meta)\b")
 
 
-def _check_coverage_preservation(file_path: str, workspace: Path) -> VerificationCheck:
+def _check_coverage_preservation(file_path: str) -> VerificationCheck:
     """Compare per-method device decorator sets between original and refactored file.
 
     Uses 'git show HEAD:<path>' to retrieve the original committed version.
@@ -1099,13 +1064,11 @@ def _find_class_end(lines: list[str], class_line: int) -> int:
         if not stripped or stripped.startswith("#"):
             continue
         line_indent = len(lines[i]) - len(lines[i].lstrip())
-        # A new class definition, function, or top-level code at same/lesser indent
-        if line_indent <= class_indent and (
-            stripped.startswith("class ")
-            or stripped.startswith("def ")
-            or stripped.startswith("if ")
-            or stripped.startswith("@")
-        ):
+        # Any non-blank, non-comment line at the class's indentation or less
+        # ends the body -- not just class/def/if/@. Otherwise a module-level
+        # statement after a device-specific class is treated as part of it and
+        # its patterns are skipped.
+        if line_indent <= class_indent:
             return i
     return len(lines)
 
@@ -1193,9 +1156,11 @@ def _check_class_split(
             if cls_name == class_name:
                 continue
 
-            # Check if any test that should have been moved is still here
+            # Check if any test that should have been moved is still here.
+            # Match the full method name, so `test_x` does not match
+            # `test_x_extended`.
             for test_name in tests_to_move:
-                if f"def {test_name}" in class_body:
+                if re.search(rf"def {re.escape(test_name)}\s*\(", class_body):
                     issues.append(
                         f"'{test_name}' still in '{cls_name}' "
                         f"(should be in '{class_name}')"
@@ -1291,9 +1256,7 @@ def _is_class_instantiated_for_mps(content: str, method_name: str) -> bool:
     return "allow_mps=True" in call_str
 
 
-def _check_skipifmps_coverage(
-    file_path: str, workspace: Path | None = None
-) -> VerificationCheck:
+def _check_skipifmps_coverage(file_path: str) -> VerificationCheck:
     """Verify @skipIfMPS is present on tests newly exposed to MPS.
 
     When @onlyCPU is removed or @onlyCUDA/@onlyOn is enlarged, the test
@@ -1319,14 +1282,25 @@ def _check_skipifmps_coverage(
         orig_decos = set(orig_methods[method])
         curr_decos = set(curr_methods[method])
 
-        # Test had @onlyCPU originally (was CPU-only, never on MPS)
-        had_onlycpu = any(d.startswith("@onlyCPU") for d in orig_decos)
+        # Test was pinned to CPU or to CUDA originally; if the restriction is
+        # gone now the test is newly exposed to MPS (when the class has an MPS
+        # variant), so @skipIfMPS becomes mandatory.
+        had_cpu_only = any(d.startswith("@onlyCPU") for d in orig_decos)
+        had_cuda_only = any(
+            d.startswith("@onlyCUDA") or d.startswith("@onlyOn") for d in orig_decos
+        )
         # Test already had skipIfMPS
         had_skipmps = any("@skipIfMPS" in d for d in orig_decos)
 
-        # If test had @onlyCPU removed (now runs on MPS for first time)
-        has_onlycpu_now = any(d.startswith("@onlyCPU") for d in curr_decos)
-        if had_onlycpu and not has_onlycpu_now and not had_skipmps:
+        has_cpu_only = any(d.startswith("@onlyCPU") for d in curr_decos)
+        has_cuda_only = any(
+            d.startswith("@onlyCUDA") or d.startswith("@onlyOn") for d in curr_decos
+        )
+        broadened = (had_cpu_only and not has_cpu_only) or (
+            had_cuda_only and not has_cuda_only
+        )
+
+        if broadened and not had_skipmps:
             # Check if @skipIfMPS was added
             has_skipmps_now = any("@skipIfMPS" in d for d in curr_decos)
             has_dtypesifmps = any("@dtypesIfMPS" in d for d in curr_decos)
@@ -1384,10 +1358,18 @@ def _check_imports(file_path: str) -> VerificationCheck:
     alive — it is flagged by ``_check_onlycuda_residual``.
     """
     content = Path(file_path).read_text()
-    findings = [imp for imp in _STALE_IMPORTS if imp in content]
+    # Match whole identifiers on code (not comments): a mention in a comment,
+    # or an identifier such as `test_onlyOnce`, is not a stale import.
+    findings: list[str] = []
+    for imp in _STALE_IMPORTS:
+        for line in content.splitlines():
+            code = line.split("#", 1)[0]
+            if re.search(rf"\b{re.escape(imp)}\b", code):
+                findings.append(imp)
+                break
     # Also detect module-level stale symbol assignments
     for sym in _STALE_SYMBOLS:
-        if re.search(rf"^{sym}\s*=", content, re.MULTILINE):
+        if re.search(rf"^{sym}\s*=(?!=)", content, re.MULTILINE):
             findings.append(f"{sym} (module-level variable)")
 
     # Exempt onlyCUDA only when it is actively used as a decorator inside an

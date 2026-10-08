@@ -175,8 +175,9 @@ class RefactorFlow:
         """Persist transient state-machine fields so the orchestrator can
         resume across process boundaries.
 
-        Saves: current_phase, rule_index, rule_sub_phase, rule_retry,
-        retry_count, and signal.
+        Saves the position the next invocation must re-enter: phase and
+        sub-phases, per-rule/per-round retry counters, the pending signal,
+        agent IDs, local-test state, and lint-gate state.
         """
         ws = self.state.workspace
         if ws is None:
@@ -193,6 +194,8 @@ class RefactorFlow:
             "test_sub_phase": self.state.test_sub_phase,
             "test_retry_count": self.state.test_retry_count,
             "deferred_failures": [f.model_dump() for f in self.state.deferred_failures],
+            "lint_gate_pending": self.state.lint_gate_pending,
+            "lint_retry_count": self.state.lint_retry_count,
         }
         try:
             (ws / self._FLOW_STATE_FILE).write_text(
@@ -238,6 +241,21 @@ class RefactorFlow:
             self.state.deferred_failures = [
                 LocalTestFailure(**f) for f in data.get("deferred_failures", [])
             ]
+        # The signal must survive a process boundary: the flow re-enters a
+        # pending fix (review or lint gate) only when it knows one is in
+        # flight, and _run_phases guards on (phase == "fix", signal ==
+        # RELAY_FINDINGS).  Without this the guard never fires on resume and
+        # the flow re-runs an already-completed review instead of accepting
+        # the coder's fix.
+        if self.state.signal == FlowSignal.DONE:
+            try:
+                self.state.signal = FlowSignal(data.get("signal", "done"))
+            except ValueError:
+                self.state.signal = FlowSignal.DONE
+        if not self.state.lint_gate_pending:
+            self.state.lint_gate_pending = data.get("lint_gate_pending", False)
+        if self.state.lint_retry_count == 0:
+            self.state.lint_retry_count = data.get("lint_retry_count", 0)
 
     # ── End flow state persistence ─────────────────────────────────
 
@@ -265,6 +283,7 @@ class RefactorFlow:
                     self.state.file_size = data.get("file_size", 0)
                     self.state.coder_count = data.get("coder_count", 0)
                     self.state.total_test_count = data.get("total_test_count", 0)
+                    self.state.git_dirty = data.get("git_dirty", False)
                     self.state.line_ranges = [
                         BoundedRange(**r) for r in data.get("line_ranges", [])
                     ]
@@ -333,17 +352,13 @@ class RefactorFlow:
     DIFF_SIZE_WARN_THRESHOLD = 500
 
     @staticmethod
-    def _estimate_diff_size(file_size: int, num_rules: int) -> int:
-        """Rough heuristic for total diff size of a refactoring.
+    def _estimate_diff_size(file_size: int) -> int:
+        """Rough heuristic for the refactoring's diff size (~30% of the file).
 
-        Estimates lines changed as ~30% of the file, distributed across
-        applicable rules.  This is a ballpark figure — not a precise
-        diff prediction.
+        A ballpark figure for the non-blocking large-diff warning — not a
+        precise diff prediction.
         """
-        if num_rules < 1:
-            return 0
-        lines_per_rule = file_size / num_rules * 0.3
-        return int(num_rules * lines_per_rule)
+        return int(file_size * 0.3)
 
     def _run_phases(self):
         # While a fix is being relayed to the coder (lint gate or review fix),
@@ -366,10 +381,8 @@ class RefactorFlow:
                 file_size=self.state.file_size,
                 coder_count=self.state.coder_count,
                 class_count=len(self.state.class_layout),
-                total_test_count=sum(c.test_count for c in self.state.class_layout),
-                git_dirty=self.state.class_layout[0].test_count > 0
-                if self.state.class_layout
-                else False,
+                total_test_count=self.state.total_test_count,
+                git_dirty=self.state.git_dirty,
             )
 
         # Phase 2: Analyze (spawn analyst)
@@ -400,7 +413,7 @@ class RefactorFlow:
 
             # Non-blocking PR scope warning
             num_rules = len(self.state.coder_tasks or [])
-            estimated = self._estimate_diff_size(self.state.file_size, num_rules)
+            estimated = self._estimate_diff_size(self.state.file_size)
             if estimated > self.DIFF_SIZE_WARN_THRESHOLD:
                 self.log.warning(
                     "distribute",
@@ -649,6 +662,7 @@ class RefactorFlow:
         """Called after the checker completes."""
         self._validate_phase("review", self.state.current_phase, "feed_review_findings")
         self.state.review_findings = findings
+        self._persist_review_findings()
         if self.log:
             self.log.agent_completed(
                 "review",
@@ -704,6 +718,20 @@ class RefactorFlow:
         if self.log:
             self.log.fix_round(self.state.retry_count, passed)
         if passed:
+            # The findings that triggered this fix round are now addressed and
+            # deterministic verification is clean. Record the review as resolved
+            # so the final summary does not report stale, already-fixed issues.
+            findings = self.state.review_findings
+            if findings is not None and not findings.all_clear:
+                self.state.review_findings = ReviewFindings(
+                    all_clear=True,
+                    findings=findings.findings,
+                    summary=(
+                        f"{len(findings.findings)} finding(s) from the previous "
+                        "review were fixed; verification passed."
+                    ),
+                )
+                self._persist_review_findings()
             self.state.signal = FlowSignal.DONE
         elif self.state.retry_count < self.MAX_RETRIES:
             self._phase_review()
@@ -783,6 +811,7 @@ class RefactorFlow:
     def _enter_lint_fix(self, lint_errors) -> None:
         """Enter the fix phase with findings synthesized from lint errors."""
         self.state.review_findings = self._synthesize_lint_findings(lint_errors)
+        self._persist_review_findings()
         self.state.current_phase = "fix"
         self.state.lint_gate_pending = True
         self.state.signal = FlowSignal.RELAY_FINDINGS
@@ -823,6 +852,7 @@ class RefactorFlow:
         self.state.file_size = result.file_size
         self.state.coder_count = result.coder_count
         self.state.total_test_count = result.total_test_count
+        self.state.git_dirty = result.git_dirty
         self.state.line_ranges = result.line_ranges
         self.state.class_layout = result.class_layout
         self.state.signal = FlowSignal.DONE
@@ -971,6 +1001,7 @@ class RefactorFlow:
         self.state.review_findings = (
             None  # clear prior findings so guard re-opens on retry
         )
+        self._clear_review_findings_file()
         self.state.signal = FlowSignal.SPAWN_SINGLE
 
     def _phase_local_test(self):
@@ -1020,6 +1051,30 @@ class RefactorFlow:
 
         self.state.test_sub_phase = "fix"
         self.state.signal = FlowSignal.SEND_MESSAGE
+
+    def _persist_review_findings(self):
+        """Persist the current review outcome so a resumed process does not
+        re-run the mandatory final review (and can re-emit a pending fix)."""
+        ws = self.state.workspace
+        if ws is None or self.state.review_findings is None:
+            return
+        try:
+            (ws / REVIEW_FINDINGS_FILE).write_text(
+                self.state.review_findings.model_dump_json(indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _clear_review_findings_file(self):
+        """Drop the persisted review outcome when the flow re-opens review."""
+        ws = self.state.workspace
+        if ws is None:
+            return
+        try:
+            (ws / REVIEW_FINDINGS_FILE).unlink(missing_ok=True)
+        except Exception:
+            pass
 
     def _persist_local_test(self):
         if self.state.workspace is None or self.state.local_test is None:

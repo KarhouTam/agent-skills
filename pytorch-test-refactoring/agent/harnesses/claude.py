@@ -98,21 +98,21 @@ class ClaudeHarness(Harness):
             )
         if kind == "ci_debugger":
             return (
-                "1. Read the debugger agent's output.\\n"
-                "2. Extract key result into JSON (see ci-automation SKILL.md).\\n"
+                "1. Read the debugger agent's output.\n"
+                "2. Extract key result into JSON (see ci-automation SKILL.md).\n"
                 '3. Include "agent_id" (from the Agent tool result) and '
-                '"agent_name": "debugger" in the JSON.\\n'
+                '"agent_name": "debugger" in the JSON.\n'
                 "4. Save the result JSON to a file at "
-                f"`{feed_file}` (use the Write tool), then run:\\n"
-                f"   {feed_cmd}\\n"
+                f"`{feed_file}` (use the Write tool), then run:\n"
+                f"   {feed_cmd}\n"
                 "   (Feed via --feed-file, not stdin, so the command "
                 "matches a Bash allow rule in Auto/restricted modes.)"
             )
         if kind == "ingest":
             return (
-                "1. Read the agent's output.\\n"
+                "1. Read the agent's output.\n"
                 "2. Save the result JSON to a file at "
-                f"`{feed_file}` (Write tool), then run:\\n"
+                f"`{feed_file}` (Write tool), then run:\n"
                 f"   {feed_cmd}"
             )
         return ""

@@ -1,5 +1,89 @@
 # Changelog
 
+## 2026-10-08 — 缺陷修复：跨进程续跑、分页丢失与评审门禁
+
+对状态机、侧车与确定性脚本做了一轮通读，修复以下缺陷（均有回归测试覆盖）。
+
+### 跨进程续跑（`flow.py`、`state.py`）
+
+- `flow_state.json` 补齐 `signal` / `lint_gate_pending` / `lint_retry_count`。此前恢复时
+  `signal` 恒为 `done`，`_run_phases` 的 `(phase=="fix", RELAY_FINDINGS)` 守卫不生效：
+  新进程会重新拉起已完成的 Phase 6 评审，使 `--feed coder` 落在 `review` 阶段报错，
+  评审修复轮次实际无法跨进程完成；lint 门禁的重试计数也被重置，3 次上限形同虚设。
+- `review_findings.json` 现在会写入（`feed_review_findings` / `_enter_lint_fix`），
+  `_phase_review()` 清空时删除。此前该文件只读不写，恢复时会重复触发强制的最终评审。
+- 修复轮 verification 通过后，把上一轮 findings 标记为已解决（`all_clear=True`），
+  `final_summary.md` 不再把已修复的问题列为未决。
+- Phase 1 审计日志的 `git_dirty` 此前取自 `class_layout[0].test_count > 0`（无意义）；
+  现在 `assess.py` 的结果写入 `RefactorState.git_dirty` 并如实记录。
+
+### 侧车与确定性 CI（`orchestrator.py`、`ingest_ops.py`、`review_ops.py`、`scripts/*`）
+
+- `ingest._gh_json` / `ci.get_bot_comment` 补 `--paginate --slurp` 并展平分页。
+  GitHub 评论接口按最旧优先返回，此前只读第一页（30 条），最新评论与机器人提示不可见。
+- `finalize_harvest` 游标改为「本批最新评论的 `created_at`」而非 finalize 时刻，
+  `filter_new` 改为严格小于；修复 triage/draft 运行期间到达的评论被永久跳过的问题。
+- `write_findings_md` 按 PR 分组落文件；此前多 PR 批次全部合并进第一个 PR 的文件。
+- `ci.parse_bot_comment` 的 "broken on trunk" 正则要求动词必填：不再把 `is` 当作检查名，
+  也消除触发的 `None.strip()` 崩溃（该异常会一路炸掉 CI cron）。
+- `ci.classify_ci_state` 将非 `success/neutral/skipped` 的 completed 结论一律判失败；
+  此前 `startup_failure`/`action_required`/`stale`/`""` 被当作全绿。
+- `review_queue.select_pending` 保留 `head_oid`（此前丢失导致结论为 `需修改` 的 PR
+  每天被重复评审）；`readmitted_urls` 传归档文件而非目录；`verdict_of` 对自相矛盾的
+  `all_clear=True + Blocker` 判 `需修改`；全员评审失败时不再发布空评论。
+- `IngestOps.feed_triage_result` 支持 prompt 允许的 `comment_id: list[int]`，
+  此前抛 `TypeError: unhashable type: 'list'`。
+
+### 确定性检查（`scripts/verify.py`、`scripts/linter.py`、`scripts/local_test.py`、`utils.py`）
+
+- `_check_external_refs`：已按后缀重命名的新文件不再被判为 stale（此前该检查无解）。
+- `_review_mechanics`：未跟踪文件的空 diff 现在回退整文件扫描，不再空过。
+- `_check_skipifmps_coverage`：`@onlyCUDA`/`@onlyOn` → `@onlyAccelerator` 的放开
+  同样要求 `@skipIfMPS`（此前只处理 `@onlyCPU`）。
+- `_check_stale_patterns` / `_check_imports`：`device_type=` 只匹配模块级赋值且排除 `==`；
+  导入审计按整词并忽略注释（`# … TEST_CUDA`、`test_onlyOnce` 不再误报）。
+- `_find_class_end` 按缩进在类后的模块级语句处结束；`_check_class_split` 按整名匹配
+  测试方法（`test_x` 不再命中 `test_x_extended`）。
+- `local_test.run_local_tests` 把 JUnit 报告路径 `resolve()` 为绝对路径：子进程以
+  `repo_root` 为 cwd，此前写入与读取目录不一致，导致结果恒为空、整轮被判
+  environmental 并跳过 coder 修复循环。
+- `local_test._classify_whole_run` 接收 stderr 并识别信号退出码（SIGSEGV→segfault，
+  SIGKILL→oom）；`_parse_junit` 把 `unittest.expectedFailure` 通过（"Unexpected success"）
+  记为 unexpected-success 而非失败。
+- `linter.check_file` 捕获 `UnicodeDecodeError`（返回 parse_error 而非崩溃）；
+  `hw_classification` 可经同文件基类继承（与上游 `getattr` 语义一致）。
+- `utils.compute_line_ranges`：文件行数少于 coder 数时钳制 coder 数，不再产生
+  `(start > end)` 的零宽区间。
+
+### 简化与去重（源码净减约 300 行）
+
+- **`scripts/ci.py` 删除死代码**：`create_branch`/`commit_changes`/`detect_fork_remote`/
+  `push_branch`/`create_draft_pr`/`mark_pr_ready`/`leave_pr_comment` 无人调用——PR 的
+  创建与推送本就由用户手动完成（模块 docstring 早已如此声明），代码与文档相反；
+  一并删除用错端点且无人调用的 `get_check_run_log`，以及仅服务于上述函数的 `_run_git`。
+- **`_run_gh` 三处重复合并**为 `utils.run_gh`（`ci.py`/`ingest.py`/`review_queue.py`
+  改为 `from utils import run_gh as _run_gh`；测试仍可 monkeypatch 各模块的同名属性）。
+  `scripts/ingest.py` 自带的 `CLAUDE_BOT_LOGIN` 副本改为直接 import `utils` 的常量。
+- **`utils.py` 删除未被引用的常量**：`SUPPORTED_FIELDS`、`ANALYST_REPORT_MD`、`AUDIT_LOG`、
+  `STATUS_FILE`、`RULE_ORDER`、`INGEST_STATE_FILE`、`HW_CLASSIFICATION_IMPORT`、
+  `HW_CLASSIFICATION_MAP`、`STRATEGY_TO_HW_CLASSIFICATION`；`linter.REPO_ROOT`、
+  `review_ops.BATCH_RESULT_FILE` 同理。
+- **`state.py` 删除死字段/死模型**：`ClassInfo.base_class`、`CICheckRun.log_snippet`
+  （从未赋值）、`CIFailure.debugger_verdict`/`debugger_rationale`/`fix_applied`、
+  未被引用的 `CIDebuggerResult`、`FeedbackComment.pr_title`。
+- **`scripts/verify.py`**：抽出 `_class_names()` 取代三处重复的类名解析；删除四个检查
+  函数中从未使用的 `workspace`/`assessment` 参数与随之无用的 `_load_assessment`。
+- **`scripts/linter.py`**：`_check_must_be_instantiated`/`_check_has_device_param` 各有
+  一份同名重复定义（ACCELERATOR 与设备特定各注册一次），合并为一次注册两个分组。
+- **`flow.py`**：`_estimate_diff_size` 的 `num_rules` 参数在公式中约掉（结果与规则数
+  无关），删除该参数与误导性的"按规则分摊"docstring。
+- **`agent/harnesses/codex.py`**：`spawn` 包装器与 `_spawn_spec` 合并为一个方法。
+
+### 测试
+
+新增 `tests/test_ci.py`、`tests/test_linter.py`、`tests/test_verify.py`，并在既有
+测试中补充回归用例；全套 87 个测试通过。
+
 ## 2026-09-30 — 评审标准统一：侧车评审对齐 pr-review 通用标准
 
 将 `--review-queue` 与 `--ingest-feedback` 两侧车的评审标准，从「仅解耦检查清单」

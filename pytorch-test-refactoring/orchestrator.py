@@ -894,18 +894,21 @@ def _emit_ingest_action(ops: "IngestOps", harness) -> None:
         )
     else:
         ws = get_ingest_workspace()
-        findings_path = ""
-        if sm.pending_findings:
-            findings_path = str(
-                ws / "findings" / f"PR-{sm.pending_findings[0].pr_number}.md"
-            )
+        findings_paths = sorted(
+            {
+                str(ws / "findings" / f"PR-{f.pr_number}.md")
+                for f in sm.pending_findings
+            }
+        )
+        findings_path = findings_paths[0] if findings_paths else ""
         _write_json(
             {
                 "status": "done",
                 "phase": "ingest_done",
                 "findings_path": findings_path,
+                "findings_paths": findings_paths,
                 "next_steps": (
-                    "Review the findings file, mark findings Approved/Rejected, "
+                    "Review the findings file(s), mark findings Approved/Rejected, "
                     "then run: python orchestrator.py --apply-ingest <findings_file>"
                 ),
             }
