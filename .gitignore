@@ -19,4 +19,6 @@
 !/teaching-technical-topics/
 !/triaging-pytorch-issues/
 /triaging-pytorch-issues/target.md
+# Runtime reports land here only when no pytorch/pytorch checkout is reachable.
+/triaging-pytorch-issues/pytorch-triage-*.md
 !/triaging-vllm-issues/
