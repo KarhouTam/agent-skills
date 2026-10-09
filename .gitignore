@@ -17,4 +17,6 @@
 !/pytorch-test-refactoring/
 !/tavily-web-access/
 !/teaching-technical-topics/
+!/triaging-pytorch-issues/
+/triaging-pytorch-issues/target.md
 !/triaging-vllm-issues/

@@ -12,6 +12,7 @@ Personal skill collection, also some useful skills from public repos.
   - `pytorch-test-refactoring`
   - `tavily-web-access`
   - `teaching-technical-topics`
+  - `triaging-pytorch-issues`
   - `triaging-vllm-issues`.
 - **Public skills** are fetched from upstream repos at pinned commits and are
   deliberately untracked. The manifest is [skills.json](skills.json).

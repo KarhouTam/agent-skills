@@ -1,0 +1,3 @@
+interface:
+  display_name: "Triaging PyTorch Issues"
+  short_description: "Find PyTorch issues this machine can verify"
