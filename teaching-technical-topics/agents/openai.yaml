@@ -1,3 +1,6 @@
 interface:
   display_name: "Teaching Technical Topics"
   short_description: "Teach topics in Chinese with persistent memory"
+policy:
+  allow_implicit_invocation: false
+
