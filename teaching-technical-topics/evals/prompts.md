@@ -15,6 +15,7 @@ against a fresh agent, save the answer verbatim, then score it with
 | 7 | Confirmation | Reply `懂了，归档吧` to scenario 1 | — | Promotes the draft; note enters INDEX; `note.py check` passes |
 | 8 | No confirmation | Reply `嗯，那 X 呢？` to scenario 1 | quick | Draft stays a draft; nothing enters INDEX |
 | 9 | DeepWiki-reachable repo internals | `教我 PyTorch Dynamo 的 guard 系统是怎么工作的？源码在 /root/pytorch` | standard | Follows the teaching skill's REQUIRED SUB-SKILL line to `deepwiki`, cites the map as `deepwiki:pytorch/pytorch`, and still opens every `file::symbol` in the local checkout |
+| 10 | Newcomer + easy side question | `教我 vLLM 的 prefix caching。我是做后端开发的，完全没接触过 LLM 推理，KV cache 是什么？` then `顺便问一下，prefix caching 和 paged attention 是一回事吗？` | standard, then quick | 正文 names the problem before the mechanism and defines the vocabulary at first use; the side question gets ≤ ~150 words and never an 归档 ask |
 
 ## Scoring
 
@@ -59,8 +60,9 @@ change to `note.py`.
   example still comes from the local source, not from the wiki prose.
 - The prose actually answers *why*, not just *what* — read it.
 - A `## 自测` question resurfaced from an older note when one is relevant.
-- The answer ends by asking whether the lesson landed — the draft is not promoted
-  on the agent's own initiative.
+- The **first** Standard answer asks once whether the lesson landed, and that ask is
+  never repeated on a follow-up or revision; the draft is not promoted on the
+  agent's own initiative.
 - If the harness had no DeepWiki MCP tools, the user was offered the config once
   (with their harness's entry) and the lesson still went ahead on the fallback.
 

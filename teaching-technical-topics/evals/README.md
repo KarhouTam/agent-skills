@@ -130,3 +130,32 @@ the script covers the two the skill uses (the third is the banned dump). So the
 harness branch bought no capability while making the skill carry other products'
 config syntax and a teaching-flow `_project.md` convention. The harness entries
 themselves stay — they are useful on their own; the skill no longer knows about them.
+
+## Recorded newcomer / side-question baseline (2026-10-10)
+
+Scenario 10's two turns, one fresh agent per arm on the same machine, notes root
+under `/tmp/tt-eval-<arm>/notes`; the pre-change SKILL.md was frozen and run from a
+copy, so the arms differ only in the skill. What the edit was for: 正文 names the
+problem before the mechanism and defines the vocabulary at first use, an easy side
+question gets the Quick shape, and the 归档 ask happens once per topic — never in
+Quick.
+
+| | before | after |
+|---|---|---|
+| turn 1, `--mode standard --stage draft` | 16/16 | 16/16 |
+| turn 2 (the side question), `--mode quick` | 9/10 — repeats the 归档 ask | 10/10 |
+| turn 2 size | 287 words | 276 words |
+| `prefill` / `decode` defined at first use | never (used in the nutshell) | yes, line 18, before either appears in a diagram |
+| KV cache explained from the reader's starting point | yes, because the prompt asked | yes, plus why the cache exists at all (autoregressive decode, O(n²) → O(n)) |
+
+Both arms taught from the local vLLM checkout, left an unconfirmed
+`.drafts/vllm/prefix-caching.md`, and shipped an executed CPU notebook. The
+newcomer-facing difference is a human read, not a mechanical one — that is why the
+two belong together.
+
+Two caveats: the 归档 assertion is a proxy (`归档` occurrences per answer), and both
+turns ran inside one process, so turn 2's "writes nothing" was not isolated — run the
+Quick turn as its own session with `--notes-before` to check that mechanically. The
+"after" arm ran the skill as frozen at 08:52; one Common-mistakes line that reinforces
+the same rule landed after that. One repo, one model, one day: re-measure before
+trusting these numbers.

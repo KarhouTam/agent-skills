@@ -49,6 +49,12 @@ def section(text: str, heading: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def first_paragraph(text: str, heading: str) -> str | None:
+    """The nutshell is one paragraph; a Quick answer may have no second heading."""
+    m = re.search(rf"^{re.escape(heading)}\s*$(.*?)(?=\n\s*\n|\Z)", text, re.M | re.S)
+    return m.group(1).strip() if m else None
+
+
 def drop_sections(text: str, headings: list[str]) -> str:
     for heading in headings:
         m = re.search(rf"^{re.escape(heading)}\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
@@ -67,7 +73,7 @@ def check_answer(path: str, mode: str, checker: str, expect_deepwiki: bool = Fal
            "answer opens with `## In a nutshell`",
            f"first heading is {headings[0]!r}" if headings else "no `## ` headings at all")
 
-    nutshell = section(text, "## In a nutshell")
+    nutshell = first_paragraph(text, "## In a nutshell")
     if nutshell is None:
         record(False, "nutshell section is present and one sentence")
     else:
@@ -103,6 +109,11 @@ def check_answer(path: str, mode: str, checker: str, expect_deepwiki: bool = Fal
         if source:
             has_provenance = bool(re.search(r"\w+::\w+", source)) or "unverified" in source
             record(has_provenance, "来源 gives `file::symbol` or says `unverified`")
+
+    # Ceremony budget: the draft gets one 归档 ask per topic, and Quick never asks.
+    ask_limit = 0 if mode == "quick" else 1
+    asks = text.count("归档")
+    record(asks <= ask_limit, f"at most {ask_limit} 归档 ask(s) in this answer", f"found {asks}")
 
     if mode != "quick":
         record(section(text, "## 延伸") is not None, "answer has a `## 延伸` section")

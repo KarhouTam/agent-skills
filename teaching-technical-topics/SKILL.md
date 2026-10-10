@@ -1,6 +1,7 @@
 ---
 name: teaching-technical-topics
 description: Use when the user wants to learn or understand how or why something works — "教我", "讲讲", "原理", "explain X", "how does X work", "why is X designed this way", "step by step", "give me an example", or pasting code/logs and asking why they behave that way — especially system internals (PyTorch dispatcher / Dynamo / autograd, vLLM scheduler / paged attention), and whenever a question follows on from something already taught. Skip for quick factual lookups and pure coding tasks.
+disable-model-invocation: true
 ---
 
 # Teaching Technical Topics
@@ -69,9 +70,13 @@ Three consequences that belong to teaching:
 
 | Mode | When | Shape |
 |---|---|---|
-| **Quick** | A follow-up or small clarification ("那 X 呢?", "what about Y?") | ≤ ~150 words, still opens with the nutshell; no notebook, no new note, no DeepWiki lookup |
+| **Quick** | A follow-up, a side question, or a small clarification ("那 X 呢?", "顺便问一下…") | ≤ ~150 words, still opens with the nutshell; no notebook, no new note, no DeepWiki lookup, no 归档 ask |
 | **Standard** | The default for a new topic | The full answer shape below |
 | **Deep** | "walk me through end to end", or a mechanism the user will act on | Standard + a source dive with `file::symbol` + a notebook |
+
+**An easy side question is still Quick.** The user is curious, not commissioning a
+lesson: answer it and stop. Escalate to Standard only when they ask to be taught it
+("仔细讲讲 X") or the answer genuinely needs a mechanism trace.
 
 **Already taught?** Two-line recap, then a new angle worth the user's time, then
 update the existing note. Never open a duplicate note for a topic `<notes>` covers.
@@ -109,6 +114,14 @@ update the existing note. Never open a duplicate note for a topic `<notes>` cove
 
 Every Standard answer carries at least one running example with real numbers, not
 an abstract sketch.
+
+**Assume zero background in *this* field.** The user is an expert somewhere else,
+not here: default to never having seen the vocabulary, and let `_project.md` record
+where that default was wrong. So 正文 does two things in order — say what problem
+the thing exists to solve, then define each term, acronym and name in one clause the
+first time it appears (`KV cache（把每个 token 的中间结果存下来，下次直接复用）`).
+Definitions stay inline at first use: not a glossary paragraph, and never before the
+nutshell.
 
 ## Diagrams
 
@@ -197,15 +210,18 @@ The **notebook is not drafted**: it goes straight to
 the user runs it during the lesson. It is executed, not asserted, so it carries no
 claim that could rot; only the note's prose needs the user's sign-off.
 
-**2. Ask, in one line, at the end of the answer.** Something like:
+**2. Ask once, in one line, at the end of the first Standard answer.** Something like:
 
 > 这节讲清楚了吗？确认没问题我就归档成 `pytorch/dynamo` 的笔记；要补的地方我先改草稿。
+
+Once per topic — never on a follow-up, never on a revision, never in Quick. After
+that the draft waits quietly; asking again on every turn is noise, not diligence.
 
 **3. React to what the user does:**
 
 | The user | You |
 |---|---|
-| Asks a follow-up, or says part of it was wrong | Revise *the same draft* — no second note. Then ask again |
+| Asks a follow-up, or says part of it was wrong | Revise *the same draft* — no second note, no re-ask |
 | Says it was good **and** that the lesson is over (懂了 / 没问题 / 归档吧 / 清楚了) | Promote |
 | Never comes back to it | The draft stays a draft. Mention it once when it becomes relevant again |
 | Says to skip the ceremony (直接归档 / 不用问) | Promote immediately — the user's instruction wins |
@@ -267,6 +283,8 @@ the topic is genuinely closed.
 assumed background, confusions they voiced, preferred depth. Update it when they
 push back, misread something, or ask for more/less detail. At Step 1, resurface one
 question from an older note's `## 自测` when it is relevant to the new topic.
+Words they use fluently are the signal that the assumed background is higher than
+zero: record that, and start the next lesson at their real level.
 
 ## Common mistakes
 
@@ -274,6 +292,8 @@ question from an older note's `## 自测` when it is relevant to the new topic.
 |---|---|
 | Answering in English because the question was | 正文 and the nutshell are Chinese whatever language the question used |
 | Background before the point | `## In a nutshell` is the first thing in the answer |
+| Terms every practitioner knows, left undefined | Assume zero background in *this* field: define each term in one clause at first use |
+| Asking to archive on every turn | One ask per topic, on the first Standard answer; follow-ups just revise the draft |
 | Same 正文 shape for every question | *how* / *why* / *step by step* / *example* take different shapes |
 | Full ceremony for a small follow-up | Quick mode: nutshell plus answer, no note, no notebook |
 | ASCII-art diagram inside a code fence | Mermaid, fence language `mermaid`, validated with `check-mermaid.mjs` |
@@ -283,7 +303,7 @@ question from an older note's `## 自测` when it is relevant to the new topic.
 | Repeating a note's claim without re-checking | Notes are hypotheses; a version mismatch means re-verify |
 | Hand-editing `INDEX.md` | Run `note.py promote`; INDEX is generated |
 | Promoting a note the user never confirmed | Ask first; a draft is not reference material |
-| Writing a second note for a follow-up | Revise the same draft and ask again |
+| Writing a second note for a follow-up | Revise the same draft — no second note, no re-ask |
 | Shipping a notebook with empty outputs | Let `build_notebook.py` execute it, or say it was not executed |
 
 ## Red flags
@@ -294,6 +314,8 @@ question from an older note's `## 自测` when it is relevant to the new topic.
 - `note.py check` was not run after a promotion, or was run and failed.
 - `<notes>` holds a related topic but `## 和前文的联系` is missing.
 - A claim about internals carries no `file::symbol` and no `unverified` marker.
+- The 归档 question is asked more than once for the same topic, or at all in Quick
+  mode.
 - A Standard/Deep lesson about a public repo's internals that never consulted DeepWiki, and never said why not.
 - A wiki-sourced claim wearing a local `file::symbol`, or `verified_against` naming DeepWiki.
 - Every question starts a new project directory instead of extending one.
