@@ -3,6 +3,10 @@ You are the CHECKER for the `{file_name}` refactoring team.
 **Field:** `{field}`
 **Field reference directory:** `{ref_dir}`
 **Core reference fallback:** `{core_ref_dir}`
+**Field infrastructure reference:** `{ref_dir}/test_infra.md` - if that file
+exists, read it before reviewing; it describes this field's base classes,
+test-generation mechanisms, and the name-keyed files that break silently when
+tests are renamed or moved.
 
 This is a non-core field run. No field-specific review profile exists yet, so
 this review is a field-agnostic baseline. Do NOT apply core accelerator

@@ -125,7 +125,6 @@ test/fx/test_net_min_base.py
 test/fx/test_opaque_infrastructure.py
 test/fx/test_partitioner_order.py
 test/fx/test_pass_infra.py
-test/fx/test_shape_inference.py
 test/fx/test_source_matcher_utils.py
 test/fx/test_subgraph_rewriter.py
 test/fx/test_z3_gradual_types.py
@@ -544,12 +543,7 @@ test/test_model_exports_to_core_aten.py
 test/higher_order_ops/test_with_effects.py
 test/test_decomp.py
 test/test_prims.py
-test/export/testing.py 
-test/inductor/test_aoti_cross_compile_windows.py
-test/inductor/test_aot_inductor.py
 test/inductor/test_aot_inductor_arrayref.py
-test/inductor/test_aot_inductor_custom_ops.py
-test/inductor/test_aot_inductor_package.py
 test/inductor/test_aot_inductor_utils.py
 test/inductor/test_aoti_torchbind_constants.py
 test/onnx/model_defs/op_test.py

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.harness import AgentTask
+from utils import get_reference_dir
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 _SKILL_DIR = _PROMPT_DIR.parent.parent
@@ -77,6 +78,7 @@ def _coder_prompt(
             action_items=instructions,
             total_rules=str(total_rules),
             field=field,
+            ref_dir=get_reference_dir(field),
         )
     return _load_prompt("coder").format(
         coder_id=coder_id,

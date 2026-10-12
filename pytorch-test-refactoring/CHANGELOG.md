@@ -1,5 +1,90 @@
 # Changelog
 
+## 2026-10-12 — graph 字段知识入库：基础设施普查与双轴耦合模型
+
+为 `graph` 字段补上第一份字段级参考知识。做法是先把「图模式测试基建长什么样」摸清并固化成
+可复跑的普查，再据此决定**暂不改规则**（见 ADR-0001）：graph 字段仍走 field-agnostic 基线，
+`compute_applicable_rules()` 仍只返回 `["cleanup"]`，本次不动规则集、状态机与 prompt 语义。
+
+### 字段知识文档（`reference/graph/test_infra.md`）
+
+七节：作用域 / 基类 / 生成机制 / sentinel 账本 / runner 集成 / 双轴耦合 / 重构含义与验证。
+覆盖 fx、dynamo、inductor、aoti、export、onnx 六个家族（391 文件、523K LOC、468 条被 runner
+执行）；jit、cpython、functorch、higher_order_ops、lazy、tensorexpr 与顶层图 IR 文件明列为
+超出范围，避免日后误以为知识有缺口。文档每条断言带 `path:line`。
+
+- **基类**是一条链：`common_utils.TestCase:3777` → `torch/_dynamo/test_case.py:129` →
+  `torch/_inductor/test_case.py:17`，外加 `test/inductor/test_torchinductor.py:387` 的文件局部
+  类（`test_xpu_basic.py:14-17` 反向 import 它）与自成体系的 ONNX。两个反直觉点已记录：
+  `DynamoTestCase` 自己不做 dynamo reset（`torch/_dynamo/CLAUDE.md` 的说法已过时），
+  `assertEqual` 在 `debug_disable_compile_counter` 下会变成空操作。
+- **生成机制**五种，其中「带 patch 的类克隆」三套（`make_test_cls_with_patches`、
+  `copy_tests`+`TestFailure`、`make_test_cls_with_mocked_export`）才是图模式测试矩阵的主体。
+  两套机制并存且不可组合：`test_torchinductor_codegen_dynamic_shapes.py:711-745` 已把 GPU 变体
+  迁到 `instantiate_device_type_tests`，因后者没有 per-suffix 失败钩子只能手工搬移
+  `test_failures`——任何「统一生成机制」的重构不搬这份数据就会静默丢 skip。
+- **双轴模型**：设备轴（Inductor 主导：`GPU_TYPE` 3568 行、`@requires_gpu` 403）与后端/模式轴
+  （类克隆生成器）。目标语言用 `HardwareClassification`，`GENERIC` 恰好对应后端轴。另一个
+  量化事实：`@onlyXPU` 在整个字段出现 0 次，XPU 仅以 `@skipXPUIf`（inductor 82 处）存在。
+- **sentinel 账本**是真正的重构约束：9362 个空文件名即 key（`Class.method`），
+  `dynamo_skips` 88%、`inductor_expected_failures` 98% 带设备后缀；改名或移动测试没有任何
+  静态检查能发现孤儿条目，覆盖率静默消失。
+
+### 可复跑普查（`scripts/graph_test_infra_census.py`）
+
+一次读取清单内文件，产出家族分布、基类（AST 与 import 双口径，基类口径只保留 harness 基类）、
+生成机制与耦合计数、最严重硬编码 CUDA 文件、账本规模与设备后缀占比、以及清单自身的缺陷检查。
+stdout 打 markdown，`--write` 写 `reference/graph/test_infra_census.json`；两份产物钉在
+HEAD `79f8150273e`。`routed=468` 与 102 格耦合计数经独立统计交叉验证一致。
+
+### 清单修复（`reference/graph/test_list.txt`）
+
+588 行 → 582 条：删除 HEAD 已不存在的 `test/fx/test_shape_inference.py`、非测试文件
+`test/export/testing.py`、4 条重复的 inductor AOTI 条目，并补文件末尾换行（git diff 计
+7 删 1 增，其中 1 增即末尾换行）。字段成员是 `resolve_field()` 的唯一真相，带缺陷的清单会直接
+污染字段归属与后续统计。
+
+### 提示词接线、术语与决策记录
+
+- 三个 `agent/prompts/*_baseline.md` 增加条件指针：若 `{ref_dir}/test_infra.md` 存在则先读；
+  `agent/tasks.py` 为 `coder_baseline` 补 `ref_dir`（此前只有 analyst/checker 拿到）。采用现成
+  的 `{ref_dir}` 而非新增字段变量，`distributed` 字段日后放同名文件即自动生效。
+- 新增 `docs/adr/0001-graph-field-knowledge-model.md`：记录「先以字段知识入场、暂不改规则」与
+  「双轴耦合模型」两个决策及被否方案（直接写完整 profile / 永久留在基线 / 只分析现代编译栈）。
+- 新增 skill 根 `GLOSSARY.md`：15 个跨字段共用术语（refactoring field、family、strategy、
+  generic test class、device-type instantiation、generation mechanism、sentinel ledger、
+  hardware classification 等），每个附 `_Avoid_` 别名。skill 目录此前无术语表，上游
+  `GLOSSARY.md` 只讲 op/kernel/JIT，不适合承载工作流词汇。
+
+### 测试
+
+新增 `tests/test_graph_field_knowledge.py`（4 项）：清单清洁度、清单路径必须全部归类、
+文档的耦合表/家族表/账本表与普查 JSON 逐格一致。该测试当场抓出 2 条无人认领的清单路径
+（`test_compile_benchmark_util.py`、`test_triton_utils.py`），已归入「top-level compile
+utilities」超范围行。全套 91 个测试通过。
+
+### 文件变更
+
+| 文件 | 描述 |
+|------|------|
+| `reference/graph/test_infra.md` | 新增：graph 字段基础设施参考（七节，全量 `path:line` 引用） |
+| `reference/graph/test_infra_census.md`、`reference/graph/test_infra_census.json` | 新增：普查的人读与机读产物 |
+| `scripts/graph_test_infra_census.py` | 新增：家族/基类/生成机制/耦合普查与清单缺陷检查 |
+| `reference/graph/test_list.txt` | 588 → 582：删失效路径、非测试文件与重复项，补尾换行 |
+| `agent/prompts/analyst_baseline.md`、`coder_baseline.md`、`checker_baseline.md` | 条件指针：`{ref_dir}/test_infra.md` 存在则先读 |
+| `agent/tasks.py` | `coder_baseline` 传入 `{ref_dir}` |
+| `GLOSSARY.md` | 新增：跨字段测试基建术语表 |
+| `docs/adr/0001-graph-field-knowledge-model.md` | 新增：知识先行 + 双轴耦合模型决策 |
+| `tests/test_graph_field_knowledge.py` | 新增：清单分类与文档-普查一致性回归 |
+
+### 数据来源
+
+- PyTorch `79f8150273e`（`scripts/graph_test_infra_census.py` 的扫描对象）
+- 关键上游符号位置：`torch/testing/_internal/common_utils.py`（`TestCase`、
+  `HardwareClassification`、sentinel 判定点）、`torch/_dynamo/test_case.py`、
+  `torch/_inductor/test_case.py`、`torch/testing/_internal/common_device_type.py`、
+  `torch/testing/_internal/dynamo_test_failures.py`、`tools/testing/discover_tests.py`
+
 ## 2026-10-08 — 缺陷修复：跨进程续跑、分页丢失与评审门禁
 
 对状态机、侧车与确定性脚本做了一轮通读，修复以下缺陷（均有回归测试覆盖）。

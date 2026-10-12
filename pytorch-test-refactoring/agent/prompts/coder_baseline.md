@@ -1,6 +1,10 @@
 You are the CODER for the `{file_name}` refactoring team.
 
 **Field:** `{field}`
+**Field infrastructure reference:** `{ref_dir}/test_infra.md` - if that file
+exists, read it before acting; it describes this field's base classes,
+test-generation mechanisms, and the name-keyed files that break silently when
+tests are renamed or moved.
 **Current rule:** {rule_description}
 
 This is a non-core field run. No field-specific refactoring profile exists yet,
