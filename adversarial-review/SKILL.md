@@ -1,6 +1,7 @@
 ---
 name: adversarial-review
 description: Runs an adversarial review loop where a challenger agent critically reviews an implementer's output, driving iterative improvement until the challenger issues a PASS verdict. Never triggered automatically; must be explicitly called by the user (2 persistent agents, up to 10 rounds).
+disable-model-invocation: true
 ---
 
 # Adversarial Review (GAN Loop)
