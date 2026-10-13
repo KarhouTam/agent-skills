@@ -53,9 +53,11 @@ retry, because codeload connections here have been observed to stall.
 
 A public skill that needs local adaptation keeps the adaptation in `overlays/<skill>/`,
 which is version-controlled (`.gitignore` whitelists `!/overlays/`) and mirrors the skill's
-own layout. `sync_skills.py` copies it over the fetched skill on every install or refresh,
-so `--force` restores the adaptation instead of discarding it. `using-superpowers` is the
-only one today: a DeepSeek Harness reference plus its line in the Platform Adaptation list.
+own layout. `sync_skills.py` copies it over the skill on every run — installed, refreshed,
+or skippe — so neither `--force` nor a plain sync discards the adaptation. It is that per-run
+re-application, rather than the install, that lets a skill already on disk pick up an
+overlay added after it was first fetched. `using-superpowers` is the only one today: a
+DeepSeek Harness reference plus its line in the Platform Adaptation list.
 
 Edits to upstream *text* cannot be expressed by a mirror copy, so `overlays/<skill>/overlay.json`
 carries declarative rules:
@@ -68,8 +70,8 @@ carries declarative rules:
 Rules are idempotent — one whose `text` is already present is skipped, which is also how an
 upstream that adopts the same line avoids a duplicate — and they fail loudly when the anchor
 disappears, so bumping a `ref` surfaces a reshaped file instead of silently dropping the
-adaptation. An overlay is applied only when the script writes the skill; a plain sync of an
-already-present skill reports `SKIPPED` and touches nothing.
+adaptation. An overlay is applied on every run, whether the skill was fetched, refreshed, or
+skipped as already present.
 
 ## `skills.json`
 

@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 """Fetch the pinned public skills listed in skills.json into this directory.
 
 Fetched skills are deliberately untracked; see .gitignore. Self-developed
 skills are version-controlled and are never touched by this script. Local
-adaptations of a public skill live in overlays/<skill>/ and are re-applied to
-every install or refresh, so --force does not discard them.
+adaptations of a public skill live in overlays/<skill>/ and are re-applied on
+every run, so neither a refresh nor a plain sync discards them.
 
     python3 sync_skills.py --list          # show the manifest
     python3 sync_skills.py                 # install anything missing
@@ -144,7 +143,7 @@ def insert_after(dest, rule):
 
 
 def apply_overlay(name, dest):
-    """Re-apply this repo's tracked adaptations to a freshly fetched skill.
+    """Re-apply this repo's tracked adaptations to a skill, freshly fetched or not.
 
     Files under overlays/<name>/ mirror the skill's own layout and are copied
     over it; overlay.json inserts lines into upstream text that must keep its
@@ -173,7 +172,7 @@ def install(name, repo, ref, entry, force):
     """Install one skill. Returns (status, metadata_generated, overlay_paths)."""
     dest = ROOT / name
     if dest.exists() and not force:
-        return "skipped", False, []
+        return "skipped", False, apply_overlay(name, dest)
 
     with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
         staged = Path(tmp) / name
