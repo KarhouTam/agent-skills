@@ -1,6 +1,7 @@
 ---
 name: pytorch-test-refactoring
 description: Orchestrate PyTorch test file refactoring to decouple tests from specific hardware accelerators. Use this skill whenever the user asks to refactor, decouple, or reorganize a PyTorch test file for cross-accelerator compatibility, or when they ask to apply the test decoupling workflow to a specific test file. Triggers on phrases like "refactor test_ops.py", "decouple tests in test_file.py", "apply test decoupling to X", or "use pytorch-test-refactoring on X". Also triggers on CI monitoring phrases like "look after the ci", "monitor ci", "check ci status", "watch the pr checks", or "debug ci failures". Always invoke this skill before starting any test refactoring work that involves splitting tests into CPU-only, device-agnostic, and device-specific classes.
+disable-model-invocation: true
 ---
 
 # PyTorch Test Refactoring
