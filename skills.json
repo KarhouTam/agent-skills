@@ -129,6 +129,19 @@
           }
         }
       }
+    },
+    {
+      "repo": "DreambigOu/ELI5",
+      "ref": "a766623b062331fdde53467001379b4ddf3acc2f",
+      "skills": {
+        "eli5": {
+          "path": "skills/eli5",
+          "interface": {
+            "display_name": "ELI5",
+            "short_description": "Explain anything at a chosen audience's level"
+          }
+        }
+      }
     }
   ]
 }
