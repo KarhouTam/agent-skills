@@ -1,6 +1,6 @@
 # Prompts
 
-Six scenarios, chosen so that each one can fail in a different way. Run them
+Eleven scenarios, chosen so that each one can fail in a different way. Run them
 against a fresh agent, save the answer verbatim, then score it with
 `check_run.py` (see README.md).
 
@@ -16,6 +16,7 @@ against a fresh agent, save the answer verbatim, then score it with
 | 8 | No confirmation | Reply `嗯，那 X 呢？` to scenario 1 | quick | Draft stays a draft; nothing enters INDEX |
 | 9 | DeepWiki-reachable repo internals | `教我 PyTorch Dynamo 的 guard 系统是怎么工作的？源码在 /root/pytorch` | standard | Follows the teaching skill's REQUIRED SUB-SKILL line to `deepwiki`, cites the map as `deepwiki:pytorch/pytorch`, and still opens every `file::symbol` in the local checkout |
 | 10 | Newcomer + easy side question | `教我 vLLM 的 prefix caching。我是做后端开发的，完全没接触过 LLM 推理，KV cache 是什么？` then `顺便问一下，prefix caching 和 paged attention 是一回事吗？` | standard, then quick | 正文 names the problem before the mechanism and defines the vocabulary at first use; the side question gets ≤ ~150 words and never an 归档 ask |
+| 11 | ELI level register | `/teaching-technical-topics 用五岁小孩也能听懂的话讲讲 vLLM 的 paged attention`, and the same again with a literal `ELI5` | standard | Loads `eli5` for the register instead of improvising one; the level changes 正文 only — same sections, same draft, same `file::symbol` provenance |
 
 ## Scoring
 
@@ -63,6 +64,9 @@ change to `note.py`.
 - The **first** Standard answer asks once whether the lesson landed, and that ask is
   never repeated on a follow-up or revision; the draft is not promoted on the
   agent's own initiative.
+- When the prompt named an ELI level, the register came from `eli5`'s audience table
+  rather than from a re-invented one, and it excused nothing: same sections, same
+  draft note, same provenance.
 - If the harness had no DeepWiki MCP tools, the user was offered the config once
   (with their harness's entry) and the lesson still went ahead on the fallback.
 

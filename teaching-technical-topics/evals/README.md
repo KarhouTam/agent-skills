@@ -159,3 +159,33 @@ Quick turn as its own session with `--notes-before` to check that mechanically. 
 "after" arm ran the skill as frozen at 08:52; one Common-mistakes line that reinforces
 the same rule landed after that. One repo, one model, one day: re-measure before
 trusting these numbers.
+
+## Recorded ELI-register baseline (2026-10-14)
+
+Scenario 11, plan-only probes, 2 reps per arm on the same machine, with `eli5` installed
+and discoverable in the catalog for both arms. The pre-change SKILL.md was frozen at
+`2dfd9b3` and run from a copy, so the arms differ only in the skill text; each arm ran
+once with a literal `ELI5` prompt and once with a Chinese level phrasing.
+
+| | before | after |
+|---|---|---|
+| literal `ELI5` → `eli5` consulted | 2/2 | 2/2 |
+| Chinese level phrasing → `eli5` consulted | 0/2 | 2/2 |
+| register stated the same way across reps | 0/2 — one silently switched itself to a "curious developer / college student" register, the other used ELI5 "for framing" only | 4/4 — level-not-age, analogy before term, real numbers kept, no talking down |
+| draft note, fixed sections, one 归档 ask still planned | 2/2 | 4/4 |
+| `file::symbol` or literal `unverified` still promised | 2/2 | 4/4 |
+
+Two findings, and they are the reason the edit is shaped the way it is:
+
+- **Discovery was not the delta for the literal token.** `eli5`'s own catalog
+  description contains "ELI5", so the pre-change arm loaded it unprompted — the same
+  shape of result the DeepWiki step produced. What the step adds is the other trigger
+  phrasings and the precedence rule, not the load itself.
+- **The gap was the register, not the ceremony.** Both pre-change reps kept every
+  section; both had to invent how an ELI level interacts with `file::symbol`
+  provenance, and they invented different things. "Register, never ceremony" and "the
+  number is the level, not the reader's age" are what make them converge.
+
+Two caveats: these are 12-line plan probes, not full lessons, so a real run can still
+over-apply the register to 正文 length; and one measurement of one model on one day.
+Re-measure before trusting the numbers.

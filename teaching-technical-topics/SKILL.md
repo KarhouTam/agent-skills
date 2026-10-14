@@ -12,7 +12,8 @@ A teaching answer is a **build**, not a dump: pick a mode, answer in a fixed sha
 and teach into a draft that only becomes reference material once the user confirms
 the lesson landed. Steps 0–2 always run; a Standard or Deep lesson about a public
 repo also fetches that repo's DeepWiki map first (Step 1) — as a reading list, never
-as a source. The answer shape below applies to Standard and Deep.
+as a source — and a prompt naming an ELI level also loads `eli5` for the register
+(Step 2). The answer shape below applies to Standard and Deep.
 
 Resolve `<base>` from the base directory the harness reports for this skill —
 normally `~/.agents/skills/teaching-technical-topics/`, also reachable as
@@ -80,6 +81,26 @@ lesson: answer it and stop. Escalate to Standard only when they ask to be taught
 
 **Already taught?** Two-line recap, then a new angle worth the user's time, then
 update the existing note. Never open a duplicate note for a topic `<notes>` covers.
+
+### ELI register — only when the prompt names a level
+
+When the prompt carries an explicit `/teaching-technical-topics` invocation **and** a
+level (`ELI5`, `ELI10`, `ELI15`, "像给五岁小孩讲"), load the `eli5` skill and take its
+audience table as this lesson's register.
+
+**REQUIRED SUB-SKILL:** `eli5`. Which audience a level maps to, and what that audience
+does to vocabulary, analogies and tone, live there; do not re-derive them here.
+
+The number is the **level, not the reader's age**: `ELI5` means no term appears before
+an analogy has made it usable; `ELI10` / `ELI15` let terms appear with this file's
+one-clause definition. A literal human audience ("讲给我妈听", an actual five-year-old)
+is the standalone `eli5` flow, not this one. The user is still an expert somewhere
+else, so 正文 keeps real numbers and never talks down — ELI5's own reminder.
+
+Register is all a level changes: mode, answer shape, draft note, `## 来源` and the
+归档 ask stay as this file fixes them, and 正文 stays Chinese. "Simplify ruthlessly —
+80% accuracy beats losing the audience" licenses dropping detail, never asserting it:
+every load-bearing claim stays `file::symbol` or `unverified`.
 
 ## Answer shape (Standard / Deep, fixed order)
 
@@ -296,6 +317,7 @@ zero: record that, and start the next lesson at their real level.
 | Asking to archive on every turn | One ask per topic, on the first Standard answer; follow-ups just revise the draft |
 | Same 正文 shape for every question | *how* / *why* / *step by step* / *example* take different shapes |
 | Full ceremony for a small follow-up | Quick mode: nutshell plus answer, no note, no notebook |
+| An ELI level read as licence to skip the build | ELIx sets register only: same sections, same draft, same `file::symbol` provenance |
 | ASCII-art diagram inside a code fence | Mermaid, fence language `mermaid`, validated with `check-mermaid.mjs` |
 | One diagram per section | One per load-bearing mechanism |
 | Confident claims with no provenance | Every load-bearing claim is `file::symbol` or says `unverified` |
