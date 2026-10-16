@@ -1,0 +1,5 @@
+interface:
+  display_name: "Skill Usage Insights"
+  short_description: "Summarise skill usage into keep/update/retire decisions"
+policy:
+  allow_implicit_invocation: false

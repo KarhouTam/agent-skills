@@ -10,6 +10,7 @@ Personal skill collection, also some useful skills from public repos.
   - `gh-github-cli`
   - `mermaid-diagrams`
   - `pytorch-test-refactoring`
+  - `skill-usage-insights`
   - `tavily-web-access`
   - `teaching-technical-topics`
   - `triaging-pytorch-issues`
@@ -39,3 +40,16 @@ manifest.
 
 `.gitignore` whitelists tracked paths, so a new self-developed skill stays
 untracked until its directory is added there.
+
+## Monitoring skill usage
+
+`skill-usage-insights` pairs Claude Code hooks that record which skills each
+prompt triggers, the tokens each skill run consumes, and whether declared
+sub-skills fire, with a skill that turns the record into a dated insight and a
+keep / update / retire decision per skill:
+
+```bash
+python3 skill-usage-insights/scripts/install_hooks.py   # once; merges into ~/.claude/settings.json
+# ...use Claude Code as usual, then in a session:
+/skill-usage-insights
+```

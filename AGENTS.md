@@ -109,3 +109,25 @@ python3 -m pytest tests/test_workflow.py::test_full_flow_replay_to_finalize -q  
 
 `.system/` is pre-provisioned by the Codex harness, ignored by the whitelist, and not managed
 by `sync_skills.py` — leave it alone.
+
+## Subproject: `skill-usage-insights/`
+
+Usage monitoring for every skill in this repo, Claude Code only. `hooks/hooks.json` is the
+hook set and `hooks/collect.py` its single entry point. `scripts/install_hooks.py` merges
+the set into `~/.claude/settings.json`. Rerunning it is idempotent, and `--uninstall` removes
+only our own handlers. The skill (`/skill-usage-insights`) runs `scripts/analyze.py` and then
+writes the decisions. `reference/data-model.md` is the authority on what is recorded and how
+tokens are attributed.
+
+Two repo conventions feed it, so changing either one changes what it measures:
+
+- The catalog is every `*/SKILL.md`. Tiers come from this `.gitignore` whitelist and from
+  `skills.json`.
+- Sub-skill edges come from `**REQUIRED SUB-SKILL:**` lines that name another skill, and from
+  nested `SKILL.md` files. Keep using that marker when one skill depends on another.
+
+`data/` and `insights/` are personal and gitignored. Stdlib only, like the rest of the repo.
+
+```bash
+cd skill-usage-insights && python3 -m pytest tests/ -q
+```

@@ -1,0 +1,38 @@
+{
+  "description": "skill-usage-insights collectors. Installed into ~/.claude/settings.json by scripts/install_hooks.py, which replaces ${COLLECT} with the absolute path of hooks/collect.py.",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "UserPromptExpansion": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Skill", "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Skill|Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Agent|Task", "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "PostToolUseFailure": [
+      { "matcher": "Skill|Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Agent|Task", "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 30 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 30 } ] }
+    ],
+    "StopFailure": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 30 } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "timeout": 15 } ] }
+    ]
+  }
+}
