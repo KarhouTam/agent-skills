@@ -52,7 +52,8 @@ class Session:
         self.transcript.parent.mkdir(parents=True, exist_ok=True)
         self.transcript.touch()
         self.prompt_ids, self.prompt, self.n = prompt_ids, None, 0
-        self.env = dict(os.environ, SKILL_USAGE_ROOT=str(root), SKILL_USAGE_DATA_DIR=str(data))
+        self.env = dict(os.environ, SKILL_USAGE_ROOT=str(root), SKILL_USAGE_DATA_DIR=str(data),
+                        DSH_HOME=str(data.parent / "dsh-home"))  # keep dsh collection out of a test run
         self.env.pop("SKILL_USAGE_DISABLE", None)
 
     def hook(self, event, **fields):

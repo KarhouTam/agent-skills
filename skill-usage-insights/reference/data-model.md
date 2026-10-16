@@ -1,11 +1,19 @@
 # Data model
 
-What the hooks record, how `analyze.py` joins it, and where the numbers are blind.
+What the collectors record, how `analyze.py` joins it, and where the numbers are blind.
 
-## Hooks → records
+Two collectors write the same record kinds into `<data>/sessions/<session>.jsonl`:
 
-`hooks/hooks.json` wires one entry point, `hooks/collect.py`, to these events. All are
-`async` except `SessionEnd`, which has to finish before Claude Code exits.
+- **Claude Code** — `hooks/collect.py` is a hook entry point; `hooks/hooks.json` wires it
+  to the events below. All are `async` except `SessionEnd`, which has to finish before
+  Claude Code exits.
+- **dsh** — `hooks/collect_dsh.py` reads the session logs dsh writes anyway, so nothing is
+  installed. `scripts/dsh_logs.py` decodes them (multi-frame zstd, through
+  `scripts/dsh_decode.mjs` and Node's built-in `node:zlib`) and the collector maps each
+  event onto the same records. A log is re-read only past the `seq` cursor in
+  `<data>/state/dsh.json`, so a live session is picked up incrementally.
+
+## Claude Code hooks → records
 
 | Event | Record(s) | Carries |
 |---|---|---|
@@ -24,7 +32,69 @@ What the hooks record, how `analyze.py` joins it, and where the numbers are blin
 Every record has `kind`, `ts` (UTC, ms), and `session_id`, and `prompt_id`,
 `agent_id` and `agent_type` when the hook supplies them.
 
-## Transcript flush → records
+## dsh session log → records
+
+One `session.v3.jsonl.zstd` per session under `$DSH_HOME/sessions/<workspace>/<id>/`.
+The collector reads these event types; everything else in the log is ignored.
+
+| dsh event | Record(s) | Notes |
+|---|---|---|
+| `session` (header) | `session_start` | `cwd` → `project`, `authoring`; `origin: subagent` marks a child session |
+| `user/message` `source.kind=user` | `prompt` | the text the user typed, plus a `slash` when it starts with `/` |
+| `user/message` `source.kind=goal` | `prompt` | the goal tool restates the objective every autonomous round; the objective is recorded once, per goal |
+| `user/message` `source.kind=skill-catalog` | `catalog` | the listing the harness sent: `entries`, `tokens` (estimated), and which of *our* skills it named |
+| `tool/call` `skill` | `activation` `via=model`, one `usage` segment break | a refused call surfaces as `activation_result` `ok=false` |
+| `read` of a `SKILL.md` | `activation` `via=read` | the child-skill path: a sub-skill that is read, not invoked |
+| `/name` in a prompt or a dsh command | `activation` `via=user` | dsh's own gesture regex, so a plugin-namespaced name is not a match |
+| `read`/`write`/`edit`/`bash` on a skill file | `resource` | the tool result patches `ok`/`error` onto the record it belongs to |
+| `subagent` / `subagent_fork` call | `spawn` | `skills` = the stack that dispatched it, `subagent_type` = the tool's description |
+| child session, matched by creation time | `agent_link` | filed under the **parent** session, because that is where the join looks |
+| `assistant/message` | `usage`, one per stack segment | see below |
+| `turn/end` | `turn_end`, or `turn_failed` when the reason is an error | `prompt_id` = `t<turn>` |
+
+`turn` numbers are per session, so a `prompt_id` is `t<turn>`. A resumed session keeps
+appending to one log and its turn numbers keep rising, so `t12` can be days after `t1`.
+
+## Token attribution
+
+- **Turn** = one dsh turn (one user-role message and everything the agent did for it).
+- **Stack** = the distinct skills activated so far in the session, in load order. It
+  never resets within a session: a skill loaded in turn 1 is still in context in turn 9.
+- **Run** = `(session, turn, skill)`. Several activations of one skill in one turn are
+  one run.
+- **Segment** = a stretch of one turn under one stack. `assistant/message` carries the
+  step's `usage`; the collector splits the turn at every activation, so the step that
+  *decides* to load a skill is not part of that skill's cost and every later step is.
+  A segment's `skills` are the stack at the moment it opened; the turn's last segment
+  takes the stack as it stood when the turn ended. Their spans overlap, so the tokens
+  of a turn exceed the tokens of any single run in it.
+- **Tokens/run** is inclusive: every usage segment whose stack contains the skill,
+  subagents included. `cache_read` is one of the four columns and dominates under dsh
+  (≈99%), where each step re-reads the context prefix; `Load` and `Out/run` are the parts
+  the skill itself caused.
+- **Load** = the next step's context minus what the issuing step ended with (its fresh
+  input plus its cached prefix plus its output), i.e. what the activation added.
+- **Subagents.** A child process's log names its parent session; the collector matches it
+  to the `subagent` call made at its creation time, files its usage under the parent
+  session with `scope=<child id>`, and sets `parent_prompt_id` to the parent turn. That
+  is what `analyze.py` joins on. When the parent log is not in the corpus (a deleted or
+  older log), the usage is charged to every main-thread skill of its turn, and the Method
+  section reports how many subagents that happened to.
+- **Outcome.** `completed` = the turn reached `turn/end` with a completed reason.
+  `failed` = it ended with an error. `interrupted` = no end, but the session went on to
+  another prompt. `open` = no end and nothing came after.
+- **Authoring.** In a session whose cwd is inside this repo, `SKILL.md` reads and
+  `resource` events count as maintenance, not use. Skill and slash activations there
+  still count.
+- **Sub-skill edges.** An edge comes from a `REQUIRED SUB-SKILL` line, where any
+  catalog name on the line is the child and the surrounding paragraph is the
+  condition, or from a nested `SKILL.md` (`<top>:<dir>`). *Same turn* = the child ran
+  in the parent's turn. *Later* = it ran in a later turn of the same session.
+  *Scripts only* = the child's files were executed in the parent's turn without the
+  child being loaded. dsh does not discover nested `SKILL.md` files at all, so a nested
+  child can only ever be read by path.
+
+## Claude Code transcript flush → records
 
 Hooks don't see token usage. `usage_lib.parse_transcript` gets it from the transcript
 instead. It reads **only the complete lines appended since the last flush** (the
@@ -53,27 +123,13 @@ Sidechain lines in the main transcript are skipped, so nothing is counted twice.
 
 ## Analysis joins
 
-- **Run** = `(session, turn, skill)`. Several activations of one skill in one turn
-  are one run.
-- **Tokens/run** is inclusive: every usage chunk whose stack contains the skill,
-  subagents included. A subagent inherits the stack of the `Agent` call that spawned
-  it (via `agent_link` → `spawn`). When that link is missing, it is charged to every
-  main-thread skill of its turn, and the Method section reports how many subagents
-  that happened to.
-- **Turn ids.** Hook `prompt_id` and transcript `promptId` normally match. When they
-  don't, a transcript turn maps to the hook prompt nearest its `turn_ts`, within 30 s.
-- **Outcome.** `completed` = the turn reached `Stop`. `failed` = `StopFailure`.
-  `interrupted` = no Stop, but the session went on to another prompt. `open` = no
-  Stop and nothing came after.
-- **Authoring.** In a session whose cwd is inside this repo, `SKILL.md` reads and
-  `resource` events count as maintenance, not use. Skill and slash activations there
-  still count.
-- **Sub-skill edges.** An edge comes from a `REQUIRED SUB-SKILL` line, where any
-  catalog name on the line is the child and the surrounding paragraph is the
-  condition, or from a nested `SKILL.md` (`<top>:<dir>`). *Same turn* = the child ran
-  in the parent's turn. *Later* = it ran in a later turn of the same session.
-  *Scripts only* = the child's files were executed in the parent's turn without the
-  child being loaded.
+- **Turn ids.** Claude Code's hook `prompt_id` and its transcript `promptId` normally
+  match; when they don't, a transcript turn maps to the hook prompt nearest its
+  `turn_ts`, within 30 s. dsh turns already agree, so the mapping is a no-op there.
+- **Listing cost.** Claude Code's `listing_tokens` is an estimate from the frontmatter
+  description; dsh's `catalog_tokens` is *measured* from the catalog message the harness
+  actually sent, so the insight reports `N×tokens` for it and falls back to the estimate
+  only when no catalog was observed.
 
 ## Blind spots
 
@@ -85,7 +141,16 @@ Sidechain lines in the main transcript are skipped, so nothing is counted twice.
   usage takes the turn-wide fallback.
 - `claude -p` kills async hooks at teardown. The synchronous `SessionEnd` flush still
   recovers the usage and the transcript-side activations.
-- Cloud sessions don't read `~/.claude/settings.json`, and Codex has no equivalent
-  hooks, so neither leaves data.
+- Cloud sessions don't read `~/.claude/settings.json`, so they leave no data. On dsh,
+  deleting a session log deletes its records: nothing re-derives them.
+- A dsh log whose parent log is missing (rotated away, another machine) leaves its child
+  unjoined, and that child's tokens are charged to every main-thread skill of the turn.
+- A subagent's own prompts are never recorded as prompts: they are the dispatcher's
+  text, so counting them would double-count a `/skill` the user typed once and fill the
+  trigger review with another agent's words.
 - `Load` for a slash command is shown as `~n`, an estimate from the SKILL.md size,
   because no API call precedes the injection.
+- The optional dsh hook bridge (`--dsh`) records the events dsh also logs, and its
+  `prompt_id` is not the log's turn number, so the same prompt can appear twice (once
+  with a preview, once from the log). Use it only to confirm live capture — the logs
+  are the authority and the bridge adds nothing the analysis needs.

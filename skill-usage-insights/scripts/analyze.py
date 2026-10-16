@@ -96,6 +96,12 @@ def bare_agent(agent_id):
 
 
 def total(vector):
+    """What a skill run cost: every token read and written across its span.
+
+    This includes cache reads. They are mostly fixed by the session, not the skill,
+    but under dsh they are ~99% of the total and are reported as their own column so
+    a reader can see which part of a run's cost the skill actually caused.
+    """
     return vector["input"] + vector["cache_creation"] + vector["cache_read"] + vector["output"]
 
 
@@ -150,6 +156,7 @@ def analyze(records, catalog, since, until, previous=None):
     links, spawns = {}, {}
     results, loads = {}, defaultdict(list)
     resources = []
+    catalogs = []
     by_kind = Counter(r.get("kind") for r in records)
 
     for r in records:
@@ -175,6 +182,8 @@ def analyze(records, catalog, since, until, previous=None):
             loads[(sid, r.get("tool_use_id"))].append(r)
         elif kind == "resource":
             resources.append(r)
+        elif kind == "catalog":
+            catalogs.append(r)
 
     def turn_of(r):
         sid, scope = r.get("session_id"), r.get("scope")
@@ -183,7 +192,9 @@ def analyze(records, catalog, since, until, previous=None):
             return turns.canon(sid, prompt)
         if scope == "main":
             return turns.canon(sid, r.get("prompt_id"), r.get("turn_ts"))
-        parent = r.get("parent_prompt_id") or subagent_turn.get((sid, bare_agent(scope)))
+        # A subagent record names the parent turn it belongs to: `parent_prompt_id` when the
+        # collector knows it (both harnesses do), otherwise the child's own prompt line.
+        parent = r.get("parent_prompt_id") or r.get("prompt_id") or subagent_turn.get((sid, bare_agent(scope)))
         return turns.canon(sid, parent)
 
     # ---- activations -> runs
@@ -291,6 +302,7 @@ def analyze(records, catalog, since, until, previous=None):
         mine = [r for r in runs.values() if r["skill"] == skill_id]
         ok = [r for r in mine if r["attempts"] > len(r["failures"])]
         totals = [total(r["usage"]) for r in ok if r["usage"]["calls"]]
+        cached = [r["usage"]["cache_read"] for r in ok if r["usage"]["calls"]]
         clean = [l["tokens"] for r in ok for l in r["loads"] if l.get("clean")]
         versions = defaultdict(list)
         for r in ok:
@@ -316,6 +328,7 @@ def analyze(records, catalog, since, until, previous=None):
             "tokens_median": median(totals),
             "tokens_p90": p90(totals),
             "tokens_sum": sum(totals),
+            "cache_median": median(cached),
             "output_median": median([r["usage"]["output"] for r in ok if r["usage"]["calls"]]),
             "calls_median": median([r["usage"]["calls"] for r in ok if r["usage"]["calls"]]),
             "subagent_share": (sum(r["subagent_tokens"] for r in ok) / sum(totals)) if sum(totals) else 0,
@@ -403,6 +416,16 @@ def analyze(records, catalog, since, until, previous=None):
                           "authoring": sessions[key[0]]["authoring"]})
     turn_rows.sort(key=lambda t: -t["ts"])
 
+    # ---- measured listing cost (dsh publishes the catalog it sends, so this is observed)
+    listing = defaultdict(list)
+    for r in catalogs:
+        for skill_id in r.get("skills") or []:
+            listing[skill_id].append(int(r.get("tokens") or 0))
+    for skill_id, data in skills.items():
+        seen = listing.get(skill_id, [])
+        data["catalog_tokens"] = round(median(seen)) if seen else None
+        data["catalog_emissions"] = len(seen)
+
     # ---- coverage
     stamps = [parse_ts(r.get("ts")) for r in records if r.get("ts")]
     first_seen = min(stamps) if stamps else None
@@ -418,6 +441,7 @@ def analyze(records, catalog, since, until, previous=None):
             "turns_with_skill": len(by_turn),
             "runs": sum(s["runs"] for s in skills.values()),
             "tokens": sum(total(u) for u in turn_usage.values()),
+            "tokens_cache_read": sum(u["cache_read"] for u in turn_usage.values()),
             "skill_tokens": sum(total(u) for k, u in turn_usage.items() if k in by_turn),
             "records": dict(by_kind),
             "approx_subagents": len(approx_agents),
@@ -426,6 +450,8 @@ def analyze(records, catalog, since, until, previous=None):
         "edges": edges,
         "undeclared": [{"parent": a, "child": b, "count": n} for (a, b), n in co.most_common() if n >= 2],
         "files": {f"{s}/{f}": v for (s, f), v in files.items()},
+        "catalogs": [{"ts": parse_ts(r.get("ts")), "skills": len(r.get("skills") or []),
+                      "entries": r.get("entries"), "tokens": r.get("tokens")} for r in catalogs],
         "authoring": {"reads": dict(authoring_reads), "edits": dict(authoring_edits)},
         "turns": turn_rows,
         "previous": previous,
@@ -446,7 +472,9 @@ def flags(summary):
             continue
         sid = s["id"]
         if s["runs"] == 0 and enough:
-            cost = f"; costs ~{fmt(s['listing_tokens'])} listing tokens every turn" if s["listing_tokens"] else ""
+            listing = s["catalog_tokens"] or s["listing_tokens"]
+            cost = f"; listed in {s['catalog_emissions']} catalogs at ~{fmt(listing)} tokens each" if s["catalog_emissions"] \
+                else (f"; costs ~{fmt(listing)} listing tokens every turn" if listing else "")
             out.append(("retire?", sid, f"no runs in {summary['window']['coverage_days']:.0f} days of data{cost}"))
         if s["model_invocable"] and s["runs"] >= 3 and s["via"].get("model", 0) == 0:
             out.append(("under-triggered", sid, f"all {s['runs']} runs were user-invoked; the description never fired on its own"))
@@ -519,8 +547,9 @@ def render(summary, labels=None, data_path=None):
         f"{t['turns_with_skill']} turns with a skill · {t['runs']} skill runs"
     )
     if t["tokens"]:
-        lines.append(f"Tokens: {fmt(t['tokens'])} total, {fmt(t['skill_tokens'])} ({pct(t['skill_tokens'], t['tokens'])}) "
-                     f"in turns that ran a skill.")
+        lines.append(f"Tokens: {fmt(t['tokens'])} read and written across {t['sessions']} sessions, of which "
+                     f"{fmt(t['tokens_cache_read'])} ({pct(t['tokens_cache_read'], t['tokens'])}) are cache reads; "
+                     f"{fmt(t['skill_tokens'])} ({pct(t['skill_tokens'], t['tokens'])}) is in turns that ran a skill.")
     if w["coverage_days"] < MIN_COVERAGE_DAYS:
         lines += ["", f"> **Thin evidence.** Under {MIN_COVERAGE_DAYS} days of data: absence of use is not a retirement "
                       "signal yet, and per-skill medians rest on few runs."]
@@ -536,9 +565,10 @@ def render(summary, labels=None, data_path=None):
 
     lines += ["", "## Skills", "",
               "Run = a skill activated in a turn; its lifecycle runs from activation to the end of that turn. "
-              "Tokens are input + cache creation + cache read + output across that span, subagents included.", "",
-              "| Skill | Tier | Runs | Δ | Via model/user/read | Sess. | Last | Tokens/run (med · p90) | Out/run | Calls/run | Load | Subagent share | Interrupted |",
-              "|---|---|---:|---:|---|---:|---|---|---:|---:|---:|---:|---:|"]
+              "Tokens are everything the model read and wrote across that span, subagents included; the cache-read "
+              "column is the part of it that was re-read context rather than new tokens.", "",
+              "| Skill | Tier | Runs | Δ | Via model/user/read | Sess. | Last | Tokens/run (med · p90) | Cache read/run | Out/run | Calls/run | Load | Listed | Subagent share | Interrupted |",
+              "|---|---|---:|---:|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|"]
     used = sorted((s for s in skills.values() if s["runs"] or s["failed_attempts"]), key=lambda s: (-s["runs"], s["id"]))
     for s in used:
         via = s["via"]
@@ -547,17 +577,28 @@ def render(summary, labels=None, data_path=None):
             delta = f"{s['runs'] - prev[s['id']].get('runs', 0):+d}"
         share = f"{100 * s['subagent_share']:.0f}%" if s["tokens_sum"] else "—"
         load = fmt(s["load_median"]) if s["load_median"] is not None else (f"~{fmt(s['body_tokens'])}" if s["body_tokens"] else "—")
+        listed = f"{s['catalog_emissions']}×{fmt(s['catalog_tokens'])}" if s["catalog_emissions"] else (
+            f"~{fmt(s['listing_tokens'])}/turn" if s["listing_tokens"] else "—")
         lines.append(
             f"| `{s['id']}` | {s['tier']} | {s['runs']}{' (+' + str(s['failed_attempts']) + ' failed)' if s['failed_attempts'] else ''} | {delta} | "
             f"{via.get('model', 0)}/{via.get('user', 0)}/{via.get('read', 0)} | {s['sessions']} | {day(s['last'])} | "
-            f"{fmt(s['tokens_median'])} · {fmt(s['tokens_p90'])} | {fmt(s['output_median'])} | {fmt(s['calls_median'])} | "
-            f"{load} | {share} | "
+            f"{fmt(s['tokens_median'])} · {fmt(s['tokens_p90'])} | {fmt(s['cache_median'])} | {fmt(s['output_median'])} | {fmt(s['calls_median'])} | "
+            f"{load} | {listed} | {share} | "
             f"{s['outcomes'].get('interrupted', 0) + s['outcomes'].get('failed', 0)} |")
     unused = sorted(s["id"] for s in skills.values() if s["repo"] and not s["runs"] and not s["failed_attempts"] and not s["parent"])
     if unused:
         lines += ["", "Not run in this window: " + ", ".join(
-            f"`{u}`" + (f" (~{fmt(skills[u]['listing_tokens'])} listing tokens/turn)" if skills[u]["listing_tokens"] else "")
+            f"`{u}`" + (f" (~{fmt(skills[u]['catalog_tokens'] or skills[u]['listing_tokens'])} listing tokens/emission)"
+                        if (skills[u]['catalog_tokens'] or skills[u]['listing_tokens']) else "")
             for u in unused)]
+    if summary["catalogs"]:
+        sizes = [c["entries"] for c in summary["catalogs"] if c["entries"]]
+        tokens = [c["tokens"] for c in summary["catalogs"] if c["tokens"]]
+        dead = [s for s in unused]
+        dead_tokens = sum(skills[u]["catalog_tokens"] or skills[u]["listing_tokens"] for u in dead)
+        lines.append(f"Catalog listings observed: {len(summary['catalogs'])} emission(s), "
+                     f"{fmt(median(sizes))} entries and ~{fmt(median(tokens))} tokens each; "
+                     f"~{fmt(dead_tokens)} of that is skills that never ran.")
     foreign = sorted(s["id"] for s in skills.values() if not s["repo"] and s["runs"])
     if foreign:
         lines.append("Outside this repo (plugins, built-ins, other dirs): " + ", ".join(f"`{f}` ×{skills[f]['runs']}" for f in foreign))
@@ -620,13 +661,21 @@ def render(summary, labels=None, data_path=None):
     lines += ["", "## Decisions", "", "<!-- Filled in by the agent following SKILL.md: one line per skill that needs a decision -->", ""]
     lines += ["## Method", "",
               f"- Records: {', '.join(f'{k} {v}' for k, v in sorted(t['records'].items()))}.",
-              "- Activation sources: `model` = Skill tool call, `user` = slash command, `read` = SKILL.md read with the Read tool "
-              "(ignored in sessions started inside this repo, which are authoring).",
+              "- Sources: Claude Code hooks (`via` a transcript flush) and dsh session logs, collected by "
+              "`hooks/collect.py` and `hooks/collect_dsh.py` into the same records.",
+              "- Listed = how often dsh published the skill in the model's catalog and the median size of that catalog "
+              "message; `~n/turn` is the estimate from the description alone, used when no catalog was observed.",
+              "- Activation sources: `model` = the harness's skill tool, `user` = a slash command or gesture, "
+              "`read` = a SKILL.md read with the file tool (ignored in sessions started inside this repo, which are authoring).",
+              "- Tokens are everything read and written across the run, subagents included (input + cache creation + "
+              "cache read + output). Under dsh cache reads reach ~99% of that, so the cache-read column separates "
+              "re-read context from the new tokens a run actually caused.",
               "- Load = context growth across the activation (tool result plus injected SKILL.md), from the next API call; "
               "`~n` is a size estimate of SKILL.md where no activating call exists (slash commands).",
-              "- Interrupted = the turn never reached Stop but the session continued; failed = StopFailure (API error).",
-              f"- Subagent tokens joined to the parent skill through the Agent tool call; {t['approx_subagents']} subagent(s) "
-              "could not be joined and were attributed to every skill of their turn."]
+              "- Interrupted = the turn never completed but the session continued; failed = the turn ended with an error.",
+              f"- Subagent tokens joined to the parent skill through the call that spawned them, when the child's log can "
+              f"be matched to it; {t['approx_subagents']} subagent(s) could not be joined and were attributed to every "
+              "main-thread skill of their turn."]
     if data_path:
         lines.append(f"- Data: `{data_path}`.")
     return "\n".join(lines) + "\n"
@@ -663,25 +712,60 @@ def keep_decisions(path, markdown):
     return DECISIONS.sub(lambda m: m.group(1) + old.group(2) + m.group(3), markdown, count=1)
 
 
+def collect_dsh(base, since=0.0):
+    """Pick up new dsh session logs before reading. dsh needs no hooks, so this is the install.
+
+    The whole corpus is offered every run, not just the analysis window: the cursor
+    in `<data>/state/dsh.json` skips what is already collected, and a wide window
+    later must not find a hole where a narrow one was collected first.
+
+    Returns the collector's report, or `{"errors": [...]}` when it could not run.
+    A failed collection is not fatal: the records already collected still count.
+    """
+    collector = lib.SKILL_DIR / "hooks" / "collect_dsh.py"
+    if not collector.is_file():
+        return None
+    try:
+        done = subprocess.run([sys.executable, str(collector), "--json", "--since", "0"],
+                              capture_output=True, text=True, timeout=900)
+        report = json.loads(done.stdout) if done.stdout.strip() else {}
+        if done.returncode != 0 and not report.get("errors"):
+            report.setdefault("errors", []).append((done.stderr or "").strip()[:200] or f"exit {done.returncode}")
+        return report
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return {"errors": [str(exc)[:200]]}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--since", default="30d", help="window start: 30d, 2w, 12h or YYYY-MM-DD (default: %(default)s)")
     parser.add_argument("--out", type=Path, help="insight path (default: insights/<today>.md)")
     parser.add_argument("--stdout", action="store_true", help="print the markdown instead of writing it")
     parser.add_argument("--json", action="store_true", help="print the summary JSON instead of writing anything")
+    parser.add_argument("--no-collect", action="store_true", help="do not pick up new dsh session logs first")
     args = parser.parse_args(argv)
 
     now = time.time()
-    base = lib.data_dir(create=False)
+    base = lib.data_dir()
     if base is None:
-        print("no usage data yet: install the hooks with scripts/install_hooks.py and use Claude Code for a while",
-              file=sys.stderr)
+        print("no writable data directory (set SKILL_USAGE_DATA_DIR)", file=sys.stderr)
         return 1
     since = parse_since(args.since, now)
+    collected = None if args.no_collect else collect_dsh(base)
+    collection_errors = (collected or {}).get("errors") or []
+    if collection_errors:
+        print(f"dsh collection failed: {collection_errors[0]}", file=sys.stderr)
     today = day(now)
     catalog = lib.Catalog()
     previous = previous_snapshot(base, today)
-    summary = analyze(lib.read_records(base, since_epoch=since), catalog, since, now, previous=previous)
+    records = list(lib.read_records(base, since_epoch=since))
+    if not records:
+        print("no usage data: install the Claude Code hooks with scripts/install_hooks.py, or run a dsh session "
+              "(its logs are collected by hooks/collect_dsh.py)", file=sys.stderr)
+        return 1
+    summary = analyze(records, catalog, since, now, previous=previous)
+    summary["totals"]["dsh_sessions_collected"] = (collected or {}).get("collected", 0)
+    summary["totals"]["dsh_records_collected"] = (collected or {}).get("records", 0)
     errors = base / "errors.log"
     text = errors.read_text(encoding="utf-8", errors="replace") if errors.exists() else ""
     summary["totals"]["hook_errors"] = sum(1 for line in text.splitlines() if line.startswith("--- "))

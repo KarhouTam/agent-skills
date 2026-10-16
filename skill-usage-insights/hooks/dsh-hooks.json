@@ -1,0 +1,20 @@
+{
+  "description": "skill-usage-insights collectors, run inside a dsh session by the @deepseek-ai/dsh-hooks-claude-code bridge. Point the bridge's configPath at this file. It is optional: dsh session logs already carry skill loads, prompts and per-step tokens, which hooks/collect_dsh.py reads. Install with: python3 scripts/install_hooks.py --dsh",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}" } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "skill", "hooks": [ { "type": "command", "command": "python3 ${COLLECT}" } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "skill|read|edit|bash|subagent", "hooks": [ { "type": "command", "command": "python3 ${COLLECT}" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}" } ] }
+    ]
+  }
+}

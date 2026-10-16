@@ -43,13 +43,17 @@ untracked until its directory is added there.
 
 ## Monitoring skill usage
 
-`skill-usage-insights` pairs Claude Code hooks that record which skills each
-prompt triggers, the tokens each skill run consumes, and whether declared
-sub-skills fire, with a skill that turns the record into a dated insight and a
-keep / update / retire decision per skill:
+`skill-usage-insights` records which skills each prompt triggers, the tokens each
+skill run consumes, and whether declared sub-skills fire, then turns that record
+into a dated insight and a keep / update / retire decision per skill. It covers
+both harnesses in use here:
+
+- **dsh** needs no setup: the collector decodes the session logs dsh already writes
+  under `$DSH_HOME/sessions`, and `analyze.py` picks up new ones by itself.
+- **Claude Code** needs its hooks merged into `~/.claude/settings.json` once.
 
 ```bash
-python3 skill-usage-insights/scripts/install_hooks.py   # once; merges into ~/.claude/settings.json
-# ...use Claude Code as usual, then in a session:
+python3 skill-usage-insights/scripts/install_hooks.py   # Claude Code only; ask before running
+# ...use either harness as usual, then in a session:
 /skill-usage-insights
 ```
