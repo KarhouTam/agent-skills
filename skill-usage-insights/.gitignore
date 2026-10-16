@@ -1,0 +1,5 @@
+# Collected usage and the insights built from it are personal state (they hold
+# prompt previews), not skill definition. Keep them out of git.
+data/
+insights/
+__pycache__
