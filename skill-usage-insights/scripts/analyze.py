@@ -231,6 +231,7 @@ def analyze(records, catalog, since, until, previous=None):
             run = runs[key] = {"session": act["session"], "turn": act["turn"], "skill": act["skill"],
                                "via": act["via"], "scope": act["scope"], "ts": act["ts"], "hash": act["hash"],
                                "attempts": 0, "failures": [], "usage": empty_usage(), "exclusive": 0,
+                               "authoring": sessions[act["session"]]["authoring"],
                                "subagent_tokens": 0, "subagents": 0, "loads": []}
         run["attempts"] += 1
         if act.get("failed"):
@@ -317,6 +318,7 @@ def analyze(records, catalog, since, until, previous=None):
             "body_tokens": info.get("body_tokens"),
             "parent": info.get("parent"),
             "runs": len(ok),
+            "runs_authoring": sum(1 for r in ok if r["authoring"]),
             "failed_attempts": sum(len(r["failures"]) for r in mine),
             "errors": Counter(e.splitlines()[0][:120] for r in mine for e in r["failures"]).most_common(3),
             "via": dict(Counter(r["via"] for r in ok)),
@@ -328,6 +330,8 @@ def analyze(records, catalog, since, until, previous=None):
             "tokens_median": median(totals),
             "tokens_p90": p90(totals),
             "tokens_sum": sum(totals),
+            "tokens_median_real": median([total(r["usage"]) for r in ok
+                                          if r["usage"]["calls"] and not r["authoring"]]),
             "cache_median": median(cached),
             "output_median": median([r["usage"]["output"] for r in ok if r["usage"]["calls"]]),
             "calls_median": median([r["usage"]["calls"] for r in ok if r["usage"]["calls"]]),
@@ -355,7 +359,7 @@ def analyze(records, catalog, since, until, previous=None):
             continue
         entry = files[(r.get("skill"), r.get("file"))]
         entry[r.get("op")] = entry.get(r.get("op"), 0) + 1
-        if not r.get("ok"):
+        if r.get("ok") is False:
             entry["fail"] += 1
             entry["last_error"] = (r.get("error") or "").splitlines()[0][:120] if r.get("error") else "failed"
         entry["last"] = max(entry["last"] or 0, parse_ts(r.get("ts")) or 0)
@@ -419,8 +423,11 @@ def analyze(records, catalog, since, until, previous=None):
     # ---- measured listing cost (dsh publishes the catalog it sends, so this is observed)
     listing = defaultdict(list)
     for r in catalogs:
+        tokens, entries = int(r.get("tokens") or 0), int(r.get("entries") or 0)
+        if not tokens:
+            continue
         for skill_id in r.get("skills") or []:
-            listing[skill_id].append(int(r.get("tokens") or 0))
+            listing[skill_id].append(tokens / entries if entries else tokens)
     for skill_id, data in skills.items():
         seen = listing.get(skill_id, [])
         data["catalog_tokens"] = round(median(seen)) if seen else None
@@ -465,7 +472,7 @@ def flags(summary):
     out = []
     enough = summary["window"]["coverage_days"] >= MIN_COVERAGE_DAYS
     skills = summary["skills"]
-    medians = [s["tokens_median"] for s in skills.values() if s["tokens_median"]]
+    medians = [s["tokens_median_real"] for s in skills.values() if s["tokens_median_real"]]
     overall = median(medians)
     for s in sorted(skills.values(), key=lambda s: s["id"]):
         if not s["repo"] or s["parent"]:
@@ -483,14 +490,16 @@ def flags(summary):
             out.append(("model-blocked", sid, f"the model tried to invoke it and was refused ({blocked[0]})"))
         elif s["failed_attempts"]:
             out.append(("activation-failures", sid, f"{s['failed_attempts']} failed activation(s): {s['errors'][0][0] if s['errors'] else ''}"))
-        if s["runs"] >= 3 and overall and s["tokens_median"] and s["tokens_median"] > 2 * overall and len(medians) > 2:
-            out.append(("costly", sid, f"median run {fmt(s['tokens_median'])} tokens vs {fmt(overall)} across skills"))
+        real = s["tokens_median_real"]
+        if s["runs"] >= 3 and overall and real and real > 2 * overall and len(medians) > 2:
+            apart = f" ({s['runs_authoring']}/{s['runs']} runs were authoring, excluded)" if s["runs_authoring"] else ""
+            out.append(("costly", sid, f"median run {fmt(real)} tokens vs {fmt(overall)} across skills{apart}"))
         bad = s["outcomes"].get("interrupted", 0) + s["outcomes"].get("failed", 0)
         if s["runs"] >= 3 and bad / s["runs"] >= 0.3:
             out.append(("abandoned", sid, f"{bad}/{s['runs']} runs interrupted or failed"))
         if len([h for h in s["versions"] if h != "?"]) > 1:
             out.append(("changed", sid, f"{len(s['versions'])} SKILL.md versions ran in this window — compare them under Versions"))
-        if s["runs"] >= 5 and s["files_total"] and s["untouched"]:
+        if s["runs"] - s["runs_authoring"] >= 5 and s["files_total"] and s["untouched"]:
             out.append(("dead-weight?", sid, f"{len(s['untouched'])}/{s['files_total']} shipped files never read or run"))
     for name, f in summary["files"].items():
         runs = f["exec"] + f["read"]
@@ -565,10 +574,12 @@ def render(summary, labels=None, data_path=None):
 
     lines += ["", "## Skills", "",
               "Run = a skill activated in a turn; its lifecycle runs from activation to the end of that turn. "
+              "Auth = runs whose session was started inside this repo, i.e. authoring the skill rather than using it; "
+              "the cost columns keep them (they are real runs) but the cost flags compare only the rest. "
               "Tokens are everything the model read and wrote across that span, subagents included; the cache-read "
               "column is the part of it that was re-read context rather than new tokens.", "",
-              "| Skill | Tier | Runs | Δ | Via model/user/read | Sess. | Last | Tokens/run (med · p90) | Cache read/run | Out/run | Calls/run | Load | Listed | Subagent share | Interrupted |",
-              "|---|---|---:|---:|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|"]
+              "| Skill | Tier | Runs | Auth | Δ | Via model/user/read | Sess. | Last | Tokens/run (med · p90) | Cache read/run | Out/run | Calls/run | Load | Listed | Subagent share | Interrupted |",
+              "|---|---|---:|---:|---:|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|"]
     used = sorted((s for s in skills.values() if s["runs"] or s["failed_attempts"]), key=lambda s: (-s["runs"], s["id"]))
     for s in used:
         via = s["via"]
@@ -580,7 +591,8 @@ def render(summary, labels=None, data_path=None):
         listed = f"{s['catalog_emissions']}×{fmt(s['catalog_tokens'])}" if s["catalog_emissions"] else (
             f"~{fmt(s['listing_tokens'])}/turn" if s["listing_tokens"] else "—")
         lines.append(
-            f"| `{s['id']}` | {s['tier']} | {s['runs']}{' (+' + str(s['failed_attempts']) + ' failed)' if s['failed_attempts'] else ''} | {delta} | "
+            f"| `{s['id']}` | {s['tier']} | {s['runs']}{' (+' + str(s['failed_attempts']) + ' failed)' if s['failed_attempts'] else ''} | "
+            f"{s['runs_authoring']} | {delta} | "
             f"{via.get('model', 0)}/{via.get('user', 0)}/{via.get('read', 0)} | {s['sessions']} | {day(s['last'])} | "
             f"{fmt(s['tokens_median'])} · {fmt(s['tokens_p90'])} | {fmt(s['cache_median'])} | {fmt(s['output_median'])} | {fmt(s['calls_median'])} | "
             f"{load} | {listed} | {share} | "
@@ -598,7 +610,7 @@ def render(summary, labels=None, data_path=None):
         dead_tokens = sum(skills[u]["catalog_tokens"] or skills[u]["listing_tokens"] for u in dead)
         lines.append(f"Catalog listings observed: {len(summary['catalogs'])} emission(s), "
                      f"{fmt(median(sizes))} entries and ~{fmt(median(tokens))} tokens each; "
-                     f"~{fmt(dead_tokens)} of that is skills that never ran.")
+                     f"~{fmt(dead_tokens)} of each emission is skills that never ran.")
     foreign = sorted(s["id"] for s in skills.values() if not s["repo"] and s["runs"])
     if foreign:
         lines.append("Outside this repo (plugins, built-ins, other dirs): " + ", ".join(f"`{f}` ×{skills[f]['runs']}" for f in foreign))
@@ -661,10 +673,11 @@ def render(summary, labels=None, data_path=None):
     lines += ["", "## Decisions", "", "<!-- Filled in by the agent following SKILL.md: one line per skill that needs a decision -->", ""]
     lines += ["## Method", "",
               f"- Records: {', '.join(f'{k} {v}' for k, v in sorted(t['records'].items()))}.",
-              "- Sources: Claude Code hooks (`via` a transcript flush) and dsh session logs, collected by "
-              "`hooks/collect.py` and `hooks/collect_dsh.py` into the same records.",
-              "- Listed = how often dsh published the skill in the model's catalog and the median size of that catalog "
-              "message; `~n/turn` is the estimate from the description alone, used when no catalog was observed.",
+              "- Sources: Claude Code and Codex hooks (`via` a transcript or rollout flush) and dsh session logs, "
+              "collected by `hooks/collect.py`, `hooks/collect_codex.py` and `hooks/collect_dsh.py` into the same records.",
+              "- Listed = how often the harness published the skill in the model's catalog, and the median share of that "
+              "message the skill accounts for (dsh and Codex publish one; the total message size is in the line above); "
+              "`~n/turn` is the estimate from the description alone, used when no catalog was observed.",
               "- Activation sources: `model` = the harness's skill tool, `user` = a slash command or gesture, "
               "`read` = a SKILL.md read with the file tool (ignored in sessions started inside this repo, which are authoring).",
               "- Tokens are everything read and written across the run, subagents included (input + cache creation + "

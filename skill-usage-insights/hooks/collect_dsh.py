@@ -121,7 +121,7 @@ class LogToRecords:
         self.records = []
         self.activations = []   # (ts_ms, tool_use_id, skill)
         self.pending = []       # (skill, tool_use_id, tool calls in the issuing step)
-        self.by_call = {}       # callId -> record index of a resource it produced
+        self.by_call = {}       # callId -> indices of the records it produced
         self.calls = {}         # callId -> (name, arguments)
         self.steps = {}         # step -> its usage vector
         self.step_calls = defaultdict(int)
@@ -311,7 +311,7 @@ class LogToRecords:
                 return
             self.add("resource", ms, prompt_id=self.turn_id(turn), skill=skill, file=rel,
                      op=FILE_TOOLS[name], ok=None, tool_use_id=call_id)
-            self.by_call[call_id] = len(self.records) - 1
+            self.by_call.setdefault(call_id, []).append(len(self.records) - 1)
             if FILE_TOOLS[name] == "read" and rel == "SKILL.md":
                 self.activate(skill, "read", ms, turn, call_id)
         elif name == "bash":
@@ -320,7 +320,7 @@ class LogToRecords:
                 if skill:
                     self.add("resource", ms, prompt_id=self.turn_id(turn), skill=skill, file=rel,
                              op="exec", ok=None, tool_use_id=call_id)
-                    self.by_call[call_id] = len(self.records) - 1
+                    self.by_call.setdefault(call_id, []).append(len(self.records) - 1)
         elif name in AGENT_TOOLS:
             self.add("spawn", ms, prompt_id=self.turn_id(turn), tool_use_id=call_id,
                      skills=self.stack_before(ms), subagent_type=arguments.get("description"))
@@ -336,8 +336,8 @@ class LogToRecords:
             self.add("activation_result", ms, prompt_id=self.turn_id(turn), tool_use_id=call_id,
                      ok=not error, error=text or None)
             return
-        index = self.by_call.get(call_id)
-        if index is not None:
+        # One command can name several skill files; the result belongs to all of them.
+        for index in self.by_call.get(call_id, []):
             self.records[index]["ok"] = not error
             if error:
                 self.records[index]["error"] = text

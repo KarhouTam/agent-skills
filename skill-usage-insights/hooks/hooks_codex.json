@@ -1,0 +1,26 @@
+{
+  "description": "skill-usage-insights collectors. Installed into ~/.codex/hooks.json by scripts/install_hooks.py, which replaces ${COLLECT} with the absolute path of hooks/collect_codex.py. Codex runs a handler only after you trust it once with /hooks.",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Bash|apply_patch", "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 10 } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 30 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "async": true, "timeout": 30 } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "python3 ${COLLECT}", "timeout": 15 } ] }
+    ]
+  }
+}

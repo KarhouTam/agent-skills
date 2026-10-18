@@ -2,11 +2,14 @@
 
 What the collectors record, how `analyze.py` joins it, and where the numbers are blind.
 
-Two collectors write the same record kinds into `<data>/sessions/<session>.jsonl`:
+Three collectors write the same record kinds into `<data>/sessions/<session>.jsonl`:
 
 - **Claude Code** — `hooks/collect.py` is a hook entry point; `hooks/hooks.json` wires it
   to the events below. All are `async` except `SessionEnd`, which has to finish before
   Claude Code exits.
+- **Codex** — `hooks/collect_codex.py` is a hook entry point; `hooks/hooks_codex.json` is
+  installed into `~/.codex/hooks.json` and every handler needs one trust review (`/hooks`)
+  before Codex will run it. Codex has no Skill tool, so activations come from the rollout.
 - **dsh** — `hooks/collect_dsh.py` reads the session logs dsh writes anyway, so nothing is
   installed. `scripts/dsh_logs.py` decodes them (multi-frame zstd, through
   `scripts/dsh_decode.mjs` and Node's built-in `node:zlib`) and the collector maps each
@@ -31,6 +34,41 @@ Two collectors write the same record kinds into `<data>/sessions/<session>.jsonl
 
 Every record has `kind`, `ts` (UTC, ms), and `session_id`, and `prompt_id`,
 `agent_id` and `agent_type` when the hook supplies them.
+
+## Codex hooks → records
+
+| Event | Record(s) | Carries |
+|---|---|---|
+| `SessionStart` | `session_start` | `source`, `model`, `cwd`, `project`, `authoring` (cwd inside this repo) |
+| `UserPromptSubmit` | `prompt`; an `activation` `via=user` per `$skill` mention | `preview`, `chars`, `slash` |
+| `PostToolUse` `Bash` | `resource` `op=exec` for each existing skill file the command names | `ok` from the exit code in `tool_response`, `None` when it does not say |
+| `PostToolUse` `apply_patch` | `resource` `op=edit` | as above |
+| `SubagentStart` / `SubagentStop` | `subagent_start` / `subagent_stop`, plus the child rollout's usage | `agent_id` |
+| `Stop` / `SessionEnd` | `turn_end` / `session_end`, plus a rollout flush | `prompt_id` = Codex `turn_id` |
+
+Codex turns a hook's stdout into model context on several events, so the collector
+never prints. `Interrupt`, `PreCompact` and `PostCompact` are ignored.
+
+## Codex rollout log → records
+
+`~/.codex/sessions/<Y>/<M>/<D>/rollout-<ts>-<id>.jsonl`, read past a byte cursor in
+`<data>/state/codex-<session>-<scope>.json` (mirrors `usage_lib.parse_transcript`).
+
+| Rollout record | Record(s) | Notes |
+|---|---|---|
+| `turn_context` | — | `model` and `cwd` for follow-on calls |
+| `event_msg task_started` / `item_completed` `UserMessage` | — | turn id and its start time |
+| `event_msg token_count` | `usage` | `last_token_usage` is *this* API call: `input` = `input_tokens - cached_input_tokens`, `cache_read` = `cached_input_tokens`, `output` = `output_tokens` |
+| `response_item function_call` (`exec_command`, `apply_patch`, …) | `t_activation` `via=read` | a skill is activated by a command that reads its `SKILL.md` |
+| `response_item message` `developer` with `<skills_instructions>` | `catalog` | `entries` counted, `tokens` estimated, entry paths resolved through the block's own `rN` roots |
+| `event_msg turn_aborted` | `turn_failed` | `turn_end` comes from the `Stop` hook, not from here |
+
+A turn is one `turn_id`; the stack resets per turn. A call is charged to the stack as
+it stood **before** that call's own tool calls — the rollout writes a call's function
+calls before its token count — so the call that decides to load a skill is not part of
+that skill's cost. `load` is the next call's context minus the activating call's
+context and output, and `clean` when the activating call ran no other tool. The cache
+split matters: Codex's `input_tokens` **includes** the cached prefix.
 
 ## dsh session log → records
 
@@ -143,6 +181,11 @@ Sidechain lines in the main transcript are skipped, so nothing is counted twice.
   recovers the usage and the transcript-side activations.
 - Cloud sessions don't read `~/.claude/settings.json`, so they leave no data. On dsh,
   deleting a session log deletes its records: nothing re-derives them.
+- Codex hooks are skipped until trusted, and the trust is keyed to the handler's hash, so
+  an edited hook stops running until you trust it again. Codex writes no hook record at
+  all in that state: the session looks like one that never used a skill.
+- Deleting a Codex rollout deletes its activations and tokens; the hook records remain,
+  so a session can show prompts and resources with no cost.
 - A dsh log whose parent log is missing (rotated away, another machine) leaves its child
   unjoined, and that child's tokens are charged to every main-thread skill of the turn.
 - A subagent's own prompts are never recorded as prompts: they are the dispatcher's
@@ -150,7 +193,8 @@ Sidechain lines in the main transcript are skipped, so nothing is counted twice.
   trigger review with another agent's words.
 - `Load` for a slash command is shown as `~n`, an estimate from the SKILL.md size,
   because no API call precedes the injection.
-- The optional dsh hook bridge (`--dsh`) records the events dsh also logs, and its
+- The optional dsh hook bridge (mounted only when the plugin is installed) records the
+  events dsh also logs, and its
   `prompt_id` is not the log's turn number, so the same prompt can appear twice (once
   with a preview, once from the log). Use it only to confirm live capture — the logs
   are the authority and the bridge adds nothing the analysis needs.

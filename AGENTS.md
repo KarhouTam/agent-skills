@@ -112,12 +112,17 @@ by `sync_skills.py` — leave it alone.
 
 ## Subproject: `skill-usage-insights/`
 
-Usage monitoring for every skill in this repo, Claude Code only. `hooks/hooks.json` is the
-hook set and `hooks/collect.py` its single entry point. `scripts/install_hooks.py` merges
-the set into `~/.claude/settings.json`. Rerunning it is idempotent, and `--uninstall` removes
-only our own handlers. The skill (`/skill-usage-insights`) runs `scripts/analyze.py` and then
-writes the decisions. `reference/data-model.md` is the authority on what is recorded and how
-tokens are attributed.
+Usage monitoring for every skill in this repo, across Claude Code, Codex and dsh.
+`hooks/hooks.json` and `hooks/hooks_codex.json` are the hook sets; `hooks/collect.py` and
+`hooks/collect_codex.py` are their entry points. `scripts/install_hooks.py` takes no
+harness flag: it wires every harness it finds — Claude Code in `~/.claude/settings.json`,
+Codex in `~/.codex/hooks.json` (where handlers stay inert until trusted once with
+`/hooks`), and the dsh live bridge only when that plugin is actually installed — and
+skips the ones that are not there. Rerunning it is idempotent, and `--uninstall` removes
+only our own handlers. dsh needs no install either way: its logs are decoded directly. The skill
+(`/skill-usage-insights`) runs `scripts/analyze.py` and then writes the decisions.
+`reference/data-model.md` is the authority on what is recorded and how tokens are
+attributed.
 
 Two repo conventions feed it, so changing either one changes what it measures:
 

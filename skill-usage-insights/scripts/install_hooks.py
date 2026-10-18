@@ -1,25 +1,28 @@
-"""Install, inspect, or remove the skill-usage-insights hooks.
+"""Install, inspect, or remove the skill-usage-insights hooks for every harness here.
 
-Claude Code needs a hook set in a settings file; dsh needs none, because its own
-session logs already carry skill loads, prompts and per-step tokens
-(`hooks/collect_dsh.py` reads them). What dsh can optionally have is the live
-bridge: `--dsh` writes `hooks/dsh-hooks.json` and mounts
-`@deepseek-ai/dsh-hooks-claude-code` in the user's own patch layer, which is the
-only file a user may edit.
+One command, no harness flag. It looks for each harness on this machine and wires
+the one it finds, skipping the rest:
+
+- **Claude Code** — merges `hooks/hooks.json` into `~/.claude/settings.json`
+  (`$CLAUDE_CONFIG_DIR` moves that root).
+- **Codex** — merges `hooks/hooks_codex.json` into `~/.codex/hooks.json`
+  (`$CODEX_HOME`). Codex only runs a handler after you trust it once with
+  `/hooks`; the installer says so, and nothing is collected until then.
+- **dsh** — mounts the live bridge (`@deepseek-ai/dsh-hooks-claude-code`) in
+  `$DSH_HOME/cordis.patch.yml`, the user-owned overlay the loader applies over
+  every profile's own layer. dsh needs no hooks to be measured — its session logs
+  already carry skill loads, prompts and per-step tokens — so the bridge is only
+  mounted when dsh and that plugin are both present, and it is skipped otherwise.
 
 Our handlers are recognised by the collector path they run, so re-running is
 idempotent and other hooks are never touched. Every file is backed up next to
 itself before a write.
 
-    python3 install_hooks.py                 # install into ~/.claude/settings.json
-    python3 install_hooks.py --status        # which events are wired, and to which path
-    python3 install_hooks.py --dry-run       # print the merged settings, write nothing
+    python3 install_hooks.py                 # install every harness found here
+    python3 install_hooks.py --status        # per harness: installed, missing or skipped
+    python3 install_hooks.py --dry-run       # print what would be written, write nothing
     python3 install_hooks.py --uninstall     # remove only our handlers
-    python3 install_hooks.py --settings .claude/settings.local.json   # project-local instead
-
-    python3 install_hooks.py --dsh           # optional: mount the dsh hook bridge
-    python3 install_hooks.py --dsh --status  # is the bridge mounted?
-    python3 install_hooks.py --dsh --uninstall
+    python3 install_hooks.py --settings .claude/settings.local.json   # Claude Code elsewhere
 """
 
 import argparse
@@ -37,13 +40,25 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE = SKILL_DIR / "hooks" / "hooks.json"
 COLLECT = SKILL_DIR / "hooks" / "collect.py"
 MARKER = "skill-usage-insights/hooks/collect.py"
-DEFAULT_SETTINGS = Path("~/.claude/settings.json").expanduser()
+
+# Codex keeps its hook set in its own hooks.json and needs `[features].hooks` on (the default).
+CODEX_TEMPLATE = SKILL_DIR / "hooks" / "hooks_codex.json"
+CODEX_COLLECT = SKILL_DIR / "hooks" / "collect_codex.py"
+CODEX_MARKER = "skill-usage-insights/hooks/collect_codex.py"
 
 # The optional dsh side. `DSH_HOME` defaults to ~/.dsh; the home patch layer is the
 # user-owned overlay the loader applies over every profile's own layer.
 DSH_TEMPLATE = SKILL_DIR / "hooks" / "dsh-hooks.json"
 DSH_BRIDGE = "@deepseek-ai/dsh-hooks-claude-code"
 DSH_ROW = "skill-usage-insights-hooks"
+
+
+def claude_dir():
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()
+
+
+def claude_settings():
+    return claude_dir() / "settings.json"
 
 
 def dsh_home():
@@ -62,17 +77,34 @@ def dsh_collect():
     return SKILL_DIR / "hooks" / "collect.py"
 
 
-def ours(handler):
-    return isinstance(handler, dict) and MARKER in str(handler.get("command", "")) + " ".join(handler.get("args") or [])
+def dsh_bridge_available():
+    """dsh is on PATH and the hook bridge sits in its global node_modules."""
+    dsh = shutil.which("dsh")
+    if not dsh:
+        return False
+    prefix = Path(os.path.realpath(dsh)).parent.parent
+    return (prefix / "lib" / "node_modules" / DSH_BRIDGE).is_dir()
 
 
-def strip_ours(hooks):
+def codex_home():
+    return Path(os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+
+
+def codex_hooks_path():
+    return codex_home() / "hooks.json"
+
+
+def ours(handler, marker=MARKER):
+    return isinstance(handler, dict) and marker in str(handler.get("command", "")) + " ".join(handler.get("args") or [])
+
+
+def strip_ours(hooks, marker=MARKER):
     """Remove our handlers (and any matcher group left empty) from a settings `hooks` object."""
     cleaned = {}
     for event, groups in (hooks or {}).items():
         kept = []
         for group in groups or []:
-            handlers = [h for h in group.get("hooks", []) if not ours(h)]
+            handlers = [h for h in group.get("hooks", []) if not ours(h, marker)]
             if handlers:
                 kept.append(dict(group, hooks=handlers))
         if kept:
@@ -102,7 +134,7 @@ def merged(settings, uninstall=False):
     return result
 
 
-def status(settings):
+def claude_status(settings):
     wired = {}
     for event, groups in (settings.get("hooks") or {}).items():
         for group in groups or []:
@@ -112,10 +144,81 @@ def status(settings):
     expected = set(rendered_template())
     for event in sorted(expected | set(wired)):
         state = "installed" if event in wired else "missing"
-        print(f"{event:<20} {state:<9} {wired.get(event, '')}")
+        print(f"  {event:<20} {state:<9} {wired.get(event, '')}")
     if wired and set(wired) == expected and all(str(COLLECT) in c for c in wired.values()):
         return 0
     return 1
+
+
+# --------------------------------------------------------------------------- codex
+
+
+def rendered_codex_template():
+    """Our Codex hook set with the collector's absolute path in it."""
+    doc = json.loads(CODEX_TEMPLATE.read_text(encoding="utf-8"))
+    for groups in doc["hooks"].values():
+        for group in groups:
+            for handler in group["hooks"]:
+                handler["command"] = handler["command"].replace("${COLLECT}", shlex.quote(str(CODEX_COLLECT)))
+    return doc
+
+
+def codex_merged(doc, uninstall=False):
+    result = dict(doc)
+    hooks = strip_ours(doc.get("hooks"), CODEX_MARKER)
+    if not uninstall:
+        for event, groups in rendered_codex_template()["hooks"].items():
+            hooks.setdefault(event, []).extend(groups)
+    if hooks:
+        result["hooks"] = hooks
+    else:
+        result.pop("hooks", None)
+    return result
+
+
+def codex_status(doc):
+    wired = {}
+    for event, groups in (doc.get("hooks") or {}).items():
+        for group in groups or []:
+            for handler in group.get("hooks", []):
+                if ours(handler, CODEX_MARKER):
+                    wired[event] = handler.get("command")
+    expected = set(rendered_codex_template()["hooks"])
+    for event in sorted(expected | set(wired)):
+        print(f"{event:<20} {'installed' if event in wired else 'missing':<9} {wired.get(event, '')}")
+    ok = bool(wired) and set(wired) == expected and all(str(CODEX_COLLECT) in c for c in wired.values())
+    if not ok:
+        print("note: Codex skips untrusted hooks; run /hooks once to review and trust them")
+    else:
+        print("note: if a session records nothing, its handlers are not trusted yet — run /hooks")
+    return 0 if ok else 1
+
+
+def codex_install(dry_run=False, uninstall=False):
+    path = codex_hooks_path()
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except ValueError as exc:
+        print(f"refusing to touch {path}: not valid JSON ({exc})", file=sys.stderr)
+        return 2
+    result = codex_merged(doc, uninstall=uninstall)
+    if dry_run:
+        print(f"--- {path} (hooks only; every other key is left as it is)")
+        print(json.dumps({"hooks": result.get("hooks", {})}, indent=2, ensure_ascii=False))
+        return 0
+    if result == doc:
+        print(f"{path}: already {'clean' if uninstall else 'up to date'}")
+        return 0
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file():
+        backup(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(path)
+    print(f"{path}: {'removed' if uninstall else 'installed'} skill-usage-insights hooks")
+    if not uninstall:
+        print("next: run /hooks in Codex once and trust the handlers, or they never run")
+    return 0
 
 
 # --------------------------------------------------------------------------- dsh
@@ -254,47 +357,103 @@ def dsh_verify():
     return 0 if mounted else 1
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS, help="settings file (default: %(default)s)")
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--uninstall", action="store_true", help="remove our handlers")
-    group.add_argument("--status", action="store_true", help="report what is wired; exit 1 unless fully installed")
-    parser.add_argument("--dry-run", action="store_true", help="print the result instead of writing it")
-    parser.add_argument("--dsh", action="store_true",
-                        help="optional live capture: mount the dsh hook bridge in $DSH_HOME/cordis.patch.yml")
-    args = parser.parse_args(argv)
-
-    if args.dsh:
-        return dsh_status() if args.status else dsh_install(dry_run=args.dry_run, uninstall=args.uninstall)
-
-    path = args.settings.expanduser()
+def claude_install(path, dry_run=False, uninstall=False):
     try:
         settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     except ValueError as exc:
         print(f"refusing to touch {path}: not valid JSON ({exc})", file=sys.stderr)
         return 2
-
-    if args.status:
-        return status(settings)
-
-    result = merged(settings, uninstall=args.uninstall)
-    if args.dry_run:
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+    result = merged(settings, uninstall=uninstall)
+    if dry_run:
+        print(f"--- {path} (hooks only; every other key is left as it is)")
+        print(json.dumps({"hooks": result.get("hooks", {})}, indent=2, ensure_ascii=False))
         return 0
     if result == settings:
-        print(f"{path}: already {'clean' if args.uninstall else 'up to date'}")
+        print(f"{path}: already {'clean' if uninstall else 'up to date'}")
         return 0
-
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
-        backup = path.with_name(f"{path.name}.bak-{time.strftime('%Y%m%d%H%M%S')}")
-        shutil.copy2(path, backup)
-        print(f"backup: {backup}")
+        backup(path)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     tmp.replace(path)
-    print(f"{path}: {'removed' if args.uninstall else 'installed'} skill-usage-insights hooks")
+    print(f"{path}: {'removed' if uninstall else 'installed'} skill-usage-insights hooks")
+    return 0
+
+
+def targets(settings=None):
+    """Every supported harness, whether it is present here, and why it is not.
+
+    A harness whose config directory is missing has never run on this machine, so it
+    is skipped rather than created. dsh additionally needs its hook bridge plugin:
+    without it the patch row would be one dsh cannot load.
+    """
+    claude = settings or claude_settings()
+    codex = codex_hooks_path()
+    home = dsh_home()
+    return [
+        {"name": "claude-code", "path": claude,
+         "present": bool(settings) or claude.parent.is_dir(),
+         "skip": f"no {claude.parent}"},
+        {"name": "codex", "path": codex,
+         "present": codex.parent.is_dir(),
+         "skip": f"no {codex.parent}"},
+        {"name": "dsh", "path": dsh_patch(),
+         "present": home.is_dir() and dsh_bridge_available(),
+         "skip": (f"no {DSH_BRIDGE} in the dsh install" if home.is_dir() else f"no {home}")},
+    ]
+
+
+def install_one(name, settings, dry_run, uninstall):
+    if name == "claude-code":
+        return claude_install(settings or claude_settings(), dry_run, uninstall)
+    if name == "codex":
+        return codex_install(dry_run, uninstall)
+    return dsh_install(dry_run, uninstall)
+
+
+def status_one(name, settings):
+    if name == "dsh":
+        return dsh_status()
+    path = codex_hooks_path() if name == "codex" else (settings or claude_settings())
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except ValueError as exc:
+        print(f"{path}: not valid JSON ({exc})", file=sys.stderr)
+        return 2
+    return codex_status(doc) if name == "codex" else claude_status(doc)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--settings", type=Path, default=None,
+                        help="Claude Code settings file (default: <claude dir>/settings.json)")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--uninstall", action="store_true", help="remove our handlers everywhere")
+    group.add_argument("--status", action="store_true", help="report what is wired; exit 1 unless fully installed")
+    parser.add_argument("--dry-run", action="store_true", help="print the result instead of writing it")
+    args = parser.parse_args(argv)
+
+    settings = args.settings.expanduser() if args.settings else None
+    failed, checked = [], 0
+    for target in targets(settings):
+        name = target["name"]
+        if not target["present"]:
+            print(f"{name}: skipped — {target['skip']}")
+            continue
+        checked += 1
+        print(f"{name}: {target['path']}")
+        code = status_one(name, settings) if args.status else install_one(
+            name, settings, args.dry_run, args.uninstall)
+        if code:
+            failed.append(name)
+    if not checked and not args.uninstall:
+        print("no harness found: looked for $CLAUDE_CONFIG_DIR, $CODEX_HOME and $DSH_HOME",
+              file=sys.stderr)
+        return 1
+    if failed:
+        print(f"\nnot ok: {', '.join(failed)} (see above)", file=sys.stderr)
+        return 1
     return 0
 
 

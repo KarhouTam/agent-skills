@@ -357,6 +357,21 @@ def test_failed_tool_result_patches_the_resource_it_belongs_to(repo, tmp_path):
     assert [r["kind"] for r in records(data)].count("turn_failed") == 1
 
 
+def test_one_command_naming_two_skill_files_keeps_both_results(repo, tmp_path):
+    home, data = tmp_path / "dsh-home", tmp_path / "data"
+    log = Log(home, SESSION, tmp_path / "project")
+    log.prompt("run both scripts")
+    call = log.step(900, 10, [("bash", {"command": (
+        f"python3 {repo / 'teach/scripts/note.py'} && python3 {repo / 'wiki/scripts/wiki.py'}")})])[0]
+    log.fail(call, "EXIT_1")
+    log.end()
+
+    run_collect(repo, home, data)
+    files = analyze_repo(repo, data)["files"]
+    for path in ("teach/scripts/note.py", "wiki/scripts/wiki.py"):
+        assert (files[path]["exec"], files[path]["fail"]) == (1, 1), path
+
+
 def test_catalog_emission_is_measured(repo, tmp_path):
     home, data = tmp_path / "dsh-home", tmp_path / "data"
     log = scenario(repo, home)

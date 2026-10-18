@@ -4,10 +4,10 @@ Personal skill collection, also some useful skills from public repos.
 ## Layout
 
 - **Self-developed skills** are version-controlled: 
-  - `adversarial-review`
   - `context7-mcp`
   - `deepwiki`
   - `gh-github-cli`
+  - `humanize`
   - `mermaid-diagrams`
   - `pytorch-test-refactoring`
   - `skill-usage-insights`
@@ -46,14 +46,18 @@ untracked until its directory is added there.
 `skill-usage-insights` records which skills each prompt triggers, the tokens each
 skill run consumes, and whether declared sub-skills fire, then turns that record
 into a dated insight and a keep / update / retire decision per skill. It covers
-both harnesses in use here:
+every harness in use here:
 
 - **dsh** needs no setup: the collector decodes the session logs dsh already writes
   under `$DSH_HOME/sessions`, and `analyze.py` picks up new ones by itself.
 - **Claude Code** needs its hooks merged into `~/.claude/settings.json` once.
+- **Codex** needs its hooks merged into `~/.codex/hooks.json` once, and then trusted
+  with `/hooks` — Codex silently skips an untrusted handler.
+- The dsh bridge is mounted only when that plugin is installed; dsh is measured from
+  its logs either way.
 
 ```bash
-python3 skill-usage-insights/scripts/install_hooks.py   # Claude Code only; ask before running
-# ...use either harness as usual, then in a session:
+python3 skill-usage-insights/scripts/install_hooks.py   # wires every harness it finds; ask first
+# ...use any harness as usual, then in a session:
 /skill-usage-insights
 ```

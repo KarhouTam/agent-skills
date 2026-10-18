@@ -17,10 +17,11 @@ decision per skill that needs one.
 |---|---|---|
 | dsh | `hooks/collect_dsh.py` decodes `$DSH_HOME/sessions/**/session.v3.jsonl.zstd` | nothing |
 | Claude Code | `hooks/collect.py` runs as a hook on every event | `scripts/install_hooks.py` |
+| Codex | `hooks/collect_codex.py` runs as a hook; its rollout log (`~/.codex/sessions/**/rollout-*.jsonl`) supplies tokens and activations | `scripts/install_hooks.py`, then trust the handlers once with `/hooks` |
 
-Both write the same record kinds, so one insight covers both and nothing in the
-analysis is harness-specific. `analyze.py` collects new dsh logs itself before it
-reads, so on dsh the only command you need is Step 1.
+All three write the same record kinds, so one insight covers every harness and
+nothing in the analysis is harness-specific. `analyze.py` collects new dsh logs
+itself before it reads, so on dsh the only command you need is Step 1.
 
 The script does the counting and the agent does the judgment. Every number in an
 insight comes from `analyze.py`. The agent's job is the `## Decisions` section, and
@@ -31,8 +32,8 @@ each decision must cite numbers that are in the file.
 ## Step 0 — Is anything being collected?
 
 ```bash
-python3 <base>/hooks/collect_dsh.py --status    # dsh: is the log corpus readable?
-python3 <base>/scripts/install_hooks.py --status   # Claude Code: is every hook wired?
+python3 <base>/hooks/collect_dsh.py --status      # dsh: is the log corpus readable?
+python3 <base>/scripts/install_hooks.py --status  # every hook harness found here: wired or not?
 ```
 
 Under dsh, `--status` exits 0 when the corpus is usable and prints something like:
@@ -51,21 +52,29 @@ there is nothing to build an insight from.
 
 A non-zero `not yet collected` is normal and needs no action: Step 1 collects.
 
-Under Claude Code, exit 0 means every hook is wired. Anything else means collection
-is off or partial: tell the user, show them the install command, and **ask before
-running it**, because it rewrites `~/.claude/settings.json` (it backs the file up
-first and leaves other hooks alone).
+The installer has no harness flag: it looks for each harness on this machine and
+wires the ones it finds, skipping the rest with a one-line reason. Exit 0 means
+every harness it found is wired. Anything else means collection is off or partial:
+tell the user, show them the command, and **ask before running it**, because it
+rewrites up to three files — `~/.claude/settings.json`, `~/.codex/hooks.json`, and
+`$DSH_HOME/cordis.patch.yml`. Each is backed up first and other hooks are left alone.
 
 ```bash
 python3 <base>/scripts/install_hooks.py            # --dry-run to preview, --uninstall to remove
 ```
 
-Neither harness needs the optional dsh hook bridge: it duplicates what the session
-logs already hold, and only adds live capture. If the user asks for it:
+Codex keeps its hook set in `~/.codex/hooks.json` and **runs nothing until you
+trust it**: run `/hooks` once in Codex, review the handlers, and trust them. Until
+then a Codex session records nothing, which looks exactly like a quiet day.
 
-```bash
-python3 <base>/scripts/install_hooks.py --dsh      # mounts the bridge in $DSH_HOME/cordis.patch.yml
-```
+### The dsh bridge is not required
+
+dsh is measured from its own session logs, so it needs no hook. The installer
+mounts the live bridge only when the dsh install actually ships
+`@deepseek-ai/dsh-hooks-claude-code`; otherwise it says so and skips. Leave it
+that way unless you are debugging live capture: the bridge records the events the
+log already holds, and its `prompt_id` is not the log's turn number, so a prompt
+can show up twice.
 
 A fresh install has no history. Say so and stop. An insight built on minutes of
 data is noise.
@@ -169,9 +178,10 @@ To update a public skill, use an overlay. Never edit it in place (AGENTS.md).
 - A run's lifecycle ends with its turn. Later turns where the skill is still in
   context are not attributed to it, and `analyze.py` says how many subagents could not
   be joined to a parent.
-- Claude Code hook records and dsh log records are both complete only for sessions the
-  machine still holds: dsh keeps its logs under `$DSH_HOME/sessions`, so a deleted log
-  is a deleted record. Cloud sessions that skip `~/.claude/settings.json` leave no data.
+- Hook records and log records are complete only for sessions the machine still holds:
+  dsh keeps its logs under `$DSH_HOME/sessions` and Codex under `~/.codex/sessions`, so
+  a deleted log is a deleted record. Cloud sessions that skip the settings file leave no
+  data, and untrusted Codex hooks leave none at all.
 - For record kinds, the attribution rules and the known blind spots, read
   `reference/data-model.md`.
 
@@ -186,4 +196,6 @@ To update a public skill, use an overlay. Never edit it in place (AGENTS.md).
 | Decisions with no numbers | Each line cites a row of the insight |
 | Editing or deleting skills straight away | Report first. Act only after the user confirms |
 | Reading every SKILL.md body for the trigger review | Descriptions are what trigger a skill. Read the frontmatter only |
+| Installing the Codex hooks and assuming they run | Codex skips untrusted hooks silently; say "run `/hooks` and trust them" in the report |
+| Comparing Tokens/run without the Auth column | A run in an authoring session is maintenance; the cost flags already exclude it, and the column says how many |
 | Hand-editing the tables | Re-run `analyze.py`. Only `## Decisions` is written by hand |
