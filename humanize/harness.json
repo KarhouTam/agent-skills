@@ -1,0 +1,4 @@
+{
+  "implementer": { "harness": "native" },
+  "challenger": { "harness": "opencode" }
+}

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Humanize"
+  short_description: "Cross-harness adversarial review loop"
+policy:
+  allow_implicit_invocation: false
