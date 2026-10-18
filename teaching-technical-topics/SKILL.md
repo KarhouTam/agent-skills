@@ -10,9 +10,9 @@ disable-model-invocation: true
 
 A teaching answer is a **build**, not a dump: pick a mode, answer in a fixed shape,
 and teach into a draft that only becomes reference material once the user confirms
-the lesson landed. Steps 0–2 always run; a Standard or Deep lesson about a public
-repo also fetches that repo's DeepWiki map first (Step 1) — as a reading list, never
-as a source — and a prompt naming an ELI level also loads `eli5` for the register
+the lesson landed. Steps 0–2 always run; every Standard or Deep lesson fetches the
+subject repo's DeepWiki map first (Step 1) — as a reading list, never as a source —
+and a prompt naming an ELI level also loads `eli5` for the register
 (Step 2). The answer shape below applies to Standard and Deep.
 
 Resolve `<base>` from the base directory the harness reports for this skill —
@@ -50,10 +50,11 @@ re-verify before repeating the claim; if the source contradicts the note, fix th
 note and tell the user what changed. For fast-moving internals an unrefreshed note
 is worse than no note.
 
-### External map: DeepWiki (one lookup for Standard / Deep; skipped in Quick)
+### External map: DeepWiki (every Standard / Deep lesson; skipped in Quick)
 
-When the question sits inside a **public GitHub repository** (PyTorch, vLLM, k8s…),
-take that repo's wiki map before drafting.
+Take the subject repo's wiki map before drafting — no condition on the question, only
+on the mode. Nearly every lesson here is PyTorch or vLLM, so the repo is almost always
+a public one with a map waiting.
 
 **REQUIRED SUB-SKILL:** `deepwiki`. What to query, in what order, and which answers may not be trusted all live there; do not re-derive them here.
 
@@ -338,6 +339,6 @@ zero: record that, and start the next lesson at their real level.
 - A claim about internals carries no `file::symbol` and no `unverified` marker.
 - The 归档 question is asked more than once for the same topic, or at all in Quick
   mode.
-- A Standard/Deep lesson about a public repo's internals that never consulted DeepWiki, and never said why not.
+- A Standard/Deep lesson that never consulted DeepWiki, and never said why not.
 - A wiki-sourced claim wearing a local `file::symbol`, or `verified_against` naming DeepWiki.
 - Every question starts a new project directory instead of extending one.
