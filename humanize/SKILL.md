@@ -71,7 +71,7 @@ Rules:
 | Harness | Persistence | Final message comes from |
 |---------|-------------|--------------------------|
 | `native` | session — this harness's own agent tool | agent result |
-| `dsh` | replay — `dsh --profile headless` is one fresh agent per run | stdout |
+| `dsh` | session — `--json` records the session id on round 1, `--session-id` adopts it later | JSON `final` event |
 | `claude-code` | session — `--session-id` then `--resume` | JSON `result` |
 | `codex` | session — `codex exec resume` | the `-o` last-message file |
 | `opencode` | session — `-s <sessionID>` | JSON event stream |
@@ -80,6 +80,94 @@ Rules:
 harness commands yourself; see [Runner Cheat Sheet](#runner-cheat-sheet). Every `scripts/…` and
 `prompts/…` path below is relative to **this skill's directory**, not to the user's workspace —
 resolve it before running bash.
+
+### Session keep-alive (default for every role)
+
+Each role keeps **one session for the whole loop**. Round 1 creates it; every later round resumes
+it — on every harness, `dsh` included. The session carries the role's own reasoning record, so a
+resumed round sends only the delta: the compact criteria list, the latest feedback or artifact
+pointer. A fresh session mid-loop (only via `--reset-session`, or after a lost session) discards
+that record and forces the full-payload prompt — resume unless the session is actually lost.
+
+Honest accounting: the resumed harness still replays session history to the model internally
+(usually cached), so what shrinks is the prompt *you* compose and re-send each round, plus the
+risk of losing the debate record. A `dsh` session is additionally bound to the `--cwd` it was
+created in — pass the same `--cwd` on every round; the runner refuses a moved resume (exit 2)
+rather than letting the harness fail late.
+
+### Communication method ({{COMMS}})
+
+The two roles talk either **directly** (team mode) or **through you** (relay). Resolve which in
+Step 0, and insert the matching block into each role prompt's `{{COMMS}}` slot in Step 2.
+
+- A role runs **natively** when its `harness` is `native` or equals the harness you are running
+  in (the rule above). Otherwise it is **bridged** — launched by `run_role.py` as its own process.
+- **Team mode** applies only when *both* roles resolve natively *and* the harness you are running
+  in is team-capable. A bridged role can never be team mode: two `run_role.py` subprocesses cannot
+  reach each other.
+- **Relay mode** is everything else — a bridged role, a mixed config, or a native pair on a
+  harness without team tools.
+- Team-capable, as shipped, is every harness in the `HARNESSES` registry (`dsh`, `codex`,
+  `claude-code`, `opencode`); shrink that set if one turns out to lack agent-team tools.
+
+In team mode both roles are teammates on the running harness, messaging each other directly with
+the harness's agent-team tools (`spawn_teammate` + `send_message`) over a shared working
+directory; the artifact travels **by path**, never inlined into your context. You still own the
+brief, the ledger, the round and dispute caps, the PASS guard, arbitration, and every user
+interaction. The challenger's read-only stance rests on its role prompt and your review, since
+teammates share one tool surface.
+
+Tradeoff, stated plainly: both roles share one harness's tool surface and scaffolding — the
+blind-spot correlation the split-harness default exists to avoid. Team mode buys persistent
+sessions and a direct, low-overhead debate; take it only when the config already puts both roles
+natively on a team-capable harness, and keep the split-harness default otherwise.
+
+**The `{{COMMS}}` blocks.** Copy the matching one into each role prompt verbatim.
+
+*implementer / team*
+
+```markdown
+## How you communicate
+
+You and the challenger are teammates on this harness, sharing one working directory. Send your
+disputes and escalations to the challenger **directly** with this harness's agent-team tools
+(`send_message`) — never route the debate through the orchestrator. The challenger messages its
+FEEDBACK and DISPUTE RESPONSES straight back to you. The orchestrator still owns the brief, the
+ledger, the caps, and every user interaction: send it the artifact path and a one-line round
+summary, not your full exchange.
+```
+
+*implementer / relay*
+
+```markdown
+## How you communicate
+
+You do not talk to the challenger directly. Everything you send goes to the orchestrator, which
+relays it. Address the orchestrator as "you"; it delivers the challenger's FEEDBACK and DISPUTE
+RESPONSES back to you, and carries your disputes to the challenger.
+```
+
+*challenger / team*
+
+```markdown
+## How you communicate
+
+You and the implementer are teammates on this harness, sharing one working directory. Deliver
+your FEEDBACK and DISPUTE RESPONSES to the implementer **directly** with this harness's
+agent-team tools (`send_message`) — never route them through the orchestrator — and the
+implementer's disputes reach you the same way. Send the orchestrator only your full structured
+verdict; it still owns the brief, the ledger, the caps, and every user interaction.
+```
+
+*challenger / relay*
+
+```markdown
+## How you communicate
+
+You do not talk to the implementer directly. Send your full verdict to the orchestrator, which
+relays your FEEDBACK and DISPUTE RESPONSES to the implementer; the implementer's disputes reach
+you the same way.
+```
 
 ## Flow
 
@@ -129,11 +217,15 @@ digraph gan_loop {
 2. Run `python3 <skill-dir>/scripts/run_role.py preflight`. It prints one line per role (harness,
    persistence, resolved binary, `ok`/`missing`) and exits non-zero when a configured binary is
    missing. Fix `path` in the config before going further.
-3. Create one run directory for the whole loop:
+3. Resolve the **communication method** — team or relay — per
+   [Communication method](#communication-method-comms). It picks the `{{COMMS}}` block you insert
+   in Step 2; note which mode you landed on, because it changes how every bridged and native round
+   is relaid.
+4. Create one run directory for the whole loop:
    `RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/humanize-XXXXXX")`. Everything the loop
    produces — brief, ledger, prompts, outputs, logs, session ids — lives there, outside the
    user's worktree.
-4. From then on, every bridged round is one `run_role.py run` invocation against `$RUN_DIR`.
+5. From then on, every bridged round is one `run_role.py run` invocation against `$RUN_DIR`.
 
 A review round routinely takes minutes. If your shell tool's timeout is shorter, launch the
 runner as a background process and collect its result (on DeepSeek Harness: `bash` with
@@ -200,8 +292,10 @@ The role instructions live in two editable files, not in this document:
 | `prompts/implementer.md` | every implementer turn |
 | `prompts/challenger.md` | every challenger turn |
 
-Each file contains three placeholders — `{{ROUND}}`, `{{BRIEF}}`, `{{PAYLOAD}}` — that you
-substitute before handing the prompt to the role. A leftover `{{` in a prompt is a bug: fix it
+Each file contains four placeholders — `{{ROUND}}`, `{{BRIEF}}`, `{{PAYLOAD}}`, `{{COMMS}}` —
+that you substitute before handing the prompt to the role. `{{COMMS}}` carries the communication
+method: the mode-specific block from [Communication method](#communication-method-comms), copied
+in verbatim. A leftover `{{` in a prompt is a bug — including an unfilled `{{COMMS}}` — fix it
 before launching. Do not edit the prompt files mid-loop; they are configuration shared by both
 roles' turns.
 
@@ -228,7 +322,7 @@ round, substitute the full `BRIEF.md` — that role has no memory of it.
 
 | Mode | Implementer payload | Challenger payload |
 |------|---------------------|--------------------|
-| `native` | `send_message` with the challenger's FEEDBACK / DISPUTE RESPONSES + where the artifact is | `send_message` with the current artifact + criteria reminder |
+| `native` | `send_message` with the challenger's FEEDBACK / DISPUTE RESPONSES + where the artifact is (team mode: the challenger sends these directly; you send only the round kick-off) | `send_message` with the current artifact + criteria reminder (team mode: by path) |
 | bridged `session` | resume the session with the same delta | resume the session with the current artifact + "answer every dispute, re-check every open item and every criterion" |
 | bridged `replay` | fresh process with the full payload | fresh process with the full payload |
 
@@ -329,7 +423,8 @@ python3 <skill-dir>/scripts/run_role.py run \
 - A non-zero exit means the round failed. Report the log tail and stop — do not invent a verdict.
 - `--reset-session` starts a fresh session. Use it when a session is lost, when the harness stops
   answering coherently, or when you want the compacted payload replayed.
-- `dsh` has no resume: every round is a fresh process, so it always takes the full payload.
+- A `dsh` session is bound to its creation `--cwd`: pass the same `--cwd` on every round; the runner
+  refuses a moved resume (exit 2) instead of letting the harness fail late.
 
 ### Parsing Failures
 
@@ -378,7 +473,8 @@ Three mechanisms keep the loop's context bounded; use all three:
 1. **Summaries.** Each challenger `SUMMARY` goes into the ledger's round list. It is the replay
    payload, the reset payload, and the final report material. Never skip it.
 2. **Resumed sessions.** A bridged session keeps its own history and its CLI compacts it; send
-   only the delta. A native role keeps its own agent context; send only the delta.
+   only the delta. A native role — subagent or teammate — keeps its own agent context; send
+   only the delta.
 3. **The ledger.** Items, states, dispute counts, and rulings live in `LEDGER.md`, not in your
    context. Read it back rather than recalling it.
 
@@ -394,14 +490,14 @@ Everything transient lives in `$RUN_DIR`; nothing is written into the user's wor
 | `round-<N>-<role>.out.md` | runner | that round's final message |
 | `round-<N>-<role>.log` | runner | argv + raw stdout/stderr of the harness process |
 | `round-<N>-<role>.harness-out` | harness | codex's `-o` last-message file (codex only) |
-| `sessions.json` | runner | role → `{harness, session_id}`, used to resume |
+| `sessions.json` | runner | role → `{harness, session_id, cwd?}`, used to resume |
 | `run.jsonl` | runner | one summary line per invocation |
 
 **How a role knows its session:** it does not, and it does not need to. You hold the run
 directory; on every round the runner reads `sessions.json` and injects the right flag
-(`--resume`, `exec resume`, `-s`). Round 1 creates the id, later rounds reuse it. `dsh` has no
-session at all — each round is a fresh process and gets the full payload. If a session is lost,
-`--reset-session` starts a new one and the full payload rebuilds context.
+(`--resume`, `exec resume`, `-s`, `--session-id`). Round 1 creates the id, later rounds reuse
+it — on every harness, `dsh` included. If a session is lost, `--reset-session` starts a new
+one and the full payload rebuilds context.
 
 ## Exit Conditions
 
@@ -428,8 +524,12 @@ session at all — each round is a fresh process and gets the full payload. If a
   brief. No preference, no "it works for me"
 - **No re-litigating** — a conceded item stays conceded; a user ruling is final. New evidence
   opens a new item, not the old one
-- **One session per role** — native roles are spawned once and reused; bridged session roles
-  create their session on round 1 and resume it
+- **One session per role** — every role keeps one session for the whole loop: native roles
+  (subagents or teammates) are spawned once and messaged thereafter; bridged roles, `dsh`
+  included, create their session on round 1 and resume it. A fresh session mid-loop resets
+  the role's reasoning record and costs the full payload
+- **Team mode stays lean** — teammates are spawned once on round 1 and messaged, never
+  re-spawned per round; the artifact travels by path, never inlined through your context
 - **Model routing** — a model comes only from `harness.json`. Native agent tools that expose no
   model parameter inherit; never invent a model name
 - **No silent fallback** — a failed or missing configured harness stops the loop
@@ -471,7 +571,7 @@ python3 <skill-dir>/scripts/run_role.py run ... --dry-run         # show the res
 |------|---------|
 | 0 | round completed; final message in `--out` |
 | 1 | the harness ran but failed, or produced no usable final message |
-| 2 | configuration error (unknown harness, bad prompt path) |
+| 2 | configuration error (unknown harness, bad prompt path, a `dsh` resume from a different cwd) |
 | 3 | the role is `native` — use your agent tool, not the runner |
 | 4 | the configured harness binary was not found |
 | 5 | resume requested with no recorded session |
@@ -495,6 +595,7 @@ real round-1 and resume call per harness. `evals/README.md` records the last liv
 | A challenger that MAINTAINs without new evidence | That is a stalemate. Escalate after the third dispute; do not let it burn rounds. |
 | Dropping the ledger or the summary list | Both are the replay/reset payload and the final report. Update them every round. |
 | Letting the implementer see old full outputs | Send only the latest feedback/dispute delta; the ledger carries the rest. |
+| Running every round as a fresh session or teammate | One session per role: resume it. A fresh round loses the reasoning record and pays the full payload. |
 | Composing harness flags by hand | Use the runner; `--dry-run` shows exactly what will execute. |
 | Falling back to native because the other harness failed | Stop and report. Same-harness review is what this configuration exists to avoid. |
 | Deciding a dispute yourself to keep going | Only the user arbitrates an unresolved dispute. |
@@ -525,6 +626,7 @@ real round-1 and resume call per harness. `evals/README.md` records the last liv
 | "The challenger is the quality gate, so it wins" | The gate is the brief. A challenger that cannot defend a critique concedes it. |
 | "Compaction loses important context" | The ledger plus 2-3 line summaries written by the challenger capture everything materially relevant. Full old output is redundant. |
 | "Re-spawning is cleaner than resuming" | Re-spawning loses the challenger's adversarial record. Resume unless the session is actually lost. |
-| "Both roles in the same harness is simpler" | That is the blind-spot-sharing failure mode this skill is configured to avoid. |
+| "A fresh session per round is cheaper" | A fresh session discards the role's reasoning record and forces the full-payload prompt; the resume carries both. |
+| "Both roles in the same harness is simpler" | An accidental same-harness collapse is the blind-spot failure the split default exists to avoid; deliberate team mode — both roles native on a team-capable harness — is the sanctioned exception. State the tradeoff. |
 | "It's been 5 rounds, that's probably enough" | The challenger, not the round count, decides when output is good. Keep going until PASS or a cap. |
 | "I'll just run it once and if it passes, move on" | A single PASS can be perfunctory. The fatigue guard exists for a reason. |

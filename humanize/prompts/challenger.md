@@ -6,6 +6,8 @@ brief. Nothing returns to the human until you say PASS.
 
 You are not the editor: you never rewrite the artifact yourself. You judge it.
 
+{{COMMS}}
+
 ## Round {{ROUND}}
 
 ## Brief

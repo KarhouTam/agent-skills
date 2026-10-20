@@ -35,6 +35,7 @@ class Role:
     harness: str = "native"
     model: str | None = None
     path: str | None = None
+    variant: str | None = None  # harness-specific rationale effort (opencode --variant)
 
 
 @dataclass
@@ -98,7 +99,13 @@ def _build_claude(ctx: Ctx) -> Launch:
         argv += ["--session-id", ctx.session_id or ""]
     if ctx.role == "challenger":
         tools = "Read,Grep,Glob,Bash"
-        argv += ["--tools", tools, "--allowedTools", tools, "--permission-prompts", "none"]
+        # Newer Claude Code dropped --tools/--permission-prompts and its variadic
+        # tool flags swallow a trailing prompt: pre-approve the read-only tool
+        # set, deny the editing tools, and use the --flag=value spelling.
+        argv += [
+            f"--allowedTools={tools}",
+            "--disallowedTools=Edit,Write,NotebookEdit",
+        ]
     else:
         argv += ["--permission-mode", "bypassPermissions"]
     if ctx.spec.model:
@@ -157,6 +164,8 @@ def _build_opencode(ctx: Ctx) -> Launch:
         argv += ["--auto"]
     if ctx.spec.model:
         argv += ["-m", ctx.spec.model]
+    if ctx.spec.variant:
+        argv += ["--variant", ctx.spec.variant]
     argv.append(ctx.prompt)
     return Launch(argv=argv, session_id=ctx.session_id)
 
@@ -187,14 +196,28 @@ def _final_opencode(stdout: str, _out_file: Path | None) -> str:
 
 
 def _build_dsh(ctx: Ctx) -> Launch:
-    return Launch(argv=[ctx.binary, "--profile", "headless", ctx.prompt])
+    argv = [ctx.binary, "--profile", "headless", "--json"]
+    if ctx.resume:
+        argv += ["--session-id", ctx.session_id or ""]
+    argv.append(ctx.prompt)
+    return Launch(argv=argv, session_id=ctx.session_id)
 
 
 def _final_dsh(stdout: str, _out_file: Path | None) -> str:
-    text = stdout.strip()
-    if not text:
-        raise InvocationError("dsh headless printed an empty final message")
-    return text
+    final: str | None = None
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "final":
+            final = event.get("text")
+    if not isinstance(final, str) or not final.strip():
+        raise InvocationError("dsh --json stream carried no non-empty final event")
+    return final.strip()
 
 
 HARNESSES: dict[str, Harness] = {
@@ -228,9 +251,9 @@ HARNESSES: dict[str, Harness] = {
     "dsh": Harness(
         name="dsh",
         candidates=("dsh",),
-        persistence="replay",
-        session_source=None,
-        session_re=None,
+        persistence="session",
+        session_source="stdout",
+        session_re=r'"sessionId"\s*:\s*"(session-[^"]+)"',
         build=_build_dsh,
         final=_final_dsh,
     ),
@@ -275,6 +298,7 @@ def load_config(path: Path) -> tuple[dict[str, Role], list[str]]:
             harness=harness,
             model=raw.get("model") or None,
             path=raw.get("path") or None,
+            variant=raw.get("variant") or None,
         )
     for key in data:
         if key not in ROLES:
@@ -288,6 +312,8 @@ def describe(role: str, spec: Role) -> str:
     harness = HARNESSES[spec.harness]
     binary = resolve_binary(spec, harness.candidates)
     model = f" model={spec.model}" if spec.model else ""
+    if spec.variant:
+        model += f" variant={spec.variant}"
     status = "ok" if binary else "missing"
     return (
         f"{role:<12} {spec.harness:<12} {harness.persistence:<8} "
@@ -395,6 +421,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         elif harness.session_source == "caller":
             session_id = str(uuid.uuid4())
 
+    # A dsh Session is bound to the cwd it was created in; refuse a resume that
+    # would move it before the harness fails late and cryptically.
+    if resume and harness.name == "dsh":
+        recorded_cwd = (sessions.get(args.role) or {}).get("cwd")
+        if recorded_cwd is not None and recorded_cwd != str(cwd):
+            print(
+                f"error: dsh session for '{args.role}' was recorded in {recorded_cwd}, "
+                f"not {cwd}; re-run with the original --cwd",
+                file=sys.stderr,
+            )
+            return 2
+
     out_file = run_dir / f"round-{args.round}-{args.role}.harness-out"
     launch = harness.build(
         Ctx(
@@ -446,7 +484,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         returncode, stdout, stderr = proc.returncode, proc.stdout, proc.stderr
     except subprocess.TimeoutExpired as exc:
         returncode = 6
-        stdout = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+        # TimeoutExpired.stdout can be bytes even with text=True; keep whatever
+        # the harness emitted so a timed-out round still leaves partial output.
+        if isinstance(exc.stdout, bytes):
+            stdout = exc.stdout.decode(errors="replace")
+        else:
+            stdout = exc.stdout or ""
         stderr = f"timed out after {args.timeout}s"
     except OSError as exc:
         returncode = 1
@@ -483,7 +526,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     }
 
     if session_id and harness.persistence == "session":
-        sessions[args.role] = {"harness": harness.name, "session_id": session_id}
+        entry = {"harness": harness.name, "session_id": session_id}
+        if harness.name == "dsh":
+            entry["cwd"] = str(cwd)
+        sessions[args.role] = entry
         _write_sessions(sessions_path, sessions)
 
     failed = returncode != 0

@@ -86,12 +86,15 @@ def dry(root: Path, config: Path, role: str, round_no: int, *extra: str) -> dict
     return json.loads(result.stdout)
 
 
-def seed_session(root: Path, role: str, harness: str, sid: str) -> None:
+def seed_session(
+    root: Path, role: str, harness: str, sid: str, cwd: str | None = None
+) -> None:
     run_dir = root / "run"
     run_dir.mkdir(exist_ok=True)
-    (run_dir / "sessions.json").write_text(
-        json.dumps({role: {"harness": harness, "session_id": sid}}), encoding="utf-8"
-    )
+    entry = {"harness": harness, "session_id": sid}
+    if cwd is not None:
+        entry["cwd"] = cwd
+    (run_dir / "sessions.json").write_text(json.dumps({role: entry}), encoding="utf-8")
 
 
 def offline(root: Path) -> None:
@@ -118,7 +121,7 @@ def offline(root: Path) -> None:
         implementer = (prompts / "implementer.md").read_text(encoding="utf-8")
         challenger = (prompts / "challenger.md").read_text(encoding="utf-8")
         skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
-        for placeholder in ("{{ROUND}}", "{{BRIEF}}", "{{PAYLOAD}}"):
+        for placeholder in ("{{ROUND}}", "{{BRIEF}}", "{{PAYLOAD}}", "{{COMMS}}"):
             assert placeholder in implementer, f"implementer missing {placeholder}"
             assert placeholder in challenger, f"challenger missing {placeholder}"
         for marker in ("DISPUTE F<n>", "ESCALATE F<n>"):
@@ -126,13 +129,27 @@ def offline(root: Path) -> None:
         for marker in ("VERDICT: PASS|FAIL", "DISPUTE RESPONSES", "CONCEDE|MAINTAIN"):
             assert marker in challenger, f"challenger missing {marker}"
         for marker in ("prompts/implementer.md", "prompts/challenger.md", "BRIEF.md",
-                       "LEDGER.md", "## Arbitration", "## PASS Guard"):
+                       "LEDGER.md", "## Arbitration", "## PASS Guard",
+                       "### Session keep-alive", "### Communication method ({{COMMS}})",
+                       "Team mode", "Relay mode"):
             assert marker in skill, f"SKILL.md missing {marker}"
         # The role prompts must live in one place only.
         assert "You are a skilled implementer" not in skill, "role prompt duplicated in SKILL.md"
         assert "You are a rigorous" not in skill, "role prompt duplicated in SKILL.md"
 
     check("role prompts live in prompts/ and SKILL.md points at them", skill_layout)
+
+    def comms_blocks() -> None:
+        skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        for mode in ("team", "relay"):
+            for role in ("implementer", "challenger"):
+                marker = f"*{role} / {mode}*"
+                assert marker in skill, f"SKILL.md missing a {{COMMS}} block for {marker}"
+        # The blocks are inserted verbatim, so each must carry the heading the prompt slot
+        # stands in for.
+        assert skill.count("## How you communicate") == 4, "expected one heading per {{COMMS}} block"
+
+    check("{{COMMS}} documents a team and a relay block for both roles", comms_blocks)
 
     def brief_template() -> None:
         skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
@@ -150,9 +167,10 @@ def offline(root: Path) -> None:
     def round_one_readonly() -> None:
         cases = {
             "codex": (codex, ["-s", "read-only"], True),
-            "claude-code": (claude, ["--permission-prompts", "none"], False),
+            "claude-code": (claude, ["--allowedTools=Read,Grep,Glob,Bash",
+                                     "--disallowedTools=Edit,Write,NotebookEdit"], False),
             "opencode": (opencode, [], False),
-            "dsh": (dsh, ["--profile", "headless"], False),
+            "dsh": (dsh, ["--profile", "headless", "--json"], False),
         }
         for name, (config, expected, uses_stdin) in cases.items():
             launch = dry(root, config, "challenger", 1)
@@ -215,16 +233,69 @@ def offline(root: Path) -> None:
 
     check("--reset-session drops the recorded session", reset_starts_over)
 
-    def dsh_replays() -> None:
-        run_root = root / "dsh-replay"
+    def dsh_resumes() -> None:
+        run_root = root / "dsh-resume"
         run_root.mkdir()
-        (run_root / "prompt.md").write_text("full payload\n", encoding="utf-8")
-        launch = dry(run_root, dsh, "challenger", 3)
-        assert launch["resume"] is False, launch
-        assert launch["persistence"] == "replay", launch
-        assert launch["argv"][-1] == "full payload\n", launch["argv"]
+        (run_root / "prompt.md").write_text("delta only\n", encoding="utf-8")
+        sid = "session-0d1e2f3a-4b5c-6d7e-8f90-aabbccddeeff"
+        seed_session(run_root, "challenger", "dsh", sid)
+        launch = dry(run_root, dsh, "challenger", 2)
+        assert launch["resume"] is True, launch
+        assert launch["persistence"] == "session", launch
+        assert launch["session_id"] == sid, launch
+        index = launch["argv"].index("--session-id")
+        assert launch["argv"][index + 1] == sid, launch["argv"]
+        assert launch["argv"][-1] == "delta only\n", launch["argv"]
 
-    check("dsh replays instead of resuming", dsh_replays)
+    check("dsh resumes the recorded session like the other session harnesses", dsh_resumes)
+
+    def dsh_cwd_guard() -> None:
+        run_root = root / "dsh-cwd"
+        run_root.mkdir()
+        (run_root / "prompt.md").write_text("go\n", encoding="utf-8")
+        seed_session(run_root, "challenger", "dsh", "session-x", str(root / "elsewhere"))
+        result = invoke(
+            [
+                "--config",
+                str(dsh),
+                "run",
+                "--role",
+                "challenger",
+                "--round",
+                "2",
+                "--prompt",
+                str(run_root / "prompt.md"),
+                "--out",
+                str(run_root / "out.md"),
+                "--run-dir",
+                str(run_root / "run"),
+                "--dry-run",
+            ]
+        )
+        assert result.returncode == 2, f"expected 2, got {result.returncode}"
+        assert "original --cwd" in result.stderr, result.stderr
+
+    check("a dsh resume with a mismatched cwd exits 2 before launching", dsh_cwd_guard)
+
+    def dsh_final_parsing() -> None:
+        sys.path.insert(0, str(SKILL_DIR / "scripts"))
+        import run_role  # noqa: PLC0415
+
+        stream = (
+            '{"type":"session","sessionId":"session-x","cwd":"/tmp"}\n'
+            '{"type":"status","phase":"turn_end"}\n'
+            '{"type":"final","text":"VERDICT: PASS"}\n'
+        )
+        assert run_role._final_dsh(stream, None) == "VERDICT: PASS"
+        for bad in ('{"type":"status"}\n', '{"type":"final","text":""}\n', ""):
+            try:
+                run_role._final_dsh(bad, None)
+            except run_role.InvocationError:
+                pass
+            else:
+                raise AssertionError(f"stream without a final text must raise: {bad!r}")
+
+    check("dsh final message is parsed from the --json final event", dsh_final_parsing)
 
     def native_is_rejected() -> None:
         config = write_config(root, {"implementer": {"harness": "native"}})
@@ -364,15 +435,6 @@ def live(root: Path) -> None:
             assert token in out1.read_text(encoding="utf-8"), out1.read_text(encoding="utf-8")[:200]
 
         check(f"{name}: round 1 returns the sentinel", round_one)
-
-        if harness == "dsh":
-            def replay_note() -> None:
-                summary = json.loads((case_root / "run" / "run.jsonl").read_text().splitlines()[-1])
-                assert summary["persistence"] == "replay", summary
-                assert summary["session_id"] is None, summary
-
-            check(f"{name}: round 1 is replay (no session)", replay_note)
-            continue
 
         def round_two(harness=harness, case_root=case_root) -> None:
             prompt2 = case_root / "r2.md"
