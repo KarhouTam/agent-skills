@@ -10,6 +10,8 @@
 !/sync_skills.py
 !/overlays/
 !/humanize/
+# Local role routing; the shipped default is harness.example.json.
+/humanize/harness.json
 !/context7-mcp/
 !/deepwiki/
 !/gh-github-cli/

@@ -98,7 +98,8 @@ def seed_session(
 
 
 def offline(root: Path) -> None:
-    shipped = SKILL_DIR / "harness.json"
+    # The shipped config is version-controlled as the example; harness.json is the local copy.
+    shipped = SKILL_DIR / "harness.example.json"
     codex = write_config(root, {"challenger": {"harness": "codex"}})
     claude = write_config(root, {"challenger": {"harness": "claude-code"}})
     opencode = write_config(root, {"challenger": {"harness": "opencode"}})
