@@ -1,0 +1,157 @@
+{
+  "_meta": "Recorded prompt outcomes from skill-usage-insights data, curated by hand. `recorded` are behavior snapshots the data must keep matching (fires ⊆ actual, skips ∩ actual = ∅); `missed` are judged-should-have-fired prompts the data shows did NOT fire — flipping one into `recorded` after it fires proves a description Update worked, and a miss coming back gets caught. `match` is `contains` (whitespace-collapsed) unless `exact`.",
+  "recorded": [
+    {
+      "date": "2026-09-17",
+      "prompt": "Address comemnt https://github.com/pytorch/pytorch/pull/197222",
+      "fires": [
+        "gh-address-comments"
+      ]
+    },
+    {
+      "date": "2026-09-22",
+      "prompt": "re-review 当前对 classmethod 以及 staticmethod 支持的实现",
+      "fires": [
+        "requesting-code-review"
+      ]
+    },
+    {
+      "date": "2026-10-10",
+      "prompt": "分析PR（200512）失败的CI，看起来跟我们的改动相关",
+      "fires": [
+        "gh-fix-ci"
+      ]
+    },
+    {
+      "date": "2026-10-13",
+      "prompt": "/triaging-pytorch-issues start triaging",
+      "match": "exact",
+      "fires": [
+        "triaging-pytorch-issues"
+      ]
+    },
+    {
+      "date": "2026-10-14",
+      "prompt": "The review: ``` TL;DR：最新 commit",
+      "fires": [
+        "receiving-code-review"
+      ]
+    },
+    {
+      "date": "2026-10-15",
+      "prompt": "同步 PR https://github.com/pytorch/pytorch/pull/200911，并分析 review 意见",
+      "fires": [
+        "receiving-code-review",
+        "gh-address-comments"
+      ]
+    },
+    {
+      "date": "2026-10-16",
+      "prompt": "/grill-me 我想做一套机制，用来监控 agent skills",
+      "fires": [
+        "grill-me",
+        "grilling"
+      ]
+    },
+    {
+      "date": "2026-10-19",
+      "prompt": "/humanize 分析并修复 issue https://github.com/pytorch/pytorch/issues/201124",
+      "fires": [
+        "humanize",
+        "using-superpowers"
+      ]
+    },
+    {
+      "date": "2026-10-19",
+      "prompt": "Make an insight in Chinese",
+      "fires": [
+        "skill-usage-insights",
+        "using-superpowers"
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "prompt": "<ide_opened_file>The user opened the file /root/.agents/skills/humanize/prompts/challenger",
+      "fires": [
+        "brainstorming",
+        "humanize"
+      ]
+    },
+    {
+      "date": "2026-10-22",
+      "prompt": "修 dsh_logs.py",
+      "fires": [
+        "test-driven-development"
+      ]
+    },
+    {
+      "date": "2026-10-22",
+      "prompt": "实现最小修法+补齐回归测试",
+      "fires": [
+        "test-driven-development"
+      ]
+    },
+    {
+      "date": "2026-10-19",
+      "prompt": "Reply with exactly this token and nothing else: AR_SMOKE",
+      "skips": [
+        "adversarial-review"
+      ],
+      "_note": "smoke-probe noise must not fire a review skill"
+    }
+  ],
+  "conditional_skips": [
+    {
+      "date": "2026-10-10",
+      "prompt": "给我解释下你的改动",
+      "fires": [
+        "teaching-technical-topics",
+        "mermaid-diagrams"
+      ],
+      "skips": [
+        "deepwiki",
+        "eli5"
+      ],
+      "_note": "deepwiki is gated on repo-mechanism lessons (this is a local-diff walkthrough), eli5 on an explicit level — both correct skips"
+    },
+    {
+      "date": "2026-10-12",
+      "prompt": "Update /pytorch-test-refactoring CHANGELOG.md",
+      "fires": [
+        "pytorch-test-refactoring"
+      ],
+      "skips": [
+        "pytorch-test-refactoring:review-test-refactoring",
+        "pytorch-test-refactoring:ci-automation",
+        "pytorch-test-refactoring:refactor-test-decoupling"
+      ],
+      "_note": "nested sub-skills gated on review/CI/refactor tasks — a changelog edit trips none"
+    }
+  ],
+  "missed": [
+    {
+      "date": "2026-10-14",
+      "prompt": "ELI5 解释下这个 bug 和你的 fix",
+      "expected_fire": [
+        "eli5"
+      ],
+      "_note": "same-day ELI5 prompts on 10-15/10-19/10-21 fired; this one did not"
+    },
+    {
+      "date": "2026-10-15",
+      "prompt": "Check PR 199496, analyze the reviews from claude agent",
+      "expected_fire": [
+        "receiving-code-review"
+      ],
+      "_note": "twin prompt the same day fired it; this turn did not"
+    },
+    {
+      "date": "2026-10-22",
+      "prompt": "debug 并分析 issue https://github.com/pytorch/pytorch/issues/201296",
+      "expected_fire": [
+        "systematic-debugging"
+      ],
+      "_note": "the chain break in action: using-superpowers fired, its debugging child did not. FIXED 2026-10-22 via overlay (description trigger words + using-superpowers routing block); post-fix probes: 1 FIRE (7b4fd66d) / 1 MISS (8768ee19) — flaky, keep probing on future windows"
+    }
+  ]
+}
