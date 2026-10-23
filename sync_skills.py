@@ -142,6 +142,28 @@ def insert_after(dest, rule):
     return rule["file"]
 
 
+def replace_line(dest, rule):
+    """Apply one overlay.json replaceLine rule to dest, once.
+
+    Swaps one exact line (e.g. a frontmatter `description:`) for a new one —
+    the edit that lets a public skill's trigger vocabulary track the prompts it
+    actually sees. Same contract as insert_after: idempotent, loud on a missing
+    anchor, so a reshaped upstream file surfaces instead of silently dropping
+    the adaptation.
+    """
+    if not isinstance(rule, dict) or {"file", "find", "text"} - set(rule):
+        raise RuntimeError(f"overlay rule needs 'file', 'find', and 'text': {rule!r}")
+
+    path = dest / rule["file"]
+    text = path.read_text(encoding="utf-8")
+    if rule["text"] in text:
+        return f"{rule['file']} (already applied)"
+    if rule["find"] not in text:
+        raise RuntimeError(f"overlay anchor missing in {rule['file']}: {rule['find']!r}")
+    path.write_text(text.replace(rule["find"], rule["text"], 1), encoding="utf-8")
+    return rule["file"]
+
+
 def apply_overlay(name, dest):
     """Re-apply this repo's tracked adaptations to a skill, freshly fetched or not.
 
@@ -163,7 +185,10 @@ def apply_overlay(name, dest):
 
     rules = source / OVERLAY_RULES
     if rules.is_file():
-        for rule in json.loads(rules.read_text(encoding="utf-8")).get("insertAfter", []):
+        parsed = json.loads(rules.read_text(encoding="utf-8"))
+        for rule in parsed.get("replaceLine", []):
+            applied.append(replace_line(dest, rule))
+        for rule in parsed.get("insertAfter", []):
             applied.append(insert_after(dest, rule))
     return applied
 
