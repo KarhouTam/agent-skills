@@ -67,13 +67,13 @@ def repo(tmp_path):
 class Log:
     """One dsh session log: one event per zstd frame, like the real writer."""
 
-    def __init__(self, home, session, cwd, parent=None):
-        self.path = Path(home) / "sessions" / "--slug--" / session / "session.v3.jsonl.zstd"
+    def __init__(self, home, session, cwd, parent=None, version=3):
+        self.path = Path(home) / "sessions" / "--slug--" / session / f"session.v{version}.jsonl.zstd"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.seq = self.turn = self.step_no = 0
         self.calls = []
         self.session = session
-        header = {"type": "session", "version": 3, "id": session, "createdAt": now_ms(), "cwd": str(cwd),
+        header = {"type": "session", "version": version, "id": session, "createdAt": now_ms(), "cwd": str(cwd),
                   "agentPreset": "cordis"}
         if parent:
             header.update(parentSession=parent, origin="subagent", delegationDepth=1)
@@ -264,6 +264,66 @@ def test_status_reports_what_is_collectible(repo, tmp_path):
     run_collect(repo, home, data)
     after = run_collect(repo, home, data, "--status")
     assert after["uncollected"] == 0 and after["collected_files"] == 1
+
+
+def test_session_paths_finds_v4_and_supersedes_v3(tmp_path):
+    """dsh rebumped logs to v4: every version is discoverable, and a rewritten
+    session keeps only its newest file, since the rewrite replays the old one."""
+    root = tmp_path / "sessions"
+    for slug, versions in [("a", ["v3"]), ("b", ["v4"]), ("c", ["v3", "v4"]), ("d", ["v3", "v5", "v4"]),
+                           ("e", ["v3", "vX"])]:
+        directory = root / "slug" / slug
+        directory.mkdir(parents=True)
+        for version in versions:
+            (directory / f"session.{version}.jsonl.zstd").write_bytes(b"x")
+    found = {path.parent.name: path.name for path in dsh_logs.session_paths(root)}
+    assert found == {"a": "session.v3.jsonl.zstd", "b": "session.v4.jsonl.zstd",
+                     "c": "session.v4.jsonl.zstd", "d": "session.v5.jsonl.zstd",
+                     "e": "session.v3.jsonl.zstd"}
+
+
+def test_v4_only_session_is_collected(repo, tmp_path):
+    """The fix's real case: 40 live sessions write v4 and were invisible before."""
+    home, data = tmp_path / "dsh-home", tmp_path / "data"
+    log = Log(home, SESSION, repo, version=4)
+    log.catalog(["teach"])
+    log.prompt("/teach how does dispatch work")
+    log.step(1000, 50, [("skill", {"name": "teach"})])
+    log.end()
+    result = run_collect(repo, home, data)
+    assert result["collected"] == 1 and result["records"] > 0
+    assert analyze_repo(repo, data)["skills"]["teach"]["runs"] == 1
+
+
+def test_v4_rewrite_supersedes_an_already_collected_v3(repo, tmp_path):
+    """A live session rewritten from v3 to v4 (the v4 replays v3's events) keeps
+    collecting: the v3 file is superseded, so only its rewrite is read again."""
+    home, data = tmp_path / "dsh-home", tmp_path / "data"
+    log = Log(home, SESSION, repo)
+    log.catalog(["teach"])
+    log.prompt("first")
+    log.step(1000, 50, [("skill", {"name": "teach"})])
+    log.end()
+    run_collect(repo, home, data)
+
+    # dsh rewrites the whole session into v4: same events, then one more turn.
+    events = [e for e in dsh_logs.decode_events(log.path) if e.get("type") != "session"]
+    twin = Log(home, SESSION, repo, version=4)
+    for event in events:
+        event.pop("seq", None)
+        event.pop("time", None)
+        twin.append(event)
+    twin.turn = 1          # the copied turn, so the next prompt is turn 2
+    twin.step_no = 1
+    twin.prompt("second")
+    twin.step(2000, 60)
+    twin.end()
+
+    grown = run_collect(repo, home, data)
+    assert grown["collected"] == 1, "only the v4 rewrite is a collectible log now"
+    t2 = [r for r in records(data) if r["session_id"] == SESSION and r["kind"] == "prompt"
+          and r.get("prompt_id") == "t2"]
+    assert t2, "the new turn of the rewrite is collected"
 
 
 def test_subagent_tokens_join_the_parent_skill(repo, tmp_path):

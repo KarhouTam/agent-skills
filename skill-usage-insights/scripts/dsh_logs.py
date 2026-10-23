@@ -1,7 +1,7 @@
 """Read DeepSeek Harness session logs.
 
 dsh persists every session as zstd-compressed JSONL at
-`$DSH_HOME/sessions/<workspace-slug>/<session-id>/session.v3.jsonl.zstd`. The
+`$DSH_HOME/sessions/<workspace-slug>/<session-id>/session.v<version>.jsonl.zstd`. The
 file is a *multi-frame* zstd stream — one frame per append — and a decoder that
 handles only the first frame sees the session header and nothing else. Node's
 `zlib.zstdDecompressSync` decodes one frame per call and dsh always ships Node,
@@ -12,6 +12,7 @@ Stdlib only, like the rest of the repo: this runs before any analysis.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from pathlib import Path
 DECODER = Path(__file__).resolve().parent / "dsh_decode.mjs"
 DECODE_TIMEOUT = 120
 _DECODER = False  # False = not probed yet, None = probed and unusable
+LOG_NAME = re.compile(r"^session\.v(\d+)\.jsonl\.zstd$")
 WANTED = (
     "session", "turn/start", "turn/end", "assistant/message", "tool/call", "tool/result",
     "user/message", "subagent/catalog", "goal/change", "command/run",
@@ -39,7 +41,11 @@ def sessions_root(home=None):
 
 
 def session_paths(root=None, since=0.0):
-    """Every `session.v3.jsonl.zstd` under the sessions root, newest first.
+    """Every `session.v*.jsonl.zstd` under the sessions root, newest first.
+
+    dsh has rebumped the log format (v3 → v4, observed 2026-10); a rewrite
+    replays the previous version's events, so when a session holds several
+    versions only the newest is read — reading both would record it twice.
 
     `since` is an epoch; a log whose mtime is older is one the session can no
     longer be appending to, so it cannot hold anything newer than the window.
@@ -47,8 +53,16 @@ def session_paths(root=None, since=0.0):
     root = Path(root or sessions_root())
     if not root.is_dir():
         return []
-    found = [path for path in root.glob("*/*/session.v3.jsonl.zstd") if path.stat().st_mtime >= since]
-    return sorted(found, key=lambda path: path.stat().st_mtime, reverse=True)
+    newest = {}
+    for path in root.glob("*/*/session.v*.jsonl.zstd"):
+        match = LOG_NAME.match(path.name)
+        if not match or path.stat().st_mtime < since:
+            continue
+        number = int(match.group(1))
+        if path.parent not in newest or number > newest[path.parent][0]:
+            newest[path.parent] = (number, path)
+    return sorted((path for _, path in newest.values()),
+                  key=lambda path: path.stat().st_mtime, reverse=True)
 
 
 NODE_HINT = "Node 22.15+ (it has zstd in node:zlib)"

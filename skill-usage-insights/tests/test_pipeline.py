@@ -314,7 +314,10 @@ def test_cli_writes_insight_and_keeps_decisions(repo, tmp_path):
 
 
 def test_cli_without_data_says_how_to_start(tmp_path):
-    env = dict(os.environ, SKILL_USAGE_DATA_DIR=str(tmp_path / "missing"), XDG_DATA_HOME=str(tmp_path / "xdg"))
+    # Keep dsh collection out of a test run: the real ~/.dsh corpus decodes for
+    # ~50s and would sit right on this test's 60s timeout.
+    env = dict(os.environ, SKILL_USAGE_DATA_DIR=str(tmp_path / "missing"), XDG_DATA_HOME=str(tmp_path / "xdg"),
+               DSH_HOME=str(tmp_path / "dsh-home"))
     done = subprocess.run([sys.executable, str(SKILL_DIR / "scripts" / "analyze.py"), "--stdout"], env=env,
                           capture_output=True, text=True, timeout=60)
     # <skill>/data may exist on a machine that already collects; only assert the empty case when it does not.
