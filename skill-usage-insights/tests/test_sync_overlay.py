@@ -58,3 +58,32 @@ def test_apply_overlay_runs_both_rule_kinds(tmp_path):
     body = (tmp_path / "demo" / "SKILL.md").read_text()
     assert "description: Replaced." in body and "Inserted line." in body
     assert any("already applied" not in line for line in applied)
+
+
+def test_remove_line_drops_its_exact_line_once_and_is_idempotent(tmp_path):
+    skill = make_skill(tmp_path)
+    rule = {"file": "SKILL.md", "find": "description: Old description."}
+
+    assert sync_skills.remove_line(skill, rule) == "SKILL.md"
+    body = (skill / "SKILL.md").read_text()
+    assert "description:" not in body
+    assert len(body.splitlines()) == 5, "the line goes whole, exactly one line gone"
+    assert sync_skills.remove_line(skill, rule) == "SKILL.md (already applied)"
+
+
+def test_remove_line_never_eats_a_partial_match(tmp_path):
+    skill = make_skill(tmp_path)
+    sync_skills.remove_line(skill, {"file": "SKILL.md", "find": "description: Old"})
+    assert "description: Old description." in (skill / "SKILL.md").read_text()
+
+
+def test_remove_files_deletes_listed_files_and_skips_absent_ones(tmp_path):
+    skill = make_skill(tmp_path)
+    (skill / "references").mkdir()
+    (skill / "references" / "a.md").write_text("x", encoding="utf-8")
+
+    removed = sync_skills.remove_files(skill, ["references/a.md", "references/b.md"])
+    assert removed == ["references/a.md"]
+    assert not (skill / "references" / "a.md").exists()
+
+    assert sync_skills.remove_files(skill, ["references/a.md"]) == []

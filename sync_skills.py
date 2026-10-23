@@ -164,6 +164,42 @@ def replace_line(dest, rule):
     return rule["file"]
 
 
+def remove_line(dest, rule):
+    """Apply one overlay.json removeLine rule to dest, once.
+
+    Deletes one whole exact line — the edit that retires a harness or section
+    this setup never uses. Absence of the line is the applied state, not an
+    error: upstream may have already dropped it.
+    """
+    if not isinstance(rule, dict) or {"file", "find"} - set(rule):
+        raise RuntimeError(f"overlay rule needs 'file' and 'find': {rule!r}")
+
+    path = dest / rule["file"]
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    kept = [line for line in lines if line.rstrip("\n") != rule["find"]]
+    if len(kept) == len(lines):
+        return f"{rule['file']} (already applied)"
+    path.write_text("".join(kept), encoding="utf-8")
+    return rule["file"]
+
+
+def remove_files(dest, rule):
+    """Apply one overlay.json removeFiles rule: unlink the listed skill files.
+
+    Retired references this setup does not use; a path already absent is a
+    no-op, so every sync keeps them gone without complaining.
+    """
+    if not isinstance(rule, list):
+        raise RuntimeError(f"removeFiles rule wants a list of paths: {rule!r}")
+    removed = []
+    for rel in rule:
+        path = dest / rel
+        if path.is_file():
+            path.unlink()
+            removed.append(str(rel))
+    return removed
+
+
 def apply_overlay(name, dest):
     """Re-apply this repo's tracked adaptations to a skill, freshly fetched or not.
 
@@ -188,8 +224,11 @@ def apply_overlay(name, dest):
         parsed = json.loads(rules.read_text(encoding="utf-8"))
         for rule in parsed.get("replaceLine", []):
             applied.append(replace_line(dest, rule))
+        for rule in parsed.get("removeLine", []):
+            applied.append(remove_line(dest, rule))
         for rule in parsed.get("insertAfter", []):
             applied.append(insert_after(dest, rule))
+        applied += remove_files(dest, parsed.get("removeFiles", []))
     return applied
 
 
