@@ -153,6 +153,15 @@ gh pr list --repo pytorch/pytorch --state open --search "<2-3 keywords>" --limit
 gh pr list --repo pytorch/pytorch --state merged --search "<2-3 keywords>" --limit 10 --json number,title,mergedAt
 # (c) claims in the comments
 gh issue view NNNNN --repo pytorch/pytorch --json comments
+# (d) author-declared pending work in the BODY. Read the FULL body, not the
+#     opened preview: authors append one-liners after the versions block that
+#     no timeline, assignee, comment or A-b/keyword merge can see, e.g.
+#     "A candidate patch and regression tests are ready for submission once
+#     this issue is marked actionable." (#201158). Grep the body you fetched
+#     for readiness phrases before calling the issue free.
+gh issue view NNNNN --repo pytorch/pytorch --json body --jq '.body' \
+  | grep -nE -i "patch is ready|are ready|ready for submission|PR is ready|will be sent|will (open|submit|send)|fix (with a test )?is (already )?on [a-z0-9_-]+/|on my fork|fix in progress|marked actionable|is (marked )?triaged" \
+  || true
 ```
 
 - The **timeline** is the linked item on the issue panel — any referencing PR,
@@ -165,6 +174,12 @@ gh issue view NNNNN --repo pytorch/pytorch --json comments
   link field was empty yet the fix was already open: an atanh-vectorization
   issue with a live PR rewriting the same override, and three more like it.
   Only the keyword sweep finds those.
+- **An authored-but-unsubmitted patch is claimed work.** If the body or a
+  comment says a patch/PR exists and is merely waiting (a label, review, or
+  maintainer go-ahead), treat the issue as owned by that author and excluded —
+  the user does not want to race an author's ready-to-push fix. Quote the
+  readiness sentence as the Dup evidence. These cases pass checks (a)-(c)
+  silently because nothing has been opened yet.
 
 ## Step 5 — Staleness gate (REQUIRED)
 
@@ -337,6 +352,7 @@ message.
 | Searching `label:"module: fsdp2"` | No such label (only `release notes: distributed (fsdp2)`); the search returns nothing and reads as no work. Resolve the API `fully_shard` to `module: fsdp` |
 | Treating `labels.json` as the label allowlist | It omits the workability and repro labels this skill ranks on; validate against `gh label list` |
 | Calling an issue claimable because it is unassigned and has no linked PR | Real cases had a live PR rewriting the exact code with no link anywhere; run the keyword sweep |
+| Calling an issue claimable from checks (a)-(c) when the author's body says a patch is ready and waiting | No PR exists yet, so nothing links; read the FULL body (the sentence sits after the versions block) and quote it as dup evidence (#201158) |
 | Trusting `-linked:pr` / `closedByPullRequestsReferences` | They only see closing links; drafts and non-closing PRs stay invisible |
 | Judging staleness from the working tree | An agent did exactly this and called a fixed FSDP2 issue a free test gap; check the ref |
 | Reading upstream over the network when a fetched ref exists | Check `refs/remotes/upstream/main` first |
@@ -366,6 +382,7 @@ message.
 - A candidate row has an empty dup-evidence or staleness cell.
 - The staleness verdict cites only the working tree.
 - "Unclaimed" rests on assignees or link fields, with no keyword PR sweep.
+- "Unclaimed" rests on checks (a)-(c) while the issue body was never read to the end; author-ready patches hide in the body tail with empty timelines (#201158).
 - The report has no Tier B row even though a host accelerator probe answered.
 - A label in a query was never checked against the live list.
 - `low priority` rows appear in the table, or the dropped count is missing.
