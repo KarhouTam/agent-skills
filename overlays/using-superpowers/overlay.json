@@ -4,6 +4,11 @@
       "file": "SKILL.md",
       "after": "- Muse: `references/muse-tools.md`",
       "text": "- DeepSeek Harness: `references/deepseek-harness-tools.md`"
+    },
+    {
+      "file": "SKILL.md",
+      "after": "- \"Fix this bug\" → superpowers:systematic-debugging first, then domain skills.",
+      "text": "- **A failure to investigate — 排查 / 查根本原因 / 找根因 / debug / 崩了 / 报错 / 帮我查一下 / red test / crash / wrong output / flaky / build or CI failure — MUST load `superpowers:systematic-debugging` BEFORE any other action, including exploring files. Load it even if you feel you already know how to debug; load it in subagents too (the SUBAGENT-STOP above does not apply to it).**"
     }
   ]
 }
