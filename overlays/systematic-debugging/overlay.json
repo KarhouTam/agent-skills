@@ -1,0 +1,9 @@
+{
+  "replaceLine": [
+    {
+      "file": "SKILL.md",
+      "find": "description: Trace a failing test, stack trace, or unexpected output to its root cause: reproduce the failure, bisect to the specific line or input, form one hypothesis at a time, and confirm the fix against the original reproduction. Use for red tests, crashed commands, wrong output, flaky behavior, and any bug report before proposing a fix.",
+      "text": "description: Debug any technical failure to its ROOT CAUSE before proposing any fix — trigger words: 排查, 查根本原因, 找根因, debug, 崩了, 报错, 帮我查一下, red test, stack trace, crashed command, wrong output, flaky behavior, build/CI failure, or any bug report. Reproduce the failure, bisect to the specific line or input, form one hypothesis at a time, and confirm the fix against the original reproduction. Symptom fixes are failure."
+    }
+  ]
+}
