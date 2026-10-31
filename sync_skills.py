@@ -9,6 +9,7 @@ every run, so neither a refresh nor a plain sync discards them.
     python3 sync_skills.py                 # install anything missing
     python3 sync_skills.py --force         # refresh to the pinned revisions
     python3 sync_skills.py --only handoff  # one skill (repeatable)
+    abc
 """
 
 import argparse
