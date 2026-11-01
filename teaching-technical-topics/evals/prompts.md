@@ -1,6 +1,6 @@
 # Prompts
 
-Eleven scenarios, chosen so that each one can fail in a different way. Run them
+Twelve scenarios, chosen so that each one can fail in a different way. Run them
 against a fresh agent, save the answer verbatim, then score it with
 `check_run.py` (see README.md).
 
@@ -17,6 +17,7 @@ against a fresh agent, save the answer verbatim, then score it with
 | 9 | DeepWiki-reachable repo internals | `教我 PyTorch Dynamo 的 guard 系统是怎么工作的？源码在 /root/pytorch` | standard | Follows the teaching skill's REQUIRED SUB-SKILL line to `deepwiki`, cites the map as `deepwiki:pytorch/pytorch`, and still opens every `file::symbol` in the local checkout |
 | 10 | Newcomer + easy side question | `教我 vLLM 的 prefix caching。我是做后端开发的，完全没接触过 LLM 推理，KV cache 是什么？` then `顺便问一下，prefix caching 和 paged attention 是一回事吗？` | standard, then quick | 正文 names the problem before the mechanism and defines the vocabulary at first use; the side question gets ≤ ~150 words and never an 归档 ask |
 | 11 | ELI level register | `/teaching-technical-topics 用五岁小孩也能听懂的话讲讲 vLLM 的 paged attention`, and the same again with a literal `ELI5` | standard | Loads `eli5` for the register instead of improvising one; the level changes 正文 only — same sections, same draft, same `file::symbol` provenance |
+| 12 | Cross-machine draft | On notes root A teach a topic and leave it unconfirmed. On a second notes root B, join the same private remote (`sync.py init`), then ask the same topic. Archive on B, then `sync.py pull` on A. | standard | Step 0 pulls every `script/*` draft branch; B sees A's draft; after confirmation B merges it into `main` and deletes the branch; A's local draft disappears and the archived note appears |
 
 ## Scoring
 

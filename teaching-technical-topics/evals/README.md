@@ -8,7 +8,8 @@ helped from one that regressed.
 
 1. Pick a scenario from `prompts.md` and run it against a fresh agent with this
    skill loaded. For scenario 4, snapshot the notes root first:
-   `cp -r <notes> /tmp/notes-before`.
+   `cp -r <notes> /tmp/notes-before` (eval roots are normally unconfigured, so
+   `.sync/` does not exist; the checker ignores it either way).
 2. Save the answer verbatim to a file.
 3. Score it:
 
@@ -46,6 +47,19 @@ run you want to hold to the map-not-source rule).
 
 The two lifecycle assertions are the point of the draft step: an unconfirmed lesson
 must never reach `INDEX.md`, and a confirmation must actually consume the draft.
+
+## Cloud sync
+
+The branch model (`main` + `script/<project>/<topic>`) is mechanical, so it is covered
+by unit tests instead of an LLM eval:
+
+```bash
+(cd <skill> && python3 -m pytest tests/ -q)
+```
+
+Scenario 12 in `prompts.md` is the human check: a draft started on one notes root must
+be visible from a second root joined to the same remote, and archiving on the second
+must merge it and remove the branch.
 
 ## Recorded no-skill baseline
 

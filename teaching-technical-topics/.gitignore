@@ -1,2 +1,4 @@
 # Learner memory is personal state, not skill definition. Keep it out of git.
 memory/
+__pycache__/
+.pytest_cache/

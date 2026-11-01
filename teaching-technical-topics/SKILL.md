@@ -10,10 +10,12 @@ disable-model-invocation: true
 
 A teaching answer is a **build**, not a dump: pick a mode, answer in a fixed shape,
 and teach into a draft that only becomes reference material once the user confirms
-the lesson landed. Steps 0–2 always run; every Standard or Deep lesson fetches the
-subject repo's DeepWiki map first (Step 1) — as a reading list, never as a source —
-and a prompt naming an ELI level also loads `eli5` for the register
-(Step 2). The answer shape below applies to Standard and Deep.
+the lesson landed. Steps 0–2 always run; every lesson first pulls the private cloud
+store (main plus every draft branch, so the same teaching memory is visible on every
+machine), every Standard or Deep lesson fetches the subject repo's DeepWiki map first
+(Step 1) — as a reading list, never as a source — and a prompt naming an ELI level also
+loads `eli5` for the register (Step 2). The answer shape below applies to Standard and
+Deep.
 
 Resolve `<base>` from the base directory the harness reports for this skill —
 normally `~/.agents/skills/teaching-technical-topics/`, also reachable as
@@ -33,16 +35,33 @@ overrides everything; `<base>/memory` is the default. If **none** is writable, s
 answer, print the note inline in a fenced block instead of saving it, and say plainly
 that it was not saved.
 
+Then bring the shared store up to date before reading anything:
+
+```bash
+python3 <base>/scripts/sync.py pull <notes>
+python3 <base>/scripts/note.py index <notes>
+```
+
+`pull` fetches `main` and every `script/*` draft branch, so drafts started on another
+machine are already local. If it exits 1 (offline / conflict) or prints `local-only`,
+keep teaching from the local copy and mention it **once at the end** of the answer —
+never before `## In a nutshell`. One-time setup per machine:
+`python3 <base>/scripts/sync.py init <private-repo-url> <notes>`.
+
 `<project>` is the ecosystem the question lives in — `pytorch`, `vllm`, `k8s`, …
 
 ## Step 1 — Read before answering
 
-Read `<notes>/INDEX.md`, then `<project>/_project.md` (including its **Learner
+Read `<notes>/INDEX.md` first: it is the generated global landscape — global counts,
+per-project topic tables, related edges, open threads, re-verification order, and links
+to each topic's materials. Then read `<project>/_project.md` (including its **Learner
 model**), then the note of any topic the question builds on.
 
-Only notes that reached the project folder are reference material. `<notes>/.drafts/`
-holds lessons the user has not signed off on yet — read a draft only to continue
-that same unfinished lesson, never to ground an answer to a new question.
+Only notes at `<project>/<topic>/note.md` are reference material. `.drafts/<project>/
+<topic>/note.md` — including drafts pulled from another machine — holds lessons the
+user has not signed off on yet; read a draft only to continue that same unfinished
+lesson, never to ground an answer to a new question. Materials (notebooks, figures)
+live beside the note in the same topic directory; open them when a demo is the point.
 
 **Treat every note as a hypothesis, not a fact.** A note records what was true for
 the version in its `verified_against`. If that differs from what is installed now,
@@ -173,13 +192,15 @@ node <mermaid-diagrams-base>/scripts/check-mermaid.mjs <file-with-the-diagram>
 
 ```
 <notes>/
-  INDEX.md                 # generated from note frontmatter — never hand-edit
-  .drafts/<project>/<topic>.md   # in-progress lesson, NOT reference material
+  INDEX.md                        # generated landscape — local-only, never hand-edit
+  .sync/                          # internal cloud mirror — never read or edit
+  .drafts/<project>/<topic>/note.md   # in-progress lesson, NOT reference material
   <project>/
-    _project.md            # learning map: taught, dependencies, Learner model, open threads
-    <topic>.md             # one *confirmed* note per topic taught
-    notebooks/<topic>.py   # percent-format source, the editable copy
-    notebooks/<topic>.ipynb
+    _project.md                   # learning map: taught, dependencies, Learner model
+    <topic>/
+      note.md                     # one *confirmed* note per topic taught
+      <topic>.py                  # percent-format source, the editable copy
+      <topic>.ipynb
 ```
 
 A note's id is `project/topic`. Topic note — frontmatter is the machine-readable
@@ -216,6 +237,36 @@ confidence: verified
 `confidence` is `verified` (a source or a run confirmed it) or `background` (model
 knowledge only). `verified_against` is `<pkg>@<version>`, or `unverified`.
 
+## Cloud store: main + draft branches
+
+`<notes>/.sync/` is a git clone of the user's **private** `teaching-notes` repo. It is
+internal: never read it for teaching, never edit it. The cloud holds only these:
+
+| Cloud ref | Contains |
+|---|---|
+| `main` | archived topics `<project>/<topic>/...` plus every `_project.md` |
+| `script/<project>/<topic>` | one unfinished lesson's `note.md` + materials, in final layout |
+
+`INDEX.md` and `.drafts/` stay local; the landscape is regenerated from whatever the
+pull brought, so generated files never produce merge conflicts.
+
+- **Setup once per machine:** `python3 <base>/scripts/sync.py init <private-repo-url> <notes>`.
+  Without it syncs run `local-only` and cross-machine memory is not shared.
+- **Every skill invocation:** `sync.py pull` in Step 0, then `note.py index`.
+- **Every draft write or revision:** `sync.py draft <project>/<topic>` immediately —
+  again after rebuilding its notebook or editing `_project.md` (a `_project.md` edit
+  with no draft on the table uses `sync.py push`).
+- **Archive:** after the user confirms, `note.py promote` → `note.py check` →
+  `sync.py archive <project>/<topic>`. `archive` refreshes the branch, merges it into
+  `main` with `--no-ff`, pushes, and deletes the branch. Never leave the merge undone.
+- **Archived-note correction / Learner model edit:** `note.py add` (or `note.py index`)
+  then `sync.py push`.
+- Conflicts are reported with the files and the local copy is kept; nothing is
+  force-pushed. Compare the two versions, then rerun with `--force` to settle in the
+  chosen direction (`pull --force` takes cloud, `push`/`draft --force` keep local).
+- Every network call times out (`TEACHING_SYNC_TIMEOUT`, default 30s), so an
+  unreachable remote degrades to local teaching instead of stalling the lesson.
+
 ## Note lifecycle: draft → promote
 
 **Nothing a lesson produced becomes reference material until the user says it was
@@ -223,14 +274,21 @@ good.** An explanation that lands badly, or that the user is still pushing back 
 must never be read back as fact six sessions later.
 
 **1. Teach into a draft.** After the answer, write
-`<notes>/.drafts/<project>/<topic>.md` (same frontmatter and body as a note). Drafts
-are excluded from `INDEX.md`, from `related` links, and from Step 1 — an unconfirmed
-draft cannot poison anything.
+`<notes>/.drafts/<project>/<topic>/note.md` (same frontmatter and body as a note).
+Drafts are excluded from `INDEX.md`, from `related` links, and from Step 1 — an
+unconfirmed draft cannot poison anything. Then back it up immediately:
+
+```bash
+python3 <base>/scripts/sync.py draft <project>/<topic> <notes>
+```
+
+Push again after every revision, and after rebuilding or replacing the notebook.
 
 The **notebook is not drafted**: it goes straight to
-`<notes>/<project>/notebooks/<topic>.py` and gets linked into the workspace, because
-the user runs it during the lesson. It is executed, not asserted, so it carries no
-claim that could rot; only the note's prose needs the user's sign-off.
+`<notes>/<project>/<topic>/<topic>.py` and gets linked into the workspace, because the
+user runs it during the lesson. It is executed, not asserted, so it carries no claim
+that could rot; only the note's prose needs the user's sign-off. It still travels on
+the draft branch as that topic's material.
 
 **2. Ask once, in one line, at the end of the first Standard answer.** Something like:
 
@@ -251,8 +309,9 @@ that the draft waits quietly; asking again on every turn is noise, not diligence
 **4. Promote:**
 
 ```bash
-python3 <base>/scripts/note.py promote <notes>/.drafts/pytorch/dynamo.md --related vllm/scheduler
+python3 <base>/scripts/note.py promote <notes>/.drafts/pytorch/dynamo/note.md --related vllm/scheduler
 python3 <base>/scripts/note.py check <notes>
+python3 <base>/scripts/sync.py archive pytorch/dynamo <notes>
 ```
 
 `promote` validates first and only then moves the file, so a rejected promotion
@@ -266,8 +325,11 @@ INDEX drift, and lists the drafts still awaiting confirmation.
 point: ask the user about the whole chain at once ("dynamo 可以归档了，它引用的
 dispatcher 还是草稿，一起归档吗？") rather than leaving a note pointing at nothing.
 
-**Run `check` after promoting — that is the gate before you send.** A draft alone
-needs no gate; a promotion does.
+**Run `check` and `archive` after promoting — that is the gate before you send.**
+`check` proves the local note graph is sound; `archive` is what actually puts the
+confirmed topic on cloud `main` and closes its draft branch. A draft alone needs no
+gate; a promotion does. If `archive` fails, say so in one line: the note is archived
+locally, the merge will be retried.
 
 ## Notebooks
 
@@ -275,7 +337,7 @@ Write the demo as percent-format `.py` (`# %%` code cells, `# %% [markdown]`
 markdown cells), then build, execute and link it:
 
 ```bash
-python3 <base>/scripts/build_notebook.py <notes>/pytorch/notebooks/<topic>.py --link-dir <workspace>
+python3 <base>/scripts/build_notebook.py <notes>/pytorch/<topic>/<topic>.py --link-dir <workspace>
 ```
 
 The script converts, **executes** the notebook and embeds the outputs, so a demo
@@ -306,7 +368,8 @@ assumed background, confusions they voiced, preferred depth. Update it when they
 push back, misread something, or ask for more/less detail. At Step 1, resurface one
 question from an older note's `## 自测` when it is relevant to the new topic.
 Words they use fluently are the signal that the assumed background is higher than
-zero: record that, and start the next lesson at their real level.
+zero: record that, and start the next lesson at their real level. `_project.md` lives on
+cloud `main`: after editing it, run `sync.py push` so the learner model is shared too.
 
 ## Common mistakes
 
@@ -328,6 +391,12 @@ zero: record that, and start the next lesson at their real level.
 | Promoting a note the user never confirmed | Ask first; a draft is not reference material |
 | Writing a second note for a follow-up | Revise the same draft — no second note, no re-ask |
 | Shipping a notebook with empty outputs | Let `build_notebook.py` execute it, or say it was not executed |
+| Writing a draft but leaving it local-only | Run `sync.py draft <project>/<topic>` after the write and after every revision |
+| Promoting without merging the branch | `note.py promote` then `sync.py archive`; an unmerged branch is an unfinished archive |
+| Putting a draft on cloud `main` | Unconfirmed content lives only on `script/<project>/<topic>` |
+| Reading or editing `<notes>/.sync/` | It is the internal mirror; use it only through `sync.py` |
+| Force-pushing over a conflict without reading it | Compare both versions first, then `--force` in the direction you chose |
+| Expecting `INDEX.md` in the cloud | The landscape is generated locally after each pull |
 
 ## Red flags
 
@@ -342,3 +411,8 @@ zero: record that, and start the next lesson at their real level.
 - A Standard/Deep lesson that never consulted DeepWiki, and never said why not.
 - A wiki-sourced claim wearing a local `file::symbol`, or `verified_against` naming DeepWiki.
 - Every question starts a new project directory instead of extending one.
+- A Standard/Deep lesson never pulled the cloud, or a pull conflict was ignored and the
+  remote note was treated as read.
+- A draft was written or revised without `sync.py draft`.
+- The user confirmed the lesson but `sync.py archive` never ran.
+- `<notes>/.sync/` was treated as teaching material.

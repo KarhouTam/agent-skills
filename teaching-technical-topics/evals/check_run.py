@@ -36,6 +36,14 @@ def record(ok: bool, label: str, detail: str = "") -> None:
     print(f"{'PASS' if ok else 'FAIL'}  {label}" + (f"  -- {detail}" if detail and not ok else ""))
 
 
+def iter_files(root: str):
+    """Walk the notes tree without descending into the cloud mirror or git metadata."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in (".git", ".sync")]
+        for name in filenames:
+            yield os.path.join(dirpath, name)
+
+
 def strip_code(text: str) -> str:
     return FENCE_RE.sub("", text)
 
@@ -132,8 +140,8 @@ def check_lifecycle(root: str, topic: str | None, stage: str) -> None:
     """A lesson stays a draft until the user confirms it; only then is it reference."""
     if not topic:
         return
-    active = os.path.join(root, *topic.split("/")) + ".md"
-    draft = os.path.join(root, ".drafts", *topic.split("/")) + ".md"
+    active = os.path.join(root, *topic.split("/"), "note.md")
+    draft = os.path.join(root, ".drafts", *topic.split("/"), "note.md")
     index_path = os.path.join(root, "INDEX.md")
     index = open(index_path, encoding="utf-8").read() if os.path.exists(index_path) else ""
     topic_slug = topic.split("/")[-1]
@@ -156,21 +164,14 @@ def check_notes(root: str, base: str, before: str | None) -> None:
     # A generated wiki is a map, not provenance: it can never be what a note was
     # verified against, however plausible its prose looked.
     wiki_claims = []
-    for dp, _, fs in os.walk(root):
-        for f in fs:
-            path = os.path.join(dp, f)
-            if f.endswith(".md") and re.search(
-                r"^verified_against:.*deepwiki", open(path, encoding="utf-8").read(), re.M | re.I
-            ):
-                wiki_claims.append(os.path.relpath(path, root))
+    for path in iter_files(root):
+        if path.endswith(".md") and re.search(
+            r"^verified_against:.*deepwiki", open(path, encoding="utf-8").read(), re.M | re.I
+        ):
+            wiki_claims.append(os.path.relpath(path, root))
     record(not wiki_claims, "no note names DeepWiki in its `verified_against`", f"claimed by {wiki_claims}")
 
-    notebooks = [
-        os.path.join(dp, f)
-        for dp, _, fs in os.walk(root)
-        for f in fs
-        if f.endswith(".ipynb")
-    ]
+    notebooks = [path for path in iter_files(root) if path.endswith(".ipynb")]
     for nb_path in notebooks:
         try:
             nb = json.load(open(nb_path))
@@ -187,10 +188,8 @@ def check_notes(root: str, base: str, before: str | None) -> None:
         def md5s(top: str) -> dict[str, str]:
             import hashlib
             out = {}
-            for dp, _, fs in os.walk(top):
-                for f in fs:
-                    p = os.path.join(dp, f)
-                    out[os.path.relpath(p, top)] = hashlib.md5(open(p, "rb").read()).hexdigest()
+            for p in iter_files(top):
+                out[os.path.relpath(p, top)] = hashlib.md5(open(p, "rb").read()).hexdigest()
             return out
         changed = {k for k, v in md5s(root).items() if md5s(before).get(k) != v}
         record(not changed, "Quick mode wrote nothing to the notes root", f"changed: {sorted(changed)[:5]}")
