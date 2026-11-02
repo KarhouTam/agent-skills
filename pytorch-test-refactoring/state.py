@@ -347,6 +347,9 @@ class PrReviewFinding(BaseModel):
     file: str = ""
     line_number: int = 0
     description: str = ""
+    # One short English sentence: the exact text posted as an inline comment
+    # when `file:line` anchors to an added line of the PR diff.
+    inline: str = ""
     fix: str = ""
 
 
@@ -364,18 +367,18 @@ class PrReviewResult(BaseModel):
     reviewed_files: list[str] = []
     findings: list[PrReviewFinding] = []
     summary: str = ""
+    review_url: str = ""  # filled at publish once the review was submitted
     error: str = ""
 
 
 class ReviewOpsState(BaseModel):
     """Transient runtime position of the review-queue state machine (persisted)."""
 
-    phase: str = "select"  # "select" | "review" | "publish" | "done"
+    phase: str = "select"  # "select" | "review" | "draft" | "done"
     review_queue: list[PrReviewItem] = []  # selected open PRs with test changes
     not_applicable: list[PrReviewItem] = []  # merged/closed or no test changes
-    failed: list[PrReviewItem] = []  # fetch failures — left pending, never in comment
+    failed: list[PrReviewItem] = []  # fetch/gate failures — left pending, never published
     in_flight: list[PrReviewItem] = []  # reviewer sub-agents currently spawned (Claude)
     results: dict[str, PrReviewResult] = {}  # str(pr_number) -> result
-    comment_url: str = ""
-    comment_path: str = ""
+    ledger_path: str = ""  # pending-publication document awaiting user approval
     signal: FlowSignal = FlowSignal.DONE

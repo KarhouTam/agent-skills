@@ -173,8 +173,6 @@ PR_QUEUE_FILE = Path("agent_space/pr_needs_review.txt")
 PR_REVIEW_WORKSPACE_ROOT = Path("agent_space/pr_reviews")
 PR_REVIEWED_ARCHIVE_FILE = "pr_reviewed.json"
 PR_REVIEW_FLOW_STATE_FILE = "flow_state.json"
-PR_REVIEW_ISSUE_REPO = "cosdt/pytorch-initial-pr-reviews"
-PR_REVIEW_ISSUE_NUMBER = 1
 PR_REVIEW_TEST_PREFIXES = ("test/", "torch/testing/")
 
 

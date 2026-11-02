@@ -134,7 +134,20 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Run the daily PR review queue sidecar: review open PRs from "
-            "agent_space/pr_needs_review.txt and post one issue comment."
+            "agent_space/pr_needs_review.txt and render a pending-publication "
+            "ledger the user edits and approves."
+        ),
+    )
+    parser.add_argument(
+        "--publish",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="LEDGER_FILE",
+        help=(
+            "Publish the pending-publication ledger (one GitHub review per "
+            "PR section, inline comments included) after the user approved "
+            "it. Optional path overrides the default document.",
         ),
     )
     parser.add_argument(
@@ -171,6 +184,10 @@ def main() -> None:
 
     if args.ingest_feedback:
         _run_ingest(args, harness)
+        return
+
+    if args.publish is not None:
+        _run_publish_ledger(args)
         return
 
     if args.review_queue:
@@ -919,7 +936,7 @@ def _emit_ingest_action(ops: "IngestOps", harness) -> None:
 
 
 def _run_review_queue(args, harness) -> None:
-    """Handle --review-queue: select + review + publish one daily comment."""
+    """Handle --review-queue: select + review + render the publication ledger."""
     from review_ops import ReviewOps
     from utils import get_pr_review_workspace
 
@@ -1053,23 +1070,53 @@ def _emit_review_queue_action(ops, harness) -> None:
 
     else:  # DONE
         ops.finalize()
-        _write_json(
-            {
-                "status": "done",
-                "phase": "review_queue_done",
-                "comment_url": sm.comment_url,
-                "comment_path": sm.comment_path,
-                "reviewed_count": len(sm.results),
-                "not_applicable_count": len(sm.not_applicable),
-                "workspace": str(ws),
-                "next_steps": (
-                    "Daily review batch complete. The comment was posted to "
-                    "cosdt/pytorch-initial-pr-reviews#1. Processed PRs were removed "
-                    "from agent_space/pr_needs_review.txt and archived in "
-                    "agent_space/pr_reviews/pr_reviewed.json."
-                ),
-            }
-        )
+        common = {
+            "phase": "review_queue_done",
+            "reviewed_count": len(sm.results),
+            "failed_count": len(sm.failed),
+            "not_applicable_count": len(sm.not_applicable),
+            "workspace": str(ws),
+        }
+        ledger = sm.ledger_path
+        if ledger and Path(ledger).exists():
+            _write_json(
+                {
+                    **common,
+                    "status": "needs_publish",
+                    "ledger_path": ledger,
+                    "next_steps": (
+                        f"Review batch complete. The pending-publication ledger is "
+                        f"at {ledger}. Show it to the user; the user edits and "
+                        "approves every published comment there (English only; "
+                        "inline comments one short sentence; the machine drafts "
+                        "every event as COMMENT, flipping to REQUEST_CHANGES is "
+                        "only the user's deliberate edit). Do NOT publish anything "
+                        "until the user explicitly approves, then run "
+                        "`python orchestrator.py --review-queue --publish`."
+                    ),
+                }
+            )
+        else:
+            _write_json(
+                {
+                    **common,
+                    "status": "done",
+                    "next_steps": (
+                        "Batch complete with nothing to publish (not-applicable "
+                        "or failed PRs only, archived in "
+                        "agent_space/pr_reviews/pr_reviewed.json)."
+                    ),
+                }
+            )
+
+
+def _run_publish_ledger(args) -> None:
+    """Handle --publish: submit one GitHub review per approved ledger section."""
+    from scripts import review_queue
+
+    ledger = Path(args.publish) if args.publish else None
+    out = review_queue.publish_from_ledger(ledger_path=ledger)
+    _write_json(out)
 
 
 def _run_apply_ingest(args, harness) -> None:

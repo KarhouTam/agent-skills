@@ -288,14 +288,20 @@ execution. The executor therefore performs triage/analyst/apply steps itself.
 
 Review open PyTorch test-decoupling PRs listed in
 `agent_space/pr_needs_review.txt` in daily batches, applying the review
-criteria of `agent/skills/review-test-refactoring/SKILL.md`, and post the
-results as one issue comment per day to
-`cosdt/pytorch-initial-pr-reviews#1`. Runs independently of the 8-phase
-refactoring workflow.
+criteria of `agent/skills/review-test-refactoring/SKILL.md`. The review output
+is NOT published automatically: each batch renders a **pending-publication
+ledger** (`agent_space/pr_reviews/pending_publication.md`) that **the user
+edits and approves**, and only after that explicit approval does the publish
+step submit one GitHub review per PR (summary body + inline comments, posted
+in English by the gh account the user is logged in as). Runs independently
+of the 8-phase refactoring workflow.
 
 ```bash
 # One daily batch (defaults to 10 PRs per run)
 python orchestrator.py --review-queue --harness <claude|codex> [--limit N]
+
+# After the user reviewed and approved the ledger:
+python orchestrator.py --review-queue --publish
 ```
 
 **What each run does**
@@ -303,34 +309,44 @@ python orchestrator.py --review-queue --harness <claude|codex> [--limit N]
 1. **Select** (deterministic): classify pending PRs FIFO via `gh pr view`.
    Open PRs with changed test files (`test/**` or `torch/testing/**`) fill
    the review queue up to `--limit`; merged/closed PRs and PRs without test
-   changes are marked not-applicable; PRs whose metadata cannot be fetched
-   are silently skipped and stay pending. PRs previously reviewed as
+   changes are marked not-applicable (archived silently when drafting — they
+   never receive a published comment); PRs whose metadata cannot be fetched
+   are silently skipped and stay pending. PRs previously published as
    `changes_requested` are re-admitted ahead of the pending list when their
    head commit has moved (see Re-admit below).
-2. **Pre-pass** (deterministic, before any reviewer): the four
-   machine-decidable critera of the review skill (II.12) are run over each
-   PR's ADDED diff lines and written to
-   `agent_space/pr_reviews/pr_<n>_prepass.json`. A reviewer takes those
-   findings as given instead of re-deriving them; when `gh pr diff` fails the
-   file records `ran: false` and the reviewer checks those critera itself.
+2. **Pre-pass + lint gate** (deterministic, before any reviewer): the four
+   machine-decidable criteria of the review skill (II.12) run over each PR's
+   ADDED diff lines, and the **mandatory TEST_LINTER gate** runs the official
+   test linter (vendored into `scripts/linter.py` at a pinned upstream SHA,
+   with the official allowlist) over the PR-head version of every changed
+   test file. Both land in
+   `agent_space/pr_reviews/pr_<n>_prepass.json` (the gate inside the
+   `lint_gate` key, the diff cached beside it). A PR whose pre-pass or gate
+   reports `ran: false` cannot be reviewed — the gate is mandatory — so it
+   stays pending for the next run. A reviewer takes these findings as given
+   (a `TEST_LINTER` error is a Blocker) instead of re-deriving them.
 3. **Review** (AI, harness-dependent). Each reviewer applies BOTH parts of
-   `agent/skills/review-test-refactoring/SKILL.md` — Part I (decoupling
-   criteria) and Part II (general test-scope criteria) — in diff-based mode:
-   - **Claude Code**: one `reviewer` sub-agent per PR, emitted in waves of up
-     to 4 concurrent tasks. Each sub-agent runs the diff-based mode of the
-     `review-test-refactoring` skill and writes a structured result to
-     `agent_space/pr_reviews/pr_<n>_result.json`.
-   - **Codex**: ONE inline instruction for the harness executor (main agent),
-     which reviews every PR itself with its own tools (no sub-agents) and
-     writes the same per-PR result files.
-4. **Publish** (deterministic): render one comment with a collapsed
-   `<details>` block per PR — the per-PR verdict (`通过` / `需修改`, derived
-   from the finding severities: any Blocker or Major means `需修改`), the
-   severity counts, the full findings tagged `[Severity/Category]`, and an
-   `@author` mention — post it to the tracking issue, archive processed PRs
-   with their verdict and head SHA in
-   `agent_space/pr_reviews/pr_reviewed.json`, and rewrite
-   `agent_space/pr_needs_review.txt` (processed PRs removed, failures kept).
+   `agent/skills/review-test-refactoring/SKILL.md` in diff-based mode and
+   writes all human-readable content in **English**: one reviewer sub-agent
+   per PR (Claude Code, waves of up to 4) or one inline instruction (Codex).
+   Results: `agent_space/pr_reviews/pr_<n>_result.json` — findings carry a
+   one-sentence `inline` text meant to become the GitHub inline comment.
+4. **Draft** (deterministic, the gate for humans): every reviewed PR becomes
+   one section of the pending-publication ledger — the review body
+   (summary + terse findings list + the `_Generated by my agent. Reviewed
+   by the user._` note) and one inline-comment block per line-anchored
+   finding. `event:` is drafted as COMMENT — the
+   machine never submits REQUEST_CHANGES on its own (the semantic verdict
+   lives in the `verdict:` header and the archive, where it keeps driving the
+   re-review-on-new-commit watch); a REQUEST_CHANGES event exists only if
+   the user deliberately edits that line. The orchestrator then reports
+   `needs_publish` and STOPS; nothing reaches GitHub yet.
+5. **Publish** (deterministic, only on user approval): re-reads the ledger —
+   the document is the single source of truth for the final published text —
+   and submits one review per section via `gh api` (`event`, verbatim body,
+   inline comments anchored to the PR diff's added lines). Posted PRs are
+   archived with their `review_url`, removed from the pending list, and
+   their sections deleted from the ledger.
 
 **Executor loop** (the JSON the orchestrator prints):
 
@@ -341,7 +357,9 @@ python orchestrator.py --review-queue --harness <claude|codex> [--limit N]
   them.
 - Codex, status=need_agent (method="inline"): YOU are the reviewer — follow
   the instruction, write one result JSON per PR, then run on_complete.feed_cmd.
-- status=done: batch complete; the comment URL is in comment_url.
+- status=needs_publish: review done. Show the user the ledger path; the user
+  edits/approves it; publish only on the user's explicit go-ahead.
+- status=done (batch, after --publish): the review URLs are in outcomes.
 ```
 
 **Daily trigger:**
@@ -350,19 +368,19 @@ python orchestrator.py --review-queue --harness <claude|codex> [--limit N]
 Claude Code: run
 `python orchestrator.py --review-queue --limit 10 --harness claude`.
 On `need_agent`, spawn the reviewer sub-agents and feed each result; on
-`waiting`, wait for the remaining agents. Loop until `done`.
+`waiting`, wait for the remaining agents. On `needs_publish`, report the
+ledger to the user and wait for approval. Loop until `done`.
 
 Codex: run
 `python orchestrator.py --review-queue --limit 10 --harness codex`.
 On `need_agent` with `method="inline"`, perform the reviews yourself (do NOT
-spawn sub-agents), write the result files, then run `feed_cmd`. Loop until
-`done`.
+spawn sub-agents), write the result files, then run `feed_cmd`. On
+`needs_publish`, report the ledger to the user and wait. Loop until `done`.
 ```
 
-Failure semantics: a reviewer that fails (or a PR whose metadata cannot be
-fetched) is **not mentioned in the comment** and stays in the pending list
-for the next run. Not-applicable PRs (merged/closed or no test changes) ARE
-listed in the comment as `不适用` and archived.
+Failure semantics: a reviewer that fails, a PR whose pre-pass or lint gate
+could not run, or a PR whose metadata cannot be fetched is not published and
+stays in the pending list for the next run.
 
 **Re-admit:** an archived PR whose verdict was `changes_requested` is watched
 for a new head commit — `head_oid` is recorded in

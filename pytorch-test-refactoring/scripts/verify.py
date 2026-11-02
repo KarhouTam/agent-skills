@@ -745,6 +745,57 @@ def _scan_review_mechanics(
     return findings
 
 
+def _walk_added_lines(patch_text: str):
+    """Yield (path, line_number, text) for every ADDED line of a diff.
+
+    Single source for the added-line walk: `pre_pass_patch` scans the text,
+    `added_line_map` turns the walk into inline-comment anchors. Both can
+    never disagree on what a patch added.
+
+    Comment lines are skipped only by `pre_pass_patch`; here every added
+    line is yielded because an anchor is a place in the diff, not a claim.
+    """
+    path = ""
+    line_no = 0
+    for raw in patch_text.splitlines():
+        if raw.startswith("diff ") or raw.startswith("index ") or raw.startswith("--- "):
+            continue
+        if raw.startswith("+++ "):
+            path = raw[4:].strip().split("\t")[0]
+            # Strip the git b/ side prefix so findings carry repo-relative
+            # paths (`test/test_ops.py`), matching the reviewer's `file` keys.
+            if path.startswith("b/") and len(path) > 2:
+                path = path[2:]
+            continue
+        if raw.startswith("@@"):
+            m = re.search(r"\+(\d+)", raw)
+            if m:
+                line_no = int(m.group(1)) - 1
+            continue
+        if raw.startswith("+"):
+            line_no += 1
+            text = raw[1:]
+        elif raw.startswith(" "):
+            line_no += 1
+            continue
+        else:
+            continue  # a removal, or a patch line this scan does not read
+        yield path, line_no, text
+
+
+def added_line_map(patch_text: str) -> dict[str, set[int]]:
+    """Map each patched file to the NEW-side line numbers its diff adds.
+
+    The review queue uses this to validate inline-comment anchors: a finding
+    whose `file:line` is not an added line of the PR diff is not line-anchored
+    and is published in the review body instead.
+    """
+    added: dict[str, set[int]] = {}
+    for path, line_no, _ in _walk_added_lines(patch_text):
+        added.setdefault(path, set()).add(line_no)
+    return added
+
+
 def pre_pass_patch(
     patch_text: str,
     pattern_set: tuple = _REVIEW_MECHANICS + _PRE_PASS_ONLY_MECHANICS,
@@ -761,27 +812,7 @@ def pre_pass_patch(
     whole-file check.
     """
     findings: list[dict] = []
-    path = ""
-    line_no = 0
-    for raw in patch_text.splitlines():
-        if raw.startswith("diff ") or raw.startswith("index ") or raw.startswith("--- "):
-            continue
-        if raw.startswith("+++ "):
-            path = raw[4:].strip().split("\t")[0]
-            continue
-        if raw.startswith("@@"):
-            m = re.search(r"\+(\d+)", raw)
-            if m:
-                line_no = int(m.group(1)) - 1
-            continue
-        if raw.startswith("+"):
-            line_no += 1
-            text = raw[1:]
-        elif raw.startswith(" "):
-            line_no += 1
-            continue
-        else:
-            continue  # a removal, or a patch line this scan does not read
+    for path, line_no, text in _walk_added_lines(patch_text):
         if text.strip().startswith("#"):
             continue
         for name, pattern, severity, note in pattern_set:

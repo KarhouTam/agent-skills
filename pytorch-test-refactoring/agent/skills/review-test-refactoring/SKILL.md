@@ -158,7 +158,7 @@ signature is: `"Cannot convert a MPS Tensor to float64 dtype"` or similar dtype
 conversion errors on MPS. In diff-based mode, pay special attention to tests
 where `@onlyCUDA` was removed.
 
-**MPS coverage safety**: When MPS coverage is broadened (new `allow_mps=True` or `@onlyAccelerator` replacing CUDA-only restriction), verify `@skipIfMPS` is present unless MPS was already covered via `@dtypesIfMPS` or `@onlyMPS`. Exception: `@skipIfMPS` is NOT required when the class is NOT instantiated for MPS — MPS variants are only created when the class's `instantiate_device_type_tests` call passes `allow_mps=True`. If no MPS variant exists, the test cannot run on MPS and the skip is unnecessary.
+**MPS coverage safety**: When MPS coverage is broadened (new `allow_mps=True` or `@onlyAccelerator` replacing CUDA-only restriction), verify `@skipIfMPS` is present unless MPS was already covered via `@dtypesIfMPS` or `@onlyMPS`. Exception: `@skipIfMPS` is NOT required when the class is NOT instantiated for MPS — MPS variants are only created when the class's `instantiate_device_type_tests` call passes `allow_mps=True`. If no MPS variant exists, the test cannot run on MPS and the skip is unnecessary. **Conservative posture**: never broaden MPS coverage yourself and never ask the author to pass `allow_mps=True` — an absent MPS variant is not a defect (II.4f). When a PR does claim MPS and its tests cannot run there, the fix to recommend is dropping `allow_mps=True` (or scoping with `only_for`), not adding more skips.
 
 **@onlyCPU to device-agnostic**: Verify each `@onlyCPU` test was individually evaluated (not bulk-decided). Check that `device` param was added when `@onlyCPU` was removed.
 
@@ -323,7 +323,7 @@ a regression.
 | `GPU_TYPE`/`HAS_GPU` from `inductor_utils` not converted | Leftover inductor-specific device abstraction | Major |
 | Mixed `device` param and hardcoded `"cuda"` in same class | Inconsistent; some tests use device param, others hardcode | Major |
 | `instantiate_device_type_tests` call references wrong class name | Class name in `globals()` call doesn't match actual test class — class never instantiated | Blocker |
-| `except_for`/`only_for`/`allow_mps`/`allow_xpu` args missing from instantiation | Device allowlists not applied to current `instantiate_device_type_tests` call | Major |
+| `except_for`/`only_for`/`allow_mps`/`allow_xpu` args missing from instantiation | Device allowlists not applied to current `instantiate_device_type_tests` call. A missing `allow_mps=True` is **not** this pitfall — MPS is never positively required (II.4f). | Major |
 | Category A/B API treated as if it makes a test CUDA-specific | Test locked to CUDA unnecessarily; check the catalog | Major |
 | Missing blacklist skip decorators | `@skipXPU`, `@skipMPS`, `@skipMeta` absent — these document known gaps. If the original file had them and they're now gone, that's a regression | Blocker |
 | `@onlyAccelerator` used without dtype compatibility check | Test runs on MPS/XPU but uses `complex128` or `float64` (unsupported on MPS). For every test using `@onlyAccelerator`, verify every dtype the test uses is supported on ALL target backends. If not, add `@expectedFailureMPS`, `@dtypesIfMPS`, or a skip decorator. | Blocker |
@@ -413,9 +413,11 @@ load-bearing.**
    test can still be the wrong test: duplicated across device classes, placed
    in a file that only runs on one backend, asserting one operator's behaviour
    where the OpInfo framework already covers it.
-4. **Focus on what CI cannot check.** Do not report formatting, lint, type
-   errors or CI failures. Report design, interface, thread safety, BC, test
-   adequacy, and pattern adherence.
+4. **Focus on what CI cannot check.** Do not report formatting, type errors,
+   or CI failures — with one exception: the TEST_LINTER gate (II.12), whose
+   findings on changed test files are mandatory to report because that
+   linter is a blocking CI check. Report design, interface, thread safety,
+   BC, test adequacy, and pattern adherence.
 5. **Everything is a must-fix.** There are no nits. Every inconsistency
    degrades the test framework over time.
 6. **Be specific and actionable.** Cite `file:line`; name the decorator,
@@ -575,15 +577,27 @@ not contradict — §1b is about the skip, §7 about the allowlist. Read §7's
 "args missing" as the allowlist arguments the class's own labell and
 construction require, not as every flag a sibling call happens to pass.
 
+**MPS is claimed, never advised.** This project's posture on MPS is
+conservative: a refactor narrows the CUDA surface it can prove, and the MPS
+variant is nobody's to hand out from a review comment. Concretely — omitting
+`allow_mps=True` is the default and correct shape of an `ACCELERATOR` class,
+so it is **not** a finding and a reviewer must not suggest adding the flag
+(not "pass `allow_mps=True` for consistency", not "the ACCELERATOR label
+should instantiate MPS", not even as a Minor). What remains a finding is the
+opposite direction: a PR that opens MPS while its tests cannot run there,
+turning claimed coverage into failures or silent skips on MPS runners.
+
 | Check | Rule | Severity |
 |---|---|---|
-| The accelerator set the class claims is the set it instantiates | A class labell `ACCELERATOR` claims the accelerators the repo builds for, not the one back-end the author had a machine for. Pass the back-ends the class claims (`allow_mps=True, allow_xpu=True` is the form the newest refactored files use), or scope the class to one device with `only_for="<device>"` and labell it `CUDA`/`MPS`/`XPU`. Consistency with a same-directory sibling that also opens one flag only narows the blast radius; it does not make an incomplete claim complete. | Minor |
+| A class that does not instantiate MPS is fine | An `ACCELERATOR` class instantiated without `allow_mps=True` (CUDA/XPU variants only) is the prescribed conservative shape. Do not file it, and do not ask the author to widen it. Coverage of MPS is a separate, opt-in project — not something this refactoring series promises. | — (not a finding) |
+| A claimed MPS variant can actually run | `allow_mps=True` (or an `@onlyAccelerator`/wider scope that newly creates MPS variants) is a promise the class body must keep: every test it generates must run on MPS, or skip/xfail on it deliberately (`@skipIfMPS`, `@dtypesIfMPS`, `@expectedFailureMPS`, a device-aware `skipMPSIf`). Ground the judgement in `reference/device_api_catalog.yaml` — a Category-C API, a triton-codegen assertion, or a float64/complex128 dtype with no MPS counterpart means the promise cannot hold. Prefer narrowing the claim (`allow_mps=True` off, or `only_for` to the back-ends that work) over bolting on skips: the fix a review asks for is the one that stops claiming, not the one that keeps claiming and skips. | Major |
 | A blacklist never leaves the set empty | `except_for=("cpu",)` removes the unconditional CPU base; it is the prescribed counterpart of `@onlyAccelerator` (Part I §9) and is **not** a finding. It becomes one only when nothing else can put a variant back — the remaining accelerator is gated on a device the machine may not have — because the class and its tests then leave discovery with no skip or xfail record (II.4a, II.4d). | Major |
 | Broadening the set is not a defect | Sweeping an extra base into the variants (a wider `except_for`, `allow_xpu` where the file carried an explicit narrower list) is the whitelist enlargement the decoupling standard prescribes (Part I §1b). It is a finding only when the broadened variant cannot run — a device-specific backend hardcoded in the class body. | — |
 
-The Minor row and the Major row are different consequences, so they file into
-different sections: an incomplete claim is a wrong pattern (Test Patterns,
-II.4b), a set left empty is a silent coverage loss (Testing, II.4a/II.4d).
+The rows split by consequence, so they file into different sections: an MPS
+claim the class cannot honour is a silent coverage loss (Testing, II.4a/II.4d)
+or a wrong pattern (Test Patterns, II.4b), while the absence of an MPS variant
+is not a defect at all and must not appear in the findings list.
 
 ### II.5 General Code Quality
 
@@ -713,10 +727,10 @@ to exactly one section, first match wins:
 4. **API Design** — the defect is in a public or frozen test interface: names,
    signatures, documented semantics (II.5b)
 5. **Testing** — the defect is only absent or inadequate coverage (II.4a, the
-   exception and boundary rows of II.4c, II.4d, the empty-set row of II.4f)
+   exception and boundary rows of II.4c, II.4d, the empty-set and MPS-claim
+   rows of II.4f)
 6. **Test Patterns** — the defect is a wrong pattern in test code, not absent
-   coverage (II.4b, the determ inism and explicit-dtype rows of II.4c, II.4e,
-   the incomplete-claim row of II.4f)
+   coverage (II.4b, the determ inism and explicit-dtype rows of II.4c, II.4e)
 7. **Performance** (II.9)
 8. **Code Quality** — everything else (II.5a, II.5c)
 
@@ -745,8 +759,19 @@ Mapping onto the PR verdict:
 
 | Finding severities present | Per-PR verdict |
 |---|---|
-| no Blocker and no Major | `ready_for_human_review` — 通过 |
-| any Blocker or Major | `changes_requested` — 需修改 |
+| no Blocker and no Major | `ready_for_human_review` |
+| any Blocker or Major | `changes_requested` |
+
+A TEST_LINTER error (II.12) on a changed test file is a Blocker by
+definition — it blocks CI — so it alone forces `changes_requested`, whatever
+else the review finds or pardons.
+
+Publication note: the review queue NEVER submits a REQUEST_CHANGES review
+event on its own. The verdict above is the severity mapping a maintainer
+would apply; it is stated in the review body and recorded in the queue's
+archive (where it drives the re-review-on-new-commit watch), while the
+posted review is a plain COMMENT whose body ends with the note
+`_Generated by my agent. Reviewed by the user._`.
 
 The verdict is per PR, not per finding and not per batch. A `Minor`-only review
 is `ready_for_human_review` with the Minors written up: they still get fixed,
@@ -755,7 +780,7 @@ but the PR merits the maintainer's time as it stands.
 A clean review is the common case, not a failure to find something. Report
 problems and nothing else.
 
-### II.12 Mecha nized Checks
+### II.12 Mechanized Checks
 
 A deterministic pre-pass runs over the **added lines of the diff** before you
 review. It covers exactly these, and you need not re-derive them:
@@ -767,22 +792,43 @@ review. It covers exactly these, and you need not re-derive them:
 | `weights_only=False` | An added `torch.load(..., weights_only=False)` (II.5c). |
 | Residual `@onlyCUDA` | An added `@onlyCUDA` decorator or `device="cuda"` in a class the diff is generalizing (Part I §5). |
 
+Beside them runs the **TEST_LINTER gate**, the fifth mechanized source. The
+official test linter (`tools/linter/adapters/test_linter.py` on
+pytorch/pytorch, vendored into this skill at a pinned SHA) is a **blocking CI
+check**; the queue runs it over the PR-head version of every changed test
+file, with the official allowlist applied. Its `severity: error` messages
+arrive in the prompt as pre-pass findings tagged `TEST_LINTER`. They are
+Blocker findings (see II.11), even when they point at lines the diff did not
+add — a changed file must satisfy the linter whole. Never re-report
+violations for a file the official allowlist exempts: the gate already
+skipped it, and upstream CI does not charge it either.
+
+If the gate reports `skipped: allowlist_changed`, the PR edits
+`test_linter_allowlist.json` itself. Judge its delta manually: additions are
+acceptable only when the PR also changes lint rules — "new allowlist entries
+should only be added when the lint rules change" — and any other addition is
+a Major finding; removals are the migration actually progressing and need no
+finding.
+
 They arrive in the prompt as pre-pass findings. Take each as given, assign it a
 severity from II.11, and spend your own attention on the judgment criteria the
 pre-pass cannot decide. If the prompt carries no pre-pass results, the pre-pass
-was skipped — check these yourself.
+was skipped — do not review; that PR stays pending.
 
-Only these four are deterministically decidable from the added lines. Every
-other rule in Part II needs judgment or the whole file, and stays yours. II.4f
-is the clear case of that: a call's accelerator set cannot be tested
-line-locally — it needs the class's labell and the call's whole argument list —
-so it stays a judgment rule.
+Only these four line patterns are deterministically decidable from the added
+lines. Every other rule in Part II needs judgment or the whole file, and stays
+yours. II.4f is the clear case of that: a call's accelerator set cannot be
+tested line-locally — it needs the class's label and the call's whole argument
+list — so it stays a judgment rule.
 
-The same four are defined once, in `scripts/verify.py`, and also run as the
-`review_mechanics` check of the refactoring worklow's Verify phase. There they
-scan the lines the refactor changed rather than the whole file, so a
-pre-existing debug print in a region the change never touched is not charged
-to it. One pattern set, two entry points — they cannot drift apart.
+The same four patterns are defined once, in `scripts/verify.py`, and also run
+as the `review_mechanics` check of the refactoring workflow's Verify phase.
+There they scan the lines the refactor changed rather than the whole file, so
+a pre-existing debug print in a region the change never touched is not charged
+to it. One pattern set, two entry points — they cannot drift apart. The lint
+gate shares its linter the same way: `scripts/linter.py` is the vendored
+official script, imported by both the refactoring flow's lint hard gate and
+the queue's pre-pass runner.
 
 ### II.13 Output
 
@@ -807,7 +853,7 @@ Structure your review as follows:
 - Mode: whole-file / diff-based
 - File(s) reviewed: N
 - What it does: <one sentence>
-- Verdict: ready_for_human_review（通过） / changes_requested（需修改）
+- Verdict: ready_for_human_review / changes_requested
 - Problems: <what is wrong, or an explicit "none found">
 
 ### Findings
@@ -837,7 +883,7 @@ Each finding:
 #### Code Quality
 
 ### Recommendation
-**ready_for_human_review**（通过） / **changes_requested**（需修改）
+**ready_for_human_review** / **changes_requested**
 ```
 
 ## Reference

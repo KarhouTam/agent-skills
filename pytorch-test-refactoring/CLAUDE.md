@@ -11,7 +11,7 @@ The skill is not run standalone: it is invoked by the host harness (Claude Code 
 ## Architecture
 
 ```
-orchestrator.py  CLI bridge — emits JSON task specs, accepts feed-back; --harness selects the harness; --ci-check / --ingest-feedback / --apply-ingest / --review-queue
+orchestrator.py  CLI bridge — emits JSON task specs, accepts feed-back; --harness selects the harness; --ci-check / --ingest-feedback / --apply-ingest / --review-queue / --review-queue --publish
 flow.py          RefactorFlow state machine — core orchestrator, phases 1-7
 ci_ops.py        CIOps state machine — CI monitoring & debug, phase 8
 ingest_ops.py    IngestOps state machine — PR feedback ingest sidecar
@@ -23,7 +23,7 @@ review_ops.py    ReviewOps state machine — daily PR review queue sidecar
 └── reference/   Core reference base (default); non-core fields live under reference/<field>/
 ```
 
-The state machines share one pattern: deterministic `scripts/*` steps do the mechanical work (analysis, verification, CI, harvesting, queue selection/publishing); AI agents do the judgment (classification, coding, review, debugging, PR reviewing). The review-queue sidecar is harness-dependent for its review phase — driven by the harness's `supports_delegated_agents` capability, not its name: Claude Code uses one reviewer sub-agent per PR, while Codex reviews inline in the executor because Codex MultiAgentV2 mis-delivers `spawn_agent` task messages (openai/codex#25458). Each machine stops on a **flow signal** (`spawn_single` / `spawn_parallel` / `send_message` / `relay_findings` / `waiting` / `done`) and lets the selected harness translate that signal into harness-specific actions.
+The state machines share one pattern: deterministic `scripts/*` steps do the mechanical work (analysis, verification, CI, harvesting, queue selection/lint gate/publication drafting); AI agents do the judgment (classification, coding, review, debugging, PR reviewing). The review-queue sidecar is harness-dependent for its review phase — driven by the harness's `supports_delegated_agents` capability, not its name: Claude Code uses one reviewer sub-agent per PR, while Codex reviews inline in the executor because Codex MultiAgentV2 mis-delivers `spawn_agent` task messages (openai/codex#25458). Its publish phase is user-gated: reviewer output becomes `agent_space/pr_reviews/pending_publication.md`, and one GitHub review per PR is submitted only after the user edits and approves that document (`--review-queue --publish`). Each machine stops on a **flow signal** (`spawn_single` / `spawn_parallel` / `send_message` / `relay_findings` / `waiting` / `done`) and lets the selected harness translate that signal into harness-specific actions.
 
 ### Harness plugin layer
 

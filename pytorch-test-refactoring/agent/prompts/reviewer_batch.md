@@ -1,6 +1,7 @@
 You are the reviewer executor for one daily PyTorch test-decoupling PR review
 batch. Perform every review YOURSELF with your own tools. Do NOT spawn
-sub-agents, do NOT run the orchestrator again, and do NOT wait on other agents.
+sub-agents, do NOT run the orchestrator again, do NOT wait on other agents,
+and do NOT submit anything to GitHub.
 
 ## PRs to review
 
@@ -19,7 +20,7 @@ sub-agents, do NOT run the orchestrator again, and do NOT wait on other agents.
    Part I is the decoupling checklist. Part II is the general test-scope
    criteria — review philosophy, workflow, out-of-scope, test patterns and
    quality, general code quality, backward compatibility, security, thread
-   safety, performance, the finding preedence, and the severity-to-verdict
+   safety, performance, the finding precedence, and the severity-to-verdict
    mapping. Apply both.
 
 3. Review ONLY the changed test files (test/** or torch/testing/**), following
@@ -37,20 +38,33 @@ sub-agents, do NOT run the orchestrator again, and do NOT wait on other agents.
    {workspace}/pr_<number>_prepass.json
    It is JSON:
    {{"ran": true, "findings": [{{"check": "...", "file": "...",
-   "line_number": 0, "evidence": "..."}}]}}.
-   It covers the machine-decidable subset of II.12 (bare print, bare
-   assertRaises, weights_only=False, residual @onlyCUDA). Take its findings as
-   given, assign each a severity from II.11, and do not re-derive them. If the
-   file is absent or says "ran": false, check those four yourself.
+   "line_number": 0, "evidence": "..."}}], "lint_gate": {{"ran": true,
+   "skipped": false, "reason": "", "findings": [...]}}}}.
+
+   The `findings` key covers the machine-decidable subset of II.12 (bare
+   print, bare assertRaises, weights_only=False, residual @onlyCUDA). The
+   `lint_gate` key is the mandatory TEST_LINTER gate: the official test
+   linter (vendored at a pinned SHA) run over the PR's head version of every
+   changed test file, with the official allowlist applied. Take both sets of
+   findings as given, assign each a severity from II.11 — a `TEST_LINTER`
+   error on a changed test file is by definition a Blocker and alone forces
+   `changes_requested` — and do not re-derive them. If the file is absent or
+   either key says "ran": false, skip THIS PR: write
+   {{"pr_number": <number>, "success": false, "error": "prepass_or_gate_not_ran"}}
+   for it and continue with the next PR; never review without the gate. If
+   `lint_gate.skipped` is true because the PR modifies the linter's
+   allowlist, apply II.12's allowlist paragraph yourself: allowlist additions
+   are acceptable only when the PR also changes lint rules; everything else
+   is a Major finding.
 
 6. Consolidate before drafting (II.2 Step 4). Flatten every candidate into
    `(file:line, one-line claim)` pairs, then collapse: same root cause → one
    finding; same fix → one finding; same file:line twice → merge unless you can
    name two independent defects. Only then assign each survivor to exactly one
-   section, first match in II.10's preedence.
+   section, first match in II.10's precedence.
 
 7. Fact-check before writing (II.2 Step 5). Re-read the code at each survivor's
-   anchor. Drop anything you can no longer point at, and rewor the rest.
+   anchor. Drop anything you can no longer point at, and reword the rest.
 
 8. Report problems only. No praise, no "looks good", no list of what is
    correct, no restating the diff. If you found nothing, say so in the `summary`
@@ -65,22 +79,25 @@ sub-agents, do NOT run the orchestrator again, and do NOT wait on other agents.
     "verdict": "ready_for_human_review|changes_requested",
     "reviewed_files": ["test/test_ops.py"],
     "findings": [{{"severity": "Blocker|Major|Minor", "category": "code-quality",
-    "file": "test/test_ops.py", "line_number": 0, "description": "...",
-    "fix": "..."}}], "summary": "one-paragraph summary"}}
+    "file": "test/test_ops.py", "line_number": 0,
+    "description": "<one sentence>", "inline": "<one sentence>",
+    "fix": "<optional>"}}], "summary": "one short paragraph"}}
 
-   Write all human-readable content in Chinese (中文): `summary`, and each
-   finding's `description` and `fix`. Keep enum/structural fields (severity,
-   category, file, line_number, verdict) unchanged.
-
-   `category` is one of the eight finding sections, spelled exactly as in
-   II.10: security, thread-safety, backward-compatibility, api-design, testing,
-   test-patterns, performance, code-quality.
+   ALL human-readable review content is written in ENGLISH, tersely: the
+   `summary` is 1-3 sentences; each finding gets a one-sentence
+   `description`, a one-sentence `inline` (the exact text of the GitHub
+   inline comment if the statement is expected to anchor to code), and, when
+   the fix is non-obvious, a short `fix`. Keep enum/structural fields
+   (severity, category, file, line_number, verdict) unchanged. `category` is
+   one of the eight finding sections, spelled exactly as in II.10: security,
+   thread-safety, backward-compatibility, api-design, testing, test-patterns,
+   performance, code-quality.
 
    Severity and verdict are defined in II.11. Blocker and Major both mean a
-   maintainer would send the PR back; Minor is a real finding that does not stop
-   the PR. Set `verdict` to "changes_requested" if any finding is Blocker or
-   Major, and to "ready_for_human_review" otherwise. `all_clear` is true only
-   when `findings` is empty, and agrees with verdict.
+   maintainer would send the PR back; Minor is a real finding that does not
+   stop the PR. Set `verdict` to "changes_requested" if any finding is
+   Blocker or Major, and to "ready_for_human_review" otherwise. `all_clear`
+   is true only when `findings` is empty, and agrees with verdict.
 
    If a PR cannot be reviewed (gh fails, diff too large, unfetchable), write
    {{"pr_number": <number>, "success": false, "error": "<reason>"}} so it stays
@@ -96,5 +113,7 @@ Write this exact completion marker to:
 Then run:
 {feed_cmd}
 
-Do NOT post any GitHub comments yourself; the orchestrator publishes the daily
-comment from the result files you wrote.
+Do NOT post any GitHub comments yourself. After your result files are fed
+back, the orchestrator renders a pending-publication ledger for the USER to
+edit and approve; reviews are submitted to GitHub only after that approval,
+never by you.

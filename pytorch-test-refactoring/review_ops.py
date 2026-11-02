@@ -1,6 +1,6 @@
 """State machine for the PR review queue sidecar module.
 
-select -> review -> publish. The review phase is harness-dependent:
+select -> review -> draft. The review phase is harness-dependent:
 
 * Claude Code: the orchestrator emits one reviewer sub-agent per PR, in waves
   of up to WAVE_SIZE, because Claude's Agent tool delivers the delegated task
@@ -10,6 +10,11 @@ select -> review -> publish. The review phase is harness-dependent:
   `message` as an assistant/commentary mailbox envelope rather than a user/task
   message (openai/codex#25458), so spawned reviewers ignore their assignment
   and re-run the orchestrator.
+
+The draft phase never touches GitHub: it renders the pending-publication
+ledger (`agent_space/pr_reviews/pending_publication.md`) that the USER edits
+and approves. Publishing (`scripts/review_queue.publish_from_ledger`, driven
+by `--review-queue --publish`) runs only after that explicit approval.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ from typing import Any
 from agent.harness import AgentTask
 from agent.tasks import REVIEW_SKILL_PATH, build_reviewer_task, _load_prompt
 from scripts import review_queue
-from state import FlowSignal, PrReviewResult, ReviewOpsState
+from state import FlowSignal, PrReviewItem, PrReviewResult, ReviewOpsState
 from utils import PR_REVIEW_FLOW_STATE_FILE, get_pr_review_workspace
 
 WAVE_SIZE = 4
@@ -40,11 +45,24 @@ class ReviewOps:
 
     def run(self, resume: bool = False) -> ReviewOpsState:
         """Advance through deterministic work until an AI step or completion."""
+        self._guard_pending_publication(resume)
         if resume:
             self._load_machine_state()
         self._advance()
         self._save_machine_state()
         return self.state
+
+    def _guard_pending_publication(self, resume: bool) -> None:
+        """A new batch must wait until its predecessor's ledger is handled."""
+        if resume:
+            return
+        ledger = review_queue.pending_publication_path()
+        if ledger.exists():
+            raise RuntimeError(
+                f"{ledger} still awaits the user's review; publish it with "
+                "`--review-queue --publish` (or delete the file) before "
+                "starting a new batch"
+            )
 
     def _advance(self) -> None:
         while True:
@@ -52,7 +70,7 @@ class ReviewOps:
                 self._select()
                 if self.state.phase == "review":
                     return  # agent step needed (inline instruction or sub-agent wave)
-                continue  # publish or done
+                continue  # nothing left to review: draft right away
             if self.state.phase == "review":
                 if self.mode == "inline":
                     self.state.signal = FlowSignal.SPAWN_SINGLE
@@ -63,9 +81,9 @@ class ReviewOps:
                     FlowSignal.SPAWN_PARALLEL,
                 ):
                     return
-                continue  # phase became publish
-            if self.state.phase == "publish":
-                self._publish()
+                continue  # phase became draft
+            if self.state.phase == "draft":
+                self._draft()
                 return
             self.state.signal = FlowSignal.DONE
             return
@@ -76,29 +94,47 @@ class ReviewOps:
         self.state.not_applicable = sel.not_applicable
         self.state.failed = sel.failed
         if self.state.review_queue:
-            self.state.phase = "review"
             self._run_pre_pass()
+        if self.state.review_queue:
+            self.state.phase = "review"
             if self.mode == "subagents":
                 self._take_wave()
             else:
                 self.state.signal = FlowSignal.SPAWN_SINGLE
-        elif self.state.not_applicable:
-            self.state.phase = "publish"
-            self.state.signal = FlowSignal.DONE
         else:
-            self.state.phase = "done"
-            self.state.signal = FlowSignal.DONE
+            self.state.phase = "draft"
 
     def _run_pre_pass(self) -> None:
-        """Run the deterministic review pre-pass over each selected PR's diff.
+        """Run the deterministic pre-pass (II.12 + mandatory lint gate).
 
-        Writes `pr_<number>_prepass.json` beside the result files; the reviewer
-        prompts read it (II.12 of the review skill). Deterministic, so it runs
-        in the select phase before any reviewer is spawned.
+        Writes `pr_<number>_prepass.json` beside the result files and the
+        diff cache beside them. A PR whose prepass or lint gate reports
+        `ran: false` cannot be reviewed — the gate is mandatory — so it is
+        moved to the failed bucket and stays pending for the next run.
         """
         workspace = get_pr_review_workspace()
+        kept: list[PrReviewItem] = []
         for item in self.state.review_queue:
-            review_queue.write_pre_pass(item, workspace)
+            data = review_queue.write_pre_pass(item, workspace)
+            gate = data.get("lint_gate") or {}
+            if data.get("ran") and gate.get("ran"):
+                kept.append(item)
+                continue
+            reason = gate.get("reason") or data.get("reason") or "unknown"
+            self.state.failed.append(
+                PrReviewItem(
+                    url=item.url,
+                    pr_number=item.pr_number,
+                    title=item.title,
+                    author=item.author,
+                    state=item.state,
+                    has_test_changes=True,
+                    status="failed",
+                    reason=f"prepass_{reason}",
+                    head_oid=item.head_oid,
+                )
+            )
+        self.state.review_queue = kept
 
     def _review_tick(self) -> None:
         if self.state.in_flight:
@@ -106,7 +142,7 @@ class ReviewOps:
         elif self.state.review_queue:
             self._take_wave()
         else:
-            self.state.phase = "publish"
+            self.state.phase = "draft"
             self.state.signal = FlowSignal.DONE
 
     def _take_wave(self) -> None:
@@ -144,7 +180,7 @@ class ReviewOps:
             feed_cmd=feed_cmd,
         )
 
-    # ── feed & publish ─────────────────────────────────────────────
+    # ── feed & draft ───────────────────────────────────────────────
 
     def feed_reviewer_result(
         self,
@@ -169,7 +205,7 @@ class ReviewOps:
                 result.head_oid = item.head_oid
                 self.state.results[str(item.pr_number)] = result
         self.state.review_queue = []
-        self.state.phase = "publish"
+        self.state.phase = "draft"
         self.state.signal = FlowSignal.DONE
 
     def _feed_subagent_result(self, data: dict[str, Any], feed_file: str) -> None:
@@ -216,26 +252,21 @@ class ReviewOps:
         except Exception:
             return None
 
-    def _publish(self) -> None:
+    def _draft(self) -> None:
+        """Render the pending-publication ledger: the batch stops here.
+
+        Nothing is posted. The user edits and approves the ledger; only the
+        explicit publish step (`--review-queue --publish`) touches GitHub.
+        Not-applicable PRs are archived here since they never get published.
+        """
         workspace = get_pr_review_workspace()
-        if not self.state.comment_url:
-            reviewed = [
-                self.state.results[key] for key in sorted(self.state.results, key=int)
-            ]
-            if not reviewed and not self.state.not_applicable:
-                # Every reviewer failed, or the batch was empty: a "0 reviewed"
-                # comment is noise, and leaving publish unrun keeps the PRs
-                # pending for the next batch.
-                self.state.phase = "done"
-                self.state.signal = FlowSignal.DONE
-                return
-            published = review_queue.publish_batch(
-                workspace,
-                reviewed,
-                self.state.not_applicable,
-            )
-            self.state.comment_url = published["comment_url"]
-            self.state.comment_path = published["comment_path"]
+        reviewed = [
+            self.state.results[key] for key in sorted(self.state.results, key=int)
+        ]
+        summary = review_queue.draft_ledger(
+            reviewed, self.state.not_applicable, workspace
+        )
+        self.state.ledger_path = summary.get("ledger_path", "")
         self.state.phase = "done"
         self.state.signal = FlowSignal.DONE
 
