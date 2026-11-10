@@ -17,9 +17,11 @@ First, determine which harness you are running in, then pass the matching
   `Write`/`Read` tools → `--harness claude`
 - **Codex** — you have `spawn_agent`, `followup_task`, and
   `wait_agent` collaboration tools → `--harness codex`
+- **DeepSeek Harness (dsh)** — you have `subagent`, `send_message`, and
+  `schedule_create` tools → `--harness dsh`
 
 ```bash
-python /root/.claude/skills/pytorch-test-refactoring/orchestrator.py <test_file_path> --harness codex
+python /root/.claude/skills/pytorch-test-refactoring/orchestrator.py <test_file_path> --harness <claude|codex|dsh>
 ```
 
 The flag is sticky: every resume/feed command the orchestrator emits carries
@@ -54,7 +56,7 @@ The orchestrator outputs a JSON task spec to stdout. Follow this loop:
      └───┬───────┬─────┘
          │       │
          │       ├── "done" + phase="ci_done"
-         │       │   → gh pr ready, CronDelete, truly done ✓
+         │       │   → gh pr ready, delete cron/schedule, done ✓
          │       │
          │       ├── "done" + phase: "finalize"
          │       │   → Refactoring complete. User creates
@@ -62,8 +64,10 @@ The orchestrator outputs a JSON task spec to stdout. Follow this loop:
          │       │     the CI" or runs --ci-check
          │       │
          │       ├── "schedule_cron"
-         │       │   → CronCreate(on_complete.cron_interval,
+         │       │   → Claude: CronCreate(on_complete.cron_interval,
          │       │     durable=true, prompt=on_complete.prompt)
+         │       │   → dsh: schedule_create(on_complete.rrule,
+         │       │     target=this_session, prompt=on_complete.prompt)
          │       │   → Session exits. Next firing resumes.
          │       │
          │       └── "need_agent"
@@ -97,10 +101,12 @@ The orchestrator outputs a JSON task spec to stdout. Follow this loop:
 
 ## Result JSON Formats
 
-After each agent completes, extract the key result and feed it to the `on_complete.command`: save the result JSON to the `feed_file` path from the task spec (use `apply_patch` in Codex or the Write tool in Claude Code), then run the command as-is. Prefer this over piping via `echo ... | python ...` — the Bash permission matcher is whole-string prefix matching, so piped/redirected commands don't match `Bash(python *)` allow rules and get blocked in Auto/restricted modes.
+After each agent completes, extract the key result and feed it to the `on_complete.command`: save the result JSON to the `feed_file` path from the task spec (use `apply_patch` in Codex, the Write tool in Claude Code, or the `write` tool in dsh), then run the command as-is. Prefer this over piping via `echo ... | python ...` — on Claude Code the Bash permission matcher is whole-string prefix matching, so piped/redirected commands don't match `Bash(python *)` allow rules and get blocked in Auto/restricted modes.
+
+**dsh wait semantics:** `subagent` has no blocking wait — it returns an agent id immediately and the runtime delivers a `Background subagent <id> finished ... Its closing message:` notice as a new user message, which starts your next turn. Dispatch, then end the turn if there is nothing else to do; when the notice arrives, extract the result and feed it back. Do not poll. If the notice is lost (the session was unloaded when the sub-agent settled), re-dispatch the same task — the orchestrator has not advanced.
 
 **All result JSON objects may include these optional fields:**
-- `agent_id`: The canonical task name returned by `spawn_agent` (for example `/root/analyst`) when spawning. **Required after any spawn** — this is how the orchestrator learns the agent's identity for future `followup_task` calls.
+- `agent_id`: The id returned by the harness's spawn tool — Codex's canonical task name (for example `/root/analyst`), Claude Code's Agent id, or dsh's `subagent` id. **Required after any spawn** — this is how the orchestrator learns the agent's identity for future follow-ups.
 - `agent_name`: The `agent_name` from the task spec (e.g. `"coder"`, `"checker"`, `"analyst"`). Include alongside `agent_id`.
 
 ### Coder (`--feed coder`)
@@ -202,25 +208,25 @@ Your ONLY job: run the command → follow the JSON → extract result → feed t
 
 **Before spawning the analyst**: quickly skim the test file (first ~50 lines and a few test methods). Note whether the original file is a plain `TestCase` with no device parametrization and whether tests primarily exercise utility/library logic (`rnn_utils`, `nn.functional` helpers, padding/packing utilities, etc.). If so, expect most tests to be CPU-only. When the analyst report arrives, question any bulk device-agnostic classification — a test that merely creates tensors is not automatically device-agnostic.
 
-**When you see `"done"` with `phase: "finalize"`, the refactoring is complete.** The `next_steps` field tells you how to proceed: create a PR manually (branch, commit, push, draft PR), then say **"look after the CI"** or run `python orchestrator.py <file> --ci-check` to start CI monitoring. Only when you see `"done"` with `phase: "ci_done"` is the entire workflow truly finished — the `next_steps` field will tell you to mark the PR ready for review and delete cron jobs.
+**When you see `"done"` with `phase: "finalize"`, the refactoring is complete.** The `next_steps` field tells you how to proceed: create a PR manually (branch, commit, push, draft PR), then say **"look after the CI"** or run the emitted `--ci-check` command with your `--harness` to start CI monitoring. Only when you see `"done"` with `phase: "ci_done"` is the entire workflow truly finished — the `next_steps` field will tell you to mark the PR ready for review and delete the CI cron job/schedule.
 
-**Important: When you spawn a new agent (method=spawn),** capture the canonical task name from the `spawn_agent` result (for example `/root/analyst`) and include it as `agent_id` (along with `agent_name`) in the result JSON you feed back. This is how the orchestrator learns the agent's identity for future `followup_task` calls. Without it, `followup_task` will fail because it needs that canonical target, not a name.
+**Important: When you spawn a new agent (method=spawn),** capture the id from the spawn tool's result — Codex's canonical task name (for example `/root/analyst`), Claude Code's Agent id, or dsh's `subagent` id — and include it as `agent_id` (along with `agent_name`) in the result JSON you feed back. This is how the orchestrator learns the agent's identity for future follow-ups. Without it, the follow-up has no target and the harness must fall back to a fresh spawn.
 
 ## CI Automation (Phase 8)
 
 After refactoring completes, the user creates a PR manually. To start CI monitoring, say **"look after the CI"** or run:
 
 ```bash
-python orchestrator.py <test_file_path> --harness <claude|codex> --ci-check [--pr-number N]
+python orchestrator.py <test_file_path> --harness <claude|codex|dsh> --ci-check [--pr-number N]
 ```
 
 The orchestrator auto-detects the PR from the current branch. Pass `--pr-number` to skip detection.
 
 | Status | `phase` | What to do |
 |--------|---------|------------|
-| `"done"` | `"ci_done"` | All CI green. Run `gh pr ready <N>`, then `CronDelete` all CI cron jobs. Truly finished. |
-| `"schedule_cron"` | `"ci_monitor"` | CI still running. `CronCreate(cron_interval, durable=true, prompt=...)` using the `on_complete` fields. Session exits. |
-| `"need_agent"` | `"ci_debug"` | CI failures found. Spawn debugger agent (background, `mode: bypassPermissions`). When done, feed the result back via `--feed debugger --feed-file <path>` (save JSON with the Write tool, then run the command). Loop. |
+| `"done"` | `"ci_done"` | All CI green. Run `gh pr ready <N>`, then delete the CI cron job/schedule: Claude Code `CronDelete`, dsh `schedule_edit(action=delete)` (find it with `schedule_list`). Truly finished. |
+| `"schedule_cron"` | `"ci_monitor"` | CI still running. Claude Code: `CronCreate(cron_interval, durable=true, prompt=...)`; dsh: `schedule_create` with the `on_complete` fields (`title`, `target`, `rrule`, `prompt`) — from the top-level session, since a delegated sub-agent cannot create schedules. Session exits. |
+| `"need_agent"` | `"ci_debug"` | CI failures found. Spawn the debugger agent (dsh: `subagent`; Claude Code: background `Agent`). When done, feed the result back via `--feed debugger --feed-file <path>` (save JSON with the file-writing tool, then run the command). Loop. |
 
 The debugger agent's result format and the full CI ops reference: `agent/skills/ci-automation/SKILL.md`.
 
@@ -232,16 +238,19 @@ refactoring workflow.
 
 ```bash
 # Harvest + analyze (cron-driven; runs triage then draft steps)
-python orchestrator.py --harness <claude|codex> --ingest-feedback
+python orchestrator.py --harness <claude|codex|dsh> --ingest-feedback
 
 # Apply approved findings (after editing a findings file's checkboxes)
-python orchestrator.py --harness <claude|codex> --apply-ingest agent_space/ingest/findings/PR-<n>.md
+python orchestrator.py --harness <claude|codex|dsh> --apply-ingest agent_space/ingest/findings/PR-<n>.md
 ```
 
 The AI steps are harness-dependent, same as the review queue:
 
 - **Claude Code** — status=`need_agent` with `tasks[]` (`method=spawn`): spawn
   the triage/analyst/ruleset-editor agent, then feed its result back.
+- **dsh** — same shape as Claude Code (`tasks[]`, `method=spawn`): dispatch each
+  task with `subagent`, then feed the result back when its completion notice
+  arrives.
 - **Codex** — status=`need_agent` with `method="inline"`: YOU are the
   triage/analyst/ruleset-editor agent. Follow `instruction`, write the result
   JSON to the `feed_file` path, then run `on_complete.command`. Do NOT spawn
@@ -259,7 +268,7 @@ deterministically-decidable rule drafts a `verify.py` check rather than
 prose, and a draft that cannot point at BOTH a rule and a comment is dropped
 rather than guessed at.
 
-**Daily cron:** `CronCreate` with a durable prompt:
+**Daily trigger:** Claude Code `CronCreate` (durable) — dsh `schedule_create` with `target: this_session` — carrying this prompt:
 
 ```
 Run `python orchestrator.py --ingest-feedback`. Read the JSON output.
@@ -272,6 +281,10 @@ If status is `need_agent`:
   `on_complete.command`. Do NOT spawn sub-agents.
 Loop until status is `done`.
 ```
+
+dsh runs this same prompt scheduled with `schedule_create`
+(`target: this_session`) on the spawn branch: dispatch with `subagent` and
+feed the result when the completion notice arrives.
 
 Workspace: `agent_space/ingest/` (state in `state.json`, reviewable findings
 in `findings/`). State cursor is per-PR `last_checked_at`; comments already
@@ -298,7 +311,7 @@ of the 8-phase refactoring workflow.
 
 ```bash
 # One daily batch (defaults to 10 PRs per run)
-python orchestrator.py --review-queue --harness <claude|codex> [--limit N]
+python orchestrator.py --review-queue --harness <claude|codex|dsh> [--limit N]
 
 # After the user reviewed and approved the ledger:
 python orchestrator.py --review-queue --publish
@@ -328,7 +341,8 @@ python orchestrator.py --review-queue --publish
 3. **Review** (AI, harness-dependent). Each reviewer applies BOTH parts of
    `agent/skills/review-test-refactoring/SKILL.md` in diff-based mode and
    writes all human-readable content in **English**: one reviewer sub-agent
-   per PR (Claude Code, waves of up to 4) or one inline instruction (Codex).
+   per PR (Claude Code and dsh, waves of up to 4) or one inline instruction
+   (Codex).
    Results: `agent_space/pr_reviews/pr_<n>_result.json` — findings carry a
    one-sentence `inline` text meant to become the GitHub inline comment.
 4. **Draft** (deterministic, the gate for humans): every reviewed PR becomes
@@ -355,6 +369,9 @@ python orchestrator.py --review-queue --publish
   each finishes, run that task's feed_cmd to feed the result back.
 - Claude, status=waiting: wait for the remaining in-flight reviewers and feed
   them.
+- dsh, status=need_agent (tasks[]): dispatch each reviewer with `subagent`;
+  run that task's feed_cmd as each completion notice arrives.
+- dsh, status=waiting: wait for the remaining completion notices and feed them.
 - Codex, status=need_agent (method="inline"): YOU are the reviewer — follow
   the instruction, write one result JSON per PR, then run on_complete.feed_cmd.
 - status=needs_publish: review done. Show the user the ledger path; the user
@@ -376,6 +393,13 @@ Codex: run
 On `need_agent` with `method="inline"`, perform the reviews yourself (do NOT
 spawn sub-agents), write the result files, then run `feed_cmd`. On
 `needs_publish`, report the ledger to the user and wait. Loop until `done`.
+
+dsh: run
+`python orchestrator.py --review-queue --limit 10 --harness dsh`.
+On `need_agent`, dispatch each reviewer with `subagent` and run its
+`feed_cmd` as the completion notice arrives; on `waiting`, wait for the
+remaining notices. On `needs_publish`, report the ledger to the user and
+wait. Loop until `done`.
 ```
 
 Failure semantics: a reviewer that fails, a PR whose pre-pass or lint gate
@@ -393,8 +417,8 @@ the extra `gh` calls.
 Why Codex differs: Codex MultiAgentV2 records the `spawn_agent` task `message`
 as an assistant/commentary mailbox envelope rather than a user/task message
 (openai/codex#25458), so spawned reviewers ignore their assignment and re-run
-the orchestrator. Claude Code's `Agent` tool delivers the task correctly, so
-Claude keeps the per-PR sub-agent model.
+the orchestrator. Claude Code's `Agent` tool and dsh's `subagent` deliver the
+task correctly, so both keep the per-PR sub-agent model.
 
 ## Workspace
 
@@ -415,7 +439,7 @@ agent_space/refactor/{field}/{file_name}/
 ## Resuming After Interruption
 
 ```bash
-python orchestrator.py test/test_ops.py --harness <claude|codex> --resume
+python orchestrator.py test/test_ops.py --harness <claude|codex|dsh> --resume
 ```
 
 The orchestrator loads all artifacts from the workspace and continues from where it left off.

@@ -1,4 +1,4 @@
-"""Unit tests for the harness protocol (Claude Code vs Codex)."""
+"""Unit tests for the harness protocol (Claude Code vs Codex vs dsh)."""
 
 import sys
 from pathlib import Path
@@ -8,7 +8,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest
 
 from agent.harness import AgentTask
-from agent.harnesses import ClaudeHarness, CodexHarness, get_harness
+from agent.harnesses import (
+    ClaudeHarness,
+    CodexHarness,
+    DshHarness,
+    get_harness,
+)
 from agent.tasks import build_analyst_task, build_ruleset_editor_task
 
 
@@ -28,6 +33,7 @@ def _send_task():
 def test_registry_maps_harnesses():
     assert isinstance(get_harness("claude"), ClaudeHarness)
     assert isinstance(get_harness("codex"), CodexHarness)
+    assert isinstance(get_harness("dsh"), DshHarness)
     assert get_harness(None).name == "claude"
 
 
@@ -39,6 +45,7 @@ def test_registry_rejects_unknown():
 def test_supports_delegated_agents():
     assert ClaudeHarness().supports_delegated_agents is True
     assert CodexHarness().supports_delegated_agents is False
+    assert DshHarness().supports_delegated_agents is True
 
 
 def test_agent_task_is_slim():
@@ -114,6 +121,50 @@ def test_codex_followup_rebuilds_role_prompt():
     assert spec["fallback"]["fork_turns"] == "all"
 
 
+def test_dsh_spawn_spec_shape():
+    spec = DshHarness().spawn(_spawn_task())
+    assert spec["method"] == "spawn"
+    assert spec["tool"] == "subagent"
+    assert spec["description"] == "analyst agent"
+    assert spec["prompt"] == "do the thing"
+    assert "model" not in spec
+    assert "run_in_background" not in spec
+    assert "mode" not in spec
+
+
+def test_dsh_followup_targets_child_and_rebuilds_fallback():
+    rc = {
+        "coder_id": "coder-1",
+        "rule": "device_agnostic",
+        "rule_description": "Convert to device-agnostic",
+        "instructions": "- enlarge @onlyCUDA",
+        "total_rules": 1,
+    }
+    spec = DshHarness().followup(
+        _send_task(),
+        file_path="test/test_ops.py",
+        workspace="agent_space/refactor/test_ops",
+        rule_context=rc,
+    )
+    assert spec["tool"] == "send_message"
+    assert spec["agent_id"] == "agent_123"
+    assert spec["target"] == "agent_123"
+    assert spec["fallback"]["tool"] == "subagent"
+    assert spec["fallback"]["prompt"].startswith(
+        "You are the CODER for the test_ops refactoring team."
+    )
+    assert "Apply the next rule" in spec["fallback"]["prompt"]
+
+
+def test_dsh_ci_wait_uses_schedule_create():
+    payload = DshHarness().wait_on_complete("test/test_ops.py")
+    assert payload["action"] == "schedule_create"
+    assert payload["target"] == "this_session"
+    assert payload["rrule"].startswith("DTSTART:")
+    assert "\nRRULE:FREQ=MINUTELY;INTERVAL=7" in payload["rrule"]
+    assert "--harness dsh" in payload["prompt"]
+
+
 def test_note_differs():
     claude = ClaudeHarness().note("refactor", feed_file="f.json", feed_cmd="python x")
     codex = CodexHarness().note("refactor", feed_file="f.json", feed_cmd="python x")
@@ -167,6 +218,9 @@ def test_cmd_roundtrips_harness():
     assert _cmd(get_harness("codex"), "test.py", "--feed", "coder") == (
         "python orchestrator.py --harness codex test.py --feed coder"
     )
+    assert _cmd(get_harness("dsh"), "test.py", "--feed", "coder") == (
+        "python orchestrator.py --harness dsh test.py --feed coder"
+    )
 
 
 def test_harness_choices_derive_from_registry(monkeypatch):
@@ -181,7 +235,7 @@ def test_harness_choices_derive_from_registry(monkeypatch):
 
 def test_notes_use_real_newlines():
     """Notes are rendered for a human; an escaped \\n would ship as literal text."""
-    for harness in (ClaudeHarness(), CodexHarness()):
+    for harness in (ClaudeHarness(), CodexHarness(), DshHarness()):
         for kind in ("refactor", "ci_debugger", "ingest"):
             note = harness.note(kind, feed_file="f.json", feed_cmd="python x")
             assert "\\n" not in note

@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-This file provides guidance to AI agents (Claude Code / Codex) working in this repository.
+This file provides guidance to AI agents (Claude Code / Codex / dsh) working in this repository.
 
 ## Overview
 
 This repo is a **harness-pluggable skill** that orchestrates refactoring PyTorch test files to decouple them from specific hardware accelerators (CUDA, MPS, XPU). Tests are split into three categories across an 8-phase workflow (7 refactoring + 1 CI automation) driven by AI agents.
 
-The skill is not run standalone: it is invoked by the host harness (Claude Code or Codex). `SKILL.md` is the operational entry point; `flow.py` is the state machine core; the host spawns AI agents from the JSON task spec emitted by `orchestrator.py`, selecting the harness via `--harness {claude,codex}`.
+The skill is not run standalone: it is invoked by the host harness (Claude Code, Codex, or dsh). `SKILL.md` is the operational entry point; `flow.py` is the state machine core; the host spawns AI agents from the JSON task spec emitted by `orchestrator.py`, selecting the harness via `--harness {claude,codex,dsh}`.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ review_ops.py    ReviewOps state machine — daily PR review queue sidecar
 └── reference/   Core reference base (default); non-core fields live under reference/<field>/
 ```
 
-The state machines share one pattern: deterministic `scripts/*` steps do the mechanical work (analysis, verification, CI, harvesting, queue selection/lint gate/publication drafting); AI agents do the judgment (classification, coding, review, debugging, PR reviewing). The review-queue sidecar is harness-dependent for its review phase — driven by the harness's `supports_delegated_agents` capability, not its name: Claude Code uses one reviewer sub-agent per PR, while Codex reviews inline in the executor because Codex MultiAgentV2 mis-delivers `spawn_agent` task messages (openai/codex#25458). Its publish phase is user-gated: reviewer output becomes `agent_space/pr_reviews/pending_publication.md`, and one GitHub review per PR is submitted only after the user edits and approves that document (`--review-queue --publish`). Each machine stops on a **flow signal** (`spawn_single` / `spawn_parallel` / `send_message` / `relay_findings` / `waiting` / `done`) and lets the selected harness translate that signal into harness-specific actions.
+The state machines share one pattern: deterministic `scripts/*` steps do the mechanical work (analysis, verification, CI, harvesting, queue selection/lint gate/publication drafting); AI agents do the judgment (classification, coding, review, debugging, PR reviewing). The review-queue sidecar is harness-dependent for its review phase — driven by the harness's `supports_delegated_agents` capability, not its name: Claude Code and dsh use one reviewer sub-agent per PR, while Codex reviews inline in the executor because Codex MultiAgentV2 mis-delivers `spawn_agent` task messages (openai/codex#25458). Its publish phase is user-gated: reviewer output becomes `agent_space/pr_reviews/pending_publication.md`, and one GitHub review per PR is submitted only after the user edits and approves that document (`--review-queue --publish`). Each machine stops on a **flow signal** (`spawn_single` / `spawn_parallel` / `send_message` / `relay_findings` / `waiting` / `done`) and lets the selected harness translate that signal into harness-specific actions.
 
 ### Harness plugin layer
 
@@ -33,6 +33,7 @@ Harness differences are isolated in `agent/`. `orchestrator.py` is the only comp
 - `agent/harness.py` — the slimmed `AgentTask` model (task content only) + the `Harness` protocol (`spawn`/`followup` emission, `note`/`wait_on_complete`/`done_next_steps`/`git_preflight*` policy, `supports_delegated_agents` capability).
 - `agent/harnesses/claude.py` — `ClaudeHarness`: `Agent`/`SendMessage`/`CronCreate`/`Write` semantics, per-role permission mode, settings.json git preflight.
 - `agent/harnesses/codex.py` — `CodexHarness`: `spawn_agent`/`followup_task`/`wait_agent`, full-history forks, poll instead of cron, inline (non-delegated) AI steps.
+- `agent/harnesses/dsh.py` — `DshHarness`: `subagent`/`send_message`/`schedule_create` semantics, background sub-agents with completion-notice waits, `schedule_edit` cleanup instead of cron deletion, delegated AI steps.
 - `agent/harnesses/__init__.py` — `HARNESSES` registry + `get_harness(name)`. Adding a harness = one module + one registry entry.
 
 Harness selection (`--harness` or `PYTORCH_TEST_REFACTOR_HARNESS`, default `claude`) is resolved once via `get_harness()`; the `--harness` choices derive from the registry, and `_cmd()` writes `--harness <name>` into every `on_complete.command`/`poll_command` so cross-process resume re-selects the same harness.
@@ -85,11 +86,11 @@ cleanup only, generic verification/review, and no local-test gate.
 The operational loop, JSON feed formats, CI automation, and feedback ingest are documented in `SKILL.md`. Entry points:
 
 ```bash
-python orchestrator.py <file> --harness <claude|codex>              # refactor a test file (phases 1-7)
-python orchestrator.py <file> --harness <claude|codex> --ci-check   # CI monitoring (phase 8)
-python orchestrator.py --harness <claude|codex> --ingest-feedback   # harvest PR feedback (sidecar)
-python orchestrator.py --harness <claude|codex> --review-queue      # daily PR review queue (sidecar)
-python orchestrator.py <file> --harness <claude|codex> --resume     # resume after interruption
+python orchestrator.py <file> --harness <claude|codex|dsh>              # refactor a test file (phases 1-7)
+python orchestrator.py <file> --harness <claude|codex|dsh> --ci-check   # CI monitoring (phase 8)
+python orchestrator.py --harness <claude|codex|dsh> --ingest-feedback   # harvest PR feedback (sidecar)
+python orchestrator.py --harness <claude|codex|dsh> --review-queue      # daily PR review queue (sidecar)
+python orchestrator.py <file> --harness <claude|codex|dsh> --resume     # resume after interruption
 ```
 
 Each refactoring writes its workspace to `agent_space/refactor/{field}/{file_name}/` (assessment, reports, tasks, verification, findings, `final_summary.md`, audit/status/flow-state files); the ingest sidecar uses `agent_space/ingest/`; the review-queue sidecar uses `agent_space/pr_reviews/` and consumes `agent_space/pr_needs_review.txt`.

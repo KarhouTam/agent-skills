@@ -462,7 +462,7 @@ def _emit_next_action(flow: RefactorFlow, state: RefactorState, harness) -> None
 
     # ── workflow complete ────────────────────────────────────
     if state.current_phase == "finalize" and signal == FlowSignal.DONE:
-        _emit_done(state)
+        _emit_done(state, harness)
         return
 
     # ── need an agent ────────────────────────────────────────
@@ -489,7 +489,7 @@ def _emit_next_action(flow: RefactorFlow, state: RefactorState, harness) -> None
         # phase completed and _run_phases didn't hit an AI phase
         state2 = flow.run(state.file_path)
         if state2.current_phase == "finalize" and state2.signal == FlowSignal.DONE:
-            _emit_done(state2)
+            _emit_done(state2, harness)
         elif state2.signal in (
             FlowSignal.SPAWN_SINGLE,
             FlowSignal.SEND_MESSAGE,
@@ -513,7 +513,7 @@ def _emit_next_action(flow: RefactorFlow, state: RefactorState, harness) -> None
     )
 
 
-def _emit_done(state: RefactorState) -> None:
+def _emit_done(state: RefactorState, harness) -> None:
     """Emit the 'done' signal — workflow complete."""
     ws = str(state.workspace) if state.workspace else ""
     payload: dict = {
@@ -529,7 +529,7 @@ def _emit_done(state: RefactorState) -> None:
             "1. Create a branch, commit, and push your changes\n"
             "2. Create a draft PR targeting upstream main\n"
             '3. Say "look after the CI" or run:\n'
-            f"   python orchestrator.py {file_path} --ci-check"
+            f"   {_cmd(harness, file_path, '--ci-check')}"
         )
     _write_json(payload)
 
@@ -912,10 +912,7 @@ def _emit_ingest_action(ops: "IngestOps", harness) -> None:
     else:
         ws = get_ingest_workspace()
         findings_paths = sorted(
-            {
-                str(ws / "findings" / f"PR-{f.pr_number}.md")
-                for f in sm.pending_findings
-            }
+            {str(ws / "findings" / f"PR-{f.pr_number}.md") for f in sm.pending_findings}
         )
         findings_path = findings_paths[0] if findings_paths else ""
         _write_json(

@@ -1,6 +1,6 @@
 ---
 name: ci-automation
-description: Use when the pytorch-test-refactoring orchestrator emits "schedule_cron" or "need_agent" with phase "ci_debug", when a CronCreate cron job fires and you need to run orchestrator.py --ci-check, or when the user says "look after the ci", "monitor ci", "check ci status", "watch the pr", or "debug ci failures".
+description: Use when the pytorch-test-refactoring orchestrator emits "schedule_cron" or "need_agent" with phase "ci_debug", when a CronCreate job / dsh schedule_create occurrence fires and you need to run orchestrator.py --ci-check, or when the user says "look after the ci", "monitor ci", "check ci status", "watch the pr", or "debug ci failures".
 ---
 
 # CI Automation
@@ -13,22 +13,22 @@ Reference for the CI loop. The root SKILL.md covers the status vocabulary — th
 
 ### "done" + phase: "ci_done"
 
-All green. Run `gh pr ready <N>` to mark the draft PR ready for review, then `CronDelete` all CI cron jobs. Truly finished.
+All green. Run `gh pr ready <N>` to mark the draft PR ready for review, then delete the CI cron job/schedule: `CronDelete` on Claude Code, `schedule_edit(action=delete)` on dsh (find the id with `schedule_list`). Truly finished.
 
 ### "schedule_cron" + phase: "ci_monitor"
 
-CI still running. `CronCreate` with the `on_complete` fields (cron_interval, prompt, durable=true). Save the job ID, session exits.
+CI still running. Claude Code: `CronCreate` with the `on_complete` fields (cron_interval, prompt, durable=true). dsh: `schedule_create` with the `on_complete` fields (`title`, `target`, `rrule`, `prompt`). Save the job/task ID, session exits.
 
 ### "need_agent" + phase: "ci_debug"
 
-1. Spawn debugger via `Agent` tool: `run_in_background=true`, `mode=bypassPermissions`
-2. Capture `agent_id` from result
-3. Wait for completion, then save the result JSON to the `feed_file` path from the task spec (use the **Write tool**), and run:
+1. Spawn the debugger — Claude Code: via `Agent` (`run_in_background=true`, `mode=bypassPermissions`); dsh: via `subagent` with the task spec's `description` and `prompt`
+2. Capture `agent_id` from the result (dsh returns the subagent id immediately)
+3. Wait for completion (dsh: the runtime delivers a completion notice), then save the result JSON to the `feed_file` path from the task spec (use the **Write tool** / dsh's `write` tool), and run:
    `python orchestrator.py <file> --ci-check --feed debugger --feed-file <feed_file>`
 
 > **Why `--feed-file`, not `echo ... | python ...`:** the Bash permission matcher is whole-string prefix matching — `echo '{...}' | python orchestrator.py ...` matches no `Bash(python *)` allow rule and is blocked in Auto/restricted modes. A plain `python ... --feed-file <path>` command matches and is auto-approved.
 
-> **Permission caveat for the debugger spawn:** some harnesses ignore the `Agent` tool's `mode` parameter, so the debugger inherits the parent session's permission mode instead of `bypassPermissions`. And an explicit `permissions.deny` rule for `git commit`/`git push` blocks the debugger **in every mode**. The orchestrator now fails fast with an actionable message if it detects such a deny — if you see that error, allow `git commit`/`git push` (see allowlist below) and re-run.
+> **Permission caveat for the debugger spawn:** some harnesses ignore the `Agent` tool's `mode` parameter, so the debugger inherits the parent session's permission mode instead of `bypassPermissions`. And an explicit `permissions.deny` rule for `git commit`/`git push` blocks the debugger **in every mode**. The orchestrator now fails fast with an actionable message if it detects such a deny — if you see that error, allow `git commit`/`git push` (see allowlist below) and re-run. On dsh there is no deny list: the session's sandbox/approval policy governs, and the debugger reports uncommitted fixes when `git push` is denied.
 
 ## Debugger Result Format
 

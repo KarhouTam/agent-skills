@@ -11,11 +11,13 @@ from __future__ import annotations
 from agent.harness import Harness
 from agent.harnesses.claude import ClaudeHarness
 from agent.harnesses.codex import CodexHarness
+from agent.harnesses.dsh import DshHarness
 
 
 HARNESSES: dict[str, type[Harness]] = {
     "claude": ClaudeHarness,
     "codex": CodexHarness,
+    "dsh": DshHarness,
 }
 
 DEFAULT_HARNESS = "claude"

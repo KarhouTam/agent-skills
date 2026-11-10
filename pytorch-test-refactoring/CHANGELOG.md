@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-11-10 — 新增 dsh（DeepSeek Harness）harness
+
+按既有 harness 插件层（一模块 + 一行注册表）接入 dsh：`--harness dsh` 与
+`PYTORCH_TEST_REFACTOR_HARNESS=dsh` 均可用，其余 harness 行为不变。
+
+- **委派**：`spawn` 发射 `subagent`（`description` + `prompt`，后台运行、立即
+  返回 agent id）；`followup` 发射 `send_message`——同一个 id 同时写在
+  `agent_id` 与 `target` 下（原版 dsh 取 `agent_id`，启用 Agent Teams 时取
+  `target`；若 id 被拒——plain subagent 不是 Team 成员——按 note 回落
+  fallback）；fallback 复用 `build_respawn_task` 重建完整角色 prompt 后重新
+  spawn。`supports_delegated_agents = True`，因此 ingest / apply-ingest /
+  review-queue 与 Claude 一样走子 agent 分支（每个 PR 一个 reviewer）。
+- **等待语义**：dsh 的 `subagent` 没有阻塞等待，完成通知会开启执行者的下一
+  轮；各类 note 因此明确「派发后可结束本轮、不要轮询」。
+- **CI 等待**：`CronCreate` 改为 `schedule_create`（`target: this_session`，
+  rrule 为 `DTSTART:<UTC now+7min>\nRRULE:FREQ=MINUTELY;INTERVAL=7`），
+  CI 绿灯后用 `schedule_list` + `schedule_edit(action=delete)` 清理。
+- **权限**：dsh 没有 Claude 的 `permissions.deny` 清单，`git_preflight` 恒空，
+  debugger 能否 commit/push 由会话的 sandbox/approval 策略决定。
+- **测试**：`tests/test_harness.py` 增加 dsh 的 spawn / followup / CI 等待契约
+  与注册表断言（全套 115 passed）。
+- 附带修复：`_emit_done` 的 finalize `next_steps` 改用 `_cmd()` 生成，把
+  `--harness` 一并写进 CI 启动命令（此前硬编码为缺省 harness）。
+
+| 文件 | 变更 |
+| --- | --- |
+| `agent/harnesses/dsh.py` | 新增 `DshHarness` |
+| `agent/harnesses/__init__.py` | 注册 `dsh` |
+| `orchestrator.py` | `_emit_done` 写入 harness 选择 |
+| `tests/test_harness.py` | dsh 契约测试 |
+| `SKILL.md`、`CLAUDE.md`、`README.md`、`agent/skills/ci-automation/SKILL.md` | 文档按 dsh 补充 |
+
 ## 2026-10-31 — MPS 改为保守立场：review 不再要求 `allow_mps=True`
 
 用户决定：不主动纳入 MPS，也不在 review 里建议别人加。此前 II.4f 的第一行

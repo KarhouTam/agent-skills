@@ -22,14 +22,14 @@
 
 ## 概述
 
-**TL;DR**：`pytorch-test-refactoring` 是一个 AI 驱动的 8 阶段状态机工作流（7 阶段重构 + 1 阶段 CI 监控），将 PyTorch 测试文件按三种策略拆分为设备无关/设备通用/设备专属类。Flow 发出 `SPAWN_SINGLE`、`RELAY_FINDINGS` 信号由 Claude Code 生成 Agent 执行，中间穿插确定性脚本进行文件评估、自动化验证和总结报告生成，并在最终审查前加一道测试 linter 硬门禁。核心原则：黑名单跳过必须保留（有意的已知缺陷）、白名单限制必须扩大（历史遗留的人为限制）、Category A/B API 不是设备专属（Category C 才是）。
+**TL;DR**：`pytorch-test-refactoring` 是一个 AI 驱动的 8 阶段状态机工作流（7 阶段重构 + 1 阶段 CI 监控），将 PyTorch 测试文件按三种策略拆分为设备无关/设备通用/设备专属类。Flow 发出 `SPAWN_SINGLE`、`RELAY_FINDINGS` 信号由宿主 harness（Claude Code / Codex / dsh）生成 Agent 执行，中间穿插确定性脚本进行文件评估、自动化验证和总结报告生成，并在最终审查前加一道测试 linter 硬门禁。核心原则：黑名单跳过必须保留（有意的已知缺陷）、白名单限制必须扩大（历史遗留的人为限制）、Category A/B API 不是设备专属（Category C 才是）。
 
 本工作流是一个 **AI 驱动的 8 阶段状态机**（7 阶段重构 + 1 阶段 CI 监控），用于将 PyTorch 测试文件按设备依赖度拆分为三类：
 
 > ![.assets/diagrams/overview.svg](.assets/diagrams/overview.svg)
 
 
-**工作流由 `RefactorFlow` 状态机驱动**，通过 `orchestrator.py` 作为 CLI 桥接层输出 JSON 任务规格，Claude Code 作为 AI 运行时——Flow 返回 `FlowSignal` 信号来指示何时需要生成 AI Agent 或向已有 Agent 发送后续指令。Agent ID 在首次生成时注册并被持久化，后续指令通过 `SendMessage(agent_id)` 自动恢复已终止的 Agent（保留完整上下文）。
+**工作流由 `RefactorFlow` 状态机驱动**，通过 `orchestrator.py` 作为 CLI 桥接层输出 JSON 任务规格，由宿主 harness（Claude Code / Codex / dsh）作为 AI 运行时——Flow 返回 `FlowSignal` 信号来指示何时需要生成 AI Agent 或向已有 Agent 发送后续指令。Agent ID 在首次生成时注册并被持久化，后续指令通过 harness 的续聊工具（Claude `SendMessage` / Codex `followup_task` / dsh `send_message`）自动恢复已终止的 Agent（保留完整上下文）。
 
 ### 使用方式
 
@@ -263,10 +263,10 @@ RefactorState
 
 ### FlowSignal 信号
 
-| 信号             | 含义                     | Claude 的动作                                                  |
+| 信号             | 含义                     | harness 的动作                                                 |
 | ---------------- | ------------------------ | -------------------------------------------------------------- |
 | `SPAWN_SINGLE`   | 需要生成 1 个 Agent      | 生成 Analyst / Coder（首规则）/ Checker，等待结果，调用 `feed_*_result()` |
-| `SEND_MESSAGE`   | 向已终止 agent 发送后续指令 | `SendMessage(to=agent_id)` 自动恢复 agent（保留完整上下文），coder 响应后调用 `feed_coder_result()` |
+| `SEND_MESSAGE`   | 向已终止 agent 发送后续指令 | harness 续聊工具（`SendMessage` / `followup_task` / `send_message`，target=agent_id）自动恢复 agent（保留完整上下文），coder 响应后调用 `feed_coder_result()` |
 | `RELAY_FINDINGS` | 审查发现问题需要修复     | 将 findings 发送给 coder，修复后调用 `feed_fix_complete()` |
 | `DONE`           | 阶段完成，继续下一步     | 重新调用 `flow.run()` 进入下一阶段                             |
 | `WAITING`        | 等待外部输入             | 等待用户/Agent 完成                                            |
@@ -445,10 +445,10 @@ python orchestrator.py --review-queue --publish                    # 用户批�
 强制运行官方 TEST_LINTER（vendored 进 `scripts/linter.py`，钉住上游 SHA，
 allowlist 生效）于 PR head 版本的改动 test 文件；pre-pass 或 gate `ran:false`
 的 PR 本轮不 review、留在待处理列表 → **按 harness 分流 review**：Claude
-Code 每个 open 且有 test 改动的 PR 生成一个 reviewer sub-agent、按 4 并发
-波次执行；Codex 则由 executor（main agent）内联逐个 review（不 spawn 子
-agent）。两者都复用 `review-test-refactoring` skill 的 diff-based 模式，输出
-全为英文 → **确定性 draft**：每个被 review 的 PR 在待发布文档里一节（body +
+Code 与 dsh 每个 open 且有 test 改动的 PR 生成一个 reviewer sub-agent、
+按 4 并发波次执行；Codex 则由 executor（main agent）内联逐个 review（不
+spawn 子 agent）。两者都复用 `review-test-refactoring` skill 的
+diff-based 模式，输出全为英文 → **确定性 draft**：每个被 review 的 PR 在待发布文档里一节（body +
 inline 块，`event:` 一律 COMMENT、语义 verdict 记在 `verdict:` 头），
 orchestrator 输出 `needs_publish` 并就此停止 → **--publish**：重新读取文档
 逐节提交，发表成功的 PR 归档 `review_url`、移出待处理列表、其节从文档中
@@ -457,14 +457,15 @@ orchestrator 输出 `needs_publish` 并就此停止 → **--publish**：重新�
 **失败语义**：review 失败、pre-pass/lint gate 未能运行、或 PR 元数据拉取失败
 的 PR **不发表**，留在待处理列表下次重试；merged/closed 或无 test 改动的 PR
 记为"不适用"，draft 时静默归档、不发表任何内容。执行者按 orchestrator 输出
-的 JSON 循环：Claude 走 `need_agent`(spawn reviewer sub-agent) / `waiting`；
-Codex 走 `need_agent`(method=inline，自己 review) → 跑 `feed_cmd`；
+的 JSON 循环：Claude / dsh 走 `need_agent`(spawn reviewer sub-agent) /
+`waiting`；Codex 走 `need_agent`(method=inline，自己 review) → 跑 `feed_cmd`；
 `needs_publish` 时把文档交用户把关、等待明确批准；`--publish` 后 `done`。
 
 > 为什么 Codex 不走子 agent：Codex MultiAgentV2 会把 `spawn_agent` 的任务
 > `message` 记录成 assistant/commentary 邮箱信封而非 user/task 消息
 > （openai/codex#25458），子 agent 会忽略自己的 review 任务并重跑 orchestrator。
-> Claude Code 的 `Agent` 工具能正常下发任务，因此保留 sub-agent 模型。
+> Claude Code 的 `Agent` 工具与 dsh 的 `subagent` 都能正常下发任务，因此二者
+> 保留 sub-agent 模型。
 
 **每日触发**（外部定时任务）：
 
@@ -474,6 +475,9 @@ Claude Code：run `python orchestrator.py --review-queue --limit 10 --harness cl
   needs_publish 时把待发布文档交给用户并等待批准；批准后跑 --publish。
 Codex：run `python orchestrator.py --review-queue --limit 10 --harness codex`
   → need_agent(method=inline) 时自己 review、写 result 文件、跑 feed_cmd；
+  needs_publish 时把待发布文档交给用户并等待批准；批准后跑 --publish。
+dsh：run `python orchestrator.py --review-queue --limit 10 --harness dsh`
+  → need_agent 时逐个 dispatch `subagent`，完成通知到达后跑 feed_cmd；
   needs_publish 时把待发布文档交给用户并等待批准；批准后跑 --publish。
 ```
 
@@ -527,7 +531,8 @@ pytorch-test-refactoring/
 │   ├── harness.py               # AgentTask 模型 + Harness 协议
 │   ├── harnesses/               # Harness 实现 + 注册表
 │   │   ├── claude.py            # Claude Code 发射/策略
-│   │   └── codex.py             # Codex 发射/策略
+│   │   ├── codex.py             # Codex 发射/策略
+│   │   └── dsh.py               # dsh 发射/策略
 │   ├── prompts/
 │   │   ├── analyst.md           # 分析师 Prompt
 │   │   ├── coder.md             # 编码者 Prompt
