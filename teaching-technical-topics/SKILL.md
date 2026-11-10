@@ -45,7 +45,8 @@ python3 <base>/scripts/note.py index <notes>
 `pull` fetches `main` and every `script/*` draft branch, so drafts started on another
 machine are already local. If it exits 1 (offline / conflict) or prints `local-only`,
 keep teaching from the local copy and mention it **once at the end** of the answer —
-never before `## In a nutshell`. One-time setup per machine:
+never before `## In a nutshell`, and just above the 归档 ask when there is one, so the
+ask still closes the message. One-time setup per machine:
 `python3 <base>/scripts/sync.py init <private-repo-url> <notes>`.
 
 `<project>` is the ecosystem the question lives in — `pytorch`, `vllm`, `k8s`, …
@@ -101,6 +102,25 @@ lesson: answer it and stop. Escalate to Standard only when they ask to be taught
 
 **Already taught?** Two-line recap, then a new angle worth the user's time, then
 update the existing note. Never open a duplicate note for a topic `<notes>` covers.
+
+### First lesson in a new project: one calibration line
+
+A Standard or Deep lesson that a prompt explicitly commissions as teaching —
+`教我` / `教教我` / `teach me` / `我想系统学` / `walk me through end to end` — and that
+opens a `<project>` with no `_project.md` and no notes yet, and where neither the
+prompt nor the session carries a background signal (a self-description, an ELI
+level, or fluent use of the vocabulary all count as signals), gets one
+calibration exchange before the build. The first reply is a single line that
+fixes the starting level, and the message ends at the question:
+
+> 先校准一下：你用过 vLLM 的上层 API 吗？KV cache 这类词需要先给名词地图，还是直接进机制？
+
+No nutshell, no lesson, nothing written to `<notes>` yet. On the next turn teach
+at the revealed level, and record the answer in `_project.md`'s Learner model as
+its first background line. Everything else answers in one turn: a prompt that
+states its own background, a project that already has a Learner model, a plain
+question ("X 是怎么工作的？"), and Quick mode. If the user waves it off
+("直接讲"), teach at the zero-background default.
 
 ### ELI register — only when the prompt names a level
 
@@ -231,7 +251,8 @@ confidence: verified
 - <threads worth pursuing next>
 
 ## 自测
-- <2–3 questions, answers withheld; optional, but keep them if you add them>
+- <1–3 questions, answers withheld; the first is the check question in the 归档
+  ask, so a draft always carries at least one>
 ```
 
 `confidence` is `verified` (a source or a run confirmed it) or `background` (model
@@ -290,9 +311,12 @@ user runs it during the lesson. It is executed, not asserted, so it carries no c
 that could rot; only the note's prose needs the user's sign-off. It still travels on
 the draft branch as that topic's material.
 
-**2. Ask once, in one line, at the end of the first Standard answer.** Something like:
+**2. Ask once, in one line, at the end of the first Standard answer — carrying the
+draft's first `## 自测` question.** The question is what turns confirmation into
+measurement, so put it last and end the message there: no hint, no answer, nothing
+after it. Something like:
 
-> 这节讲清楚了吗？确认没问题我就归档成 `pytorch/dynamo` 的笔记；要补的地方我先改草稿。
+> 这节讲清楚了吗？我先考一道，答上来我就归档成 `pytorch/dynamo` 的笔记——dispatcher 查不到 op 的 overload key 时，会走哪条 fallback 路径？
 
 Once per topic — never on a follow-up, never on a revision, never in Quick. After
 that the draft waits quietly; asking again on every turn is noise, not diligence.
@@ -302,9 +326,17 @@ that the draft waits quietly; asking again on every turn is noise, not diligence
 | The user | You |
 |---|---|
 | Asks a follow-up, or says part of it was wrong | Revise *the same draft* — no second note, no re-ask |
+| Answers the check question correctly | Promote — a correct answer **is** the confirmation |
+| Answers it wrongly or vaguely | Not correct is not correct: say exactly what was off, patch the draft section that failed to teach it, re-teach that one point in a few sentences, then archive on their word. Never re-quiz |
 | Says it was good **and** that the lesson is over (懂了 / 没问题 / 归档吧 / 清楚了) | Promote |
 | Never comes back to it | The draft stays a draft. Mention it once when it becomes relevant again |
 | Says to skip the ceremony (直接归档 / 不用问) | Promote immediately — the user's instruction wins |
+
+Grading is strict, in both directions. A vague or partly-correct answer is not
+correct; no insight the user did not actually express counts as theirs. The reply
+to a wrong answer is the sentence that exposes the contradiction ("那第 3 个块没
+写满，哈希为什么还对得上？"), never "不错的尝试" — and a failed check is a
+confusion point for `_project.md`'s Learner model, same as any other.
 
 **4. Promote:**
 
@@ -397,6 +429,9 @@ cloud `main`: after editing it, run `sync.py push` so the learner model is share
 | Reading or editing `<notes>/.sync/` | It is the internal mirror; use it only through `sync.py` |
 | Force-pushing over a conflict without reading it | Compare both versions first, then `--force` in the direction you chose |
 | Expecting `INDEX.md` in the cloud | The landscape is generated locally after each pull |
+| Promoting on a polite 懂了 that the check question just contradicted | A wrong or vague answer defers promotion: patch the draft, re-teach the gap, archive on their word |
+| Asking the check question and answering it in the same message | The question is the last sentence of the ask; hint and answer come only after the user replies |
+| A calibration quiz for a plain question, a known project, or a prompt that already carries background | Only an explicitly commissioned first lesson of a new project with no background signal calibrates; everything else answers in one turn |
 
 ## Red flags
 
@@ -415,4 +450,7 @@ cloud `main`: after editing it, run `sync.py push` so the learner model is share
   remote note was treated as read.
 - A draft was written or revised without `sync.py draft`.
 - The user confirmed the lesson but `sync.py archive` never ran.
+- The 归档 ask carried no check question, or answered it in the same breath.
+- An explicitly commissioned first lesson of a new project was taught at an assumed
+  level, with no calibration line and no background signal in the prompt.
 - `<notes>/.sync/` was treated as teaching material.

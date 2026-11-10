@@ -6,7 +6,7 @@ against a fresh agent, save the answer verbatim, then score it with
 
 | # | Scenario | Prompt | Mode | The point |
 |---|---|---|---|---|
-| 1 | First topic | `教我 vLLM prefix caching` | standard | Creates the `vllm` project, note, INDEX row from nothing |
+| 1 | First topic, calibrated | `教我 vLLM prefix caching`, then the user answers the calibration question (e.g. `完全没接触过 LLM 推理，只写过 Python 后端，从名词地图开始吧`) | standard, 2 turns | Turn 1 is the calibration line alone (`--mode calibration`, nothing written yet); turn 2 creates the `vllm` project, note, INDEX row from nothing, taught at the revealed level with the background recorded in `_project.md` |
 | 2 | Related topic | `PyTorch Dynamo 是怎么工作的？` after #1 or a prior dispatcher lesson | standard | Must link the prior note in `## 和前文的联系`, bidirectionally |
 | 3 | Why-design | `vLLM 的 scheduler 为什么设计成这样？` | standard | 正文 takes the constraint → design → rejected alternative → breakage shape |
 | 4 | Quick follow-up | `那 chunked prefill 呢？` in the same session | quick | Stays short, opens with the nutshell, writes nothing |
@@ -14,10 +14,14 @@ against a fresh agent, save the answer verbatim, then score it with
 | 6 | Demo without a GPU | `show me the eviction policy with a runnable example` on a CPU-only box | standard | Toy simulator, notebook executes; no fabricated expected output |
 | 7 | Confirmation | Reply `懂了，归档吧` to scenario 1 | — | Promotes the draft; note enters INDEX; `note.py check` passes |
 | 8 | No confirmation | Reply `嗯，那 X 呢？` to scenario 1 | quick | Draft stays a draft; nothing enters INDEX |
-| 9 | DeepWiki-reachable repo internals | `教我 PyTorch Dynamo 的 guard 系统是怎么工作的？源码在 /root/pytorch` | standard | Follows the teaching skill's REQUIRED SUB-SKILL line to `deepwiki`, cites the map as `deepwiki:pytorch/pytorch`, and still opens every `file::symbol` in the local checkout |
+| 9 | DeepWiki-reachable repo internals | `教我 PyTorch Dynamo 的 guard 系统是怎么工作的？源码在 /root/pytorch` | standard | Follows the teaching skill's REQUIRED SUB-SKILL line to `deepwiki`, cites the map as `deepwiki:pytorch/pytorch`, and still opens every `file::symbol` in the local checkout. Run after #2, or with background stated, so the calibration guard is not the thing under test |
 | 10 | Newcomer + easy side question | `教我 vLLM 的 prefix caching。我是做后端开发的，完全没接触过 LLM 推理，KV cache 是什么？` then `顺便问一下，prefix caching 和 paged attention 是一回事吗？` | standard, then quick | 正文 names the problem before the mechanism and defines the vocabulary at first use; the side question gets ≤ ~150 words and never an 归档 ask |
 | 11 | ELI level register | `/teaching-technical-topics 用五岁小孩也能听懂的话讲讲 vLLM 的 paged attention`, and the same again with a literal `ELI5` | standard | Loads `eli5` for the register instead of improvising one; the level changes 正文 only — same sections, same draft, same `file::symbol` provenance |
 | 12 | Cross-machine draft | On notes root A teach a topic and leave it unconfirmed. On a second notes root B, join the same private remote (`sync.py init`), then ask the same topic. Archive on B, then `sync.py pull` on A. | standard | Step 0 pulls every `script/*` draft branch; B sees A's draft; after confirmation B merges it into `main` and deletes the branch; A's local draft disappears and the archived note appears |
+| 13 | Calibration negatives | (a) `教我 vLLM 的 prefix caching。我是做后端开发的，完全没接触过 LLM 推理。` (b) `vLLM 的 scheduler 是怎么工作的？` on a fresh root (c) `教我 PyTorch Dynamo` after #2 | standard, 1 turn each | The guard fires only for an explicitly commissioned first lesson with no background signal: all three answer in one turn with the full Standard shape, no calibration question |
+| 14 | Check question in the 归档 ask | `教我 vLLM 的 prefix caching。我写 Python 后端，懂 attention 和 KV cache 的概念，但没读过 vLLM 源码。` | standard | Background is stated, so no calibration; the 归档 ask carries exactly one check question — the draft's first `## 自测` question — and the message ends with it (`--expect-check-ask`) |
+| 15 | Correct answer promotes | Continue 14: the user answers the check question correctly, with no confirmation word | — | A correct answer **is** the confirmation: the note is promoted (`--stage promoted`), with no second quiz |
+| 16 | Wrong answer does not | Fresh run of 14's prompt, then the user answers the check question wrongly | — | The draft stays a draft (`--stage draft`); the reply names the gap without flattery, patches the draft section that failed to teach it, re-teaches that one point, and does not re-quiz (human read) |
 
 ## Scoring
 
@@ -30,8 +34,14 @@ Pass `--expect-deepwiki` for scenario 9, or whenever the run had DeepWiki reacha
 the answer must then point at the wiki it used in `## 来源` and must still carry a
 local `file::symbol`.
 
-`--notes-before` is only meaningful for scenario 4, where the assertion is that
-nothing was written.
+`--notes-before` is meaningful for scenario 4 and for scenario 1's first turn,
+where the assertion is that nothing was written.
+
+`--mode calibration` scores scenario 1's first turn: no nutshell, at most ~150
+words, the message ends with its question, and nothing was written to the notes
+root. `--expect-check-ask` scores a first Standard answer (scenario 1 turn 2,
+scenario 14): the 归档 ask is present exactly once, the message ends with its
+check question, and the draft's `## 自测` carries that question.
 
 ## Two stages per lesson
 
@@ -65,6 +75,11 @@ change to `note.py`.
 - The **first** Standard answer asks once whether the lesson landed, and that ask is
   never repeated on a follow-up or revision; the draft is not promoted on the
   agent's own initiative.
+- The calibration question targets level — familiar vocabulary versus a 名词地图 —
+  not trivia, and it is the whole message: no lesson, no hint after the question.
+- A wrong check answer gets the gap named ("Not quite — ..." style, no 不错的尝试),
+  the draft section that failed to teach it patched, that one point re-taught in a
+  few sentences, and no second quiz; a correct answer promotes without re-asking.
 - When the prompt named an ELI level, the register came from `eli5`'s audience table
   rather than from a re-invented one, and it excused nothing: same sections, same
   draft note, same provenance.

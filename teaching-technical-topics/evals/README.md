@@ -7,9 +7,9 @@ helped from one that regressed.
 ## Running a scenario
 
 1. Pick a scenario from `prompts.md` and run it against a fresh agent with this
-   skill loaded. For scenario 4, snapshot the notes root first:
-   `cp -r <notes> /tmp/notes-before` (eval roots are normally unconfigured, so
-   `.sync/` does not exist; the checker ignores it either way).
+   skill loaded. For scenario 4 and scenario 1's first turn, snapshot the notes
+   root first: `cp -r <notes> /tmp/notes-before` (eval roots are normally
+   unconfigured, so `.sync/` does not exist; the checker ignores it either way).
 2. Save the answer verbatim to a file.
 3. Score it:
 
@@ -39,11 +39,14 @@ run you want to hold to the map-not-source rule).
 | `## 来源` points at the DeepWiki map, and a local `file::symbol` survives | `--expect-deepwiki` |
 | No note names DeepWiki in its `verified_against` | all |
 | `## 延伸` present with at most 4 items | standard / deep |
-| Quick mode stays short and writes nothing to the notes root | quick |
+| Quick mode stays short, and Quick and calibration write nothing to the notes root | quick, 1 (turn 1) |
+| Calibration turn: no nutshell, at most ~150 words, the message ends with its question | 1 (turn 1) |
+| With `--expect-check-ask`: one 归档 ask, the message ends with its check question, the draft's `## 自测` carries it | 1 (turn 2), 14 |
 | `note.py check` passes (links, frontmatter, INDEX) | all |
 | Every notebook ran — each code cell has outputs | all |
 | The lesson is still a draft, not promoted, before the user confirms | `--stage draft --topic project/topic` |
 | After confirmation the note is active, in INDEX, and the draft is gone | `--stage promoted --topic project/topic` |
+| A correct answer to the check question promotes; a wrong one leaves the draft a draft | 15 / 16 |
 
 The two lifecycle assertions are the point of the draft step: an unconfirmed lesson
 must never reach `INDEX.md`, and a confirmation must actually consume the draft.
@@ -203,3 +206,50 @@ Two findings, and they are the reason the edit is shaped the way it is:
 Two caveats: these are 12-line plan probes, not full lessons, so a real run can still
 over-apply the register to 正文 length; and one measurement of one model on one day.
 Re-measure before trusting the numbers.
+
+## Recorded check-question and calibration baselines (2026-11-10)
+
+Scenarios 1 (reworked to two turns), 13–16, plus the guard's negatives. The
+pre-change SKILL.md was frozen (`31d3cd9`, run from a copy at
+`/tmp/tt-eval-shared/SKILL-red.md`) and the post-change file (`a388fed`, likewise
+a copy), so the arms differ only in the skill text. One fresh agent per turn,
+same machine, notes root under `/tmp/tt-<arm>/notes`; DeepWiki unreachable in
+both arms (offline rule exercised); vLLM checkout at `/root/vllm` (`fb3fec970`).
+
+One scorer fix landed mid-measurement, exposed by the arms themselves: prose like
+"还没有别的归档主题" (和前文的联系) counts as an ask under a raw substring
+count, so an ask is now a line that pairs 归档 with the asking formula
+(讲清楚 / 考一道 / 考你 / 确认没问题).
+
+| | before (`31d3cd9`) | after (`a388fed`) |
+|---|---|---|
+| scenario 1 turn 1 (`--mode calibration`) | 6/13 — full 633-word lesson, draft + notebook written | 10/10 — one calibration line ending in its question, nothing written |
+| scenario 1 turn 2 / 14 (`--expect-check-ask`) | 18/19 — the ask carries no question; the message ends on the local-only caveat | 19/19 — the ask carries the draft's first 自测 question and ends the message |
+| scenario 15: correct answer → `--stage promoted` | 13/16 — graded the answer, revised the draft, no promotion | 16/16 — promoted and archived, no re-ask |
+| scenario 16: wrong answer → `--stage draft` | n/a — no question to answer wrongly | 16/16 — promotion deferred, draft patched, confusion recorded, no re-quiz |
+| guard negatives: background stated (×2), plain question, known project | n/a | 19/19, 19/19, 19/19, 20/20 — all one-turn lessons, no calibration line |
+
+Findings worth keeping:
+
+- **The machinery pre-existed; the wiring did not.** Both RED drafts carried 自测
+  questions (the old text made them optional — these runs wrote them anyway), and
+  the RED turn-2 agent graded the user's answer strictly and well. What the old
+  skill never did was ask the question or let a correct answer count as the
+  confirmation — the entire change is the ask line and one table row.
+- **Ordering had to be specified, not assumed.** The RED arms ended the message
+  with the local-only caveat *below* the ask, which breaks the
+  ends-with-question contract; the after-arm places the caveat just above the
+  ask, as the skill now says explicitly.
+- **The wrong-answer path is the strictness block in action.** The after-arm reply
+  names both errors (an invented collision-avoidance rationale; a partial-block
+  vs full-divergent-block misread), patches the draft bullet, records the
+  confusion in the Learner model, and closes with the archive-on-their-word
+  invitation — which can appear at most once per topic, since the ask is never
+  repeated and a failed check is never re-quizzed.
+
+Caveats: one model, one machine, one day — re-measure before trusting these
+numbers. Turn 2 of each flow ran as a fresh agent seeded with the turn-1
+transcript rather than one process holding both turns; the notes root and the
+saved answer files carried all state. The guard's known-project negative reused
+the promoted scenario-15 root, so it also exercised 和前文的联系 linking and the
+old-自测 resurface.
