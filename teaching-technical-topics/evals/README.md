@@ -36,6 +36,7 @@ run you want to hold to the map-not-source rule).
 | 正文 is predominantly Chinese regardless of the question's language | all |
 | At most 2 mermaid blocks, and every one parses | all |
 | `## 来源` present, with `file::symbol` or an explicit `unverified` | standard / deep |
+| Code is cited by inlining it: every snippet carries a caption comment plus a why-comment, and no `path:line` appears bare in prose | all but calibration |
 | `## 来源` points at the DeepWiki map, and a local `file::symbol` survives | `--expect-deepwiki` |
 | No note names DeepWiki in its `verified_against` | all |
 | `## 延伸` present with at most 4 items | standard / deep |
@@ -253,3 +254,40 @@ transcript rather than one process holding both turns; the notes root and the
 saved answer files carried all state. The guard's known-project negative reused
 the promoted scenario-15 root, so it also exercised 和前文的联系 linking and the
 old-自测 resurface.
+
+## Recorded code-citation baseline (2026-11-14)
+
+Scenario 9's prompt (`教我 PyTorch Dynamo 的 guard 系统是怎么工作的？源码在 /root/pytorch`),
+one fresh agent per arm on the same machine, empty notes roots under `/tmp/tt-code-eval/<arm>/notes`,
+local checkout `/root/pytorch` at `08e2ad5a31` (torch `2.16.0a0+git287d16b`). The pre-change
+SKILL.md was frozen (`a388fed`) and run from a copy, so the arms differ only in the skill text.
+What the edit is for: 正文 inlines the lines that carry the claim, each commented on why it
+behaves that way, instead of naming a `file::symbol` the reader still has to go open.
+
+| | before (`a388fed`) | after, first cut | after, tightened |
+|---|---|---|---|
+| `check_run.py`, scenario 9 prompt | 21/22 — inlines no source at all | 21/22 — one caption-only snippet | 22/22 |
+| source snippets inlined | 0 | 8 (5 python, 3 cpp) | 6 (4 python, 2 cpp) |
+| snippets carrying a line-level why-comment | — | 7 of 8 | 6 of 6 |
+| distinct `file::symbol` named in the answer | 7 | 12 | 13 |
+| `path:line` coordinates left bare in prose | 0 | 0 | 0 |
+
+Three findings:
+
+- **The failure was a missing snippet, not a wrong label.** The before arm never wrote a
+  `path.py:120-145` coordinate: it named 7 `file::symbol`s and left the code where it found
+  it, which is the same reader-hostile outcome. An assertion that only banned `path:line` in
+  prose would have scored that arm green — the "来源 names a `file::symbol`, so 正文 must
+  inline one" assertion is what catches it.
+- **"Caption only" is a real and stable miss.** The first cut inlined 8 snippets and still
+  left one with no comment on its lines; the wording that closed it names the failure outright
+  ("a snippet whose only comment is its caption is a coordinate with code pasted under it").
+- **`## 来源` kept its job.** Both after arms still list one `file::symbol` plus version per
+  claim; the change is that the claim's evidence now also sits in 正文.
+
+Caveats: one model, one repo, one day; the arms were run back to back, and the third had no
+DeepWiki transport while the first two did, so the map step is not what these arms measure.
+Answer sizes grow with the snippets (9584 / 11115 / 11586 bytes before / first cut /
+tightened); the tightened arm is the longest and still inlines fewer blocks than the first
+cut. The Quick-row clause and the Common-mistakes/Red-flag lines reinforcing the same rule
+landed after the measurement.

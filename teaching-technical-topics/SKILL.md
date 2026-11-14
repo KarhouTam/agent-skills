@@ -92,9 +92,9 @@ Three consequences that belong to teaching:
 
 | Mode | When | Shape |
 |---|---|---|
-| **Quick** | A follow-up, a side question, or a small clarification ("那 X 呢?", "顺便问一下…") | ≤ ~150 words, still opens with the nutshell; no notebook, no new note, no DeepWiki lookup, no 归档 ask |
+| **Quick** | A follow-up, a side question, or a small clarification ("那 X 呢?", "顺便问一下…") | ≤ ~150 words, still opens with the nutshell; no notebook, no new note, no DeepWiki lookup, no 归档 ask; the code-citation rule still holds |
 | **Standard** | The default for a new topic | The full answer shape below |
-| **Deep** | "walk me through end to end", or a mechanism the user will act on | Standard + a source dive with `file::symbol` + a notebook |
+| **Deep** | "walk me through end to end", or a mechanism the user will act on | Standard + a source dive with the code inlined (`file::symbol` in 来源) + a notebook |
 
 **An easy side question is still Quick.** The user is curious, not commissioning a
 lesson: answer it and stop. Escalate to Standard only when they ask to be taught it
@@ -156,9 +156,9 @@ every load-bearing claim stays `file::symbol` or `unverified`.
    notebook (see Notebooks). A plain `.py` is acceptable when a notebook genuinely
    cannot run (needs a GPU, a server, or a CLI); say which and why.
 5. **`## 来源`** — for each load-bearing claim: `file::symbol` plus the version it
-   was checked against, or the literal word `unverified`. Doc links and blog posts
-   go here; a DeepWiki pointer is written `deepwiki:<owner>/<repo>` and never
-   replaces the `file::symbol`.
+   was checked against, or the literal word `unverified`. It indexes what 正文 already
+   inlined; it is never the quote itself. Doc links and blog posts go here; a DeepWiki
+   pointer is written `deepwiki:<owner>/<repo>` and never replaces the `file::symbol`.
 6. **`## 和前文的联系`** — required as soon as `<notes>` holds a related topic: name
    the note and the mechanism-level link. For a genuinely first topic, say so in one
    line instead.
@@ -183,6 +183,33 @@ the thing exists to solve, then define each term, acronym and name in one clause
 first time it appears (`KV cache（把每个 token 的中间结果存下来，下次直接复用）`).
 Definitions stay inline at first use: not a glossary paragraph, and never before the
 nutshell.
+
+### Citing code: inline the snippet, never just the coordinates
+
+Every load-bearing source reference in 正文 is a fenced snippet. Its first line is a
+comment naming where the code lives; then come only the lines that carry the claim,
+and at least one of those lines carries its own comment on *why it behaves that way*,
+not a translation of what the line does. The caption is provenance, never the
+explanation: a snippet whose only comment is its caption is a coordinate with code
+pasted under it.
+
+```python
+# vllm/v1/core/scheduler.py:412-430 · schedule() —— 这一轮谁进 prefill、谁继续 decode
+while self.waiting and token_budget > 0:
+    seq_group = self.waiting.popleft()      # 队头优先：FCFS，抢占回填也按这个顺序
+    if seq_group.get_num_uncomputed_tokens() > token_budget:
+        break                               # prefill 一个请求必须整段吃完，吃不下就顺延
+    ...
+```
+
+- 3–15 lines. Cut everything the conclusion does not need, mark elisions with `...`,
+  and never paste a whole function.
+- A bare `path.py:120-145` is not a citation — it is a coordinate the reader still has
+  to go look up.
+- Line numbers or `path::symbol` ride on the caption line as provenance; `## 来源` is
+  the index, one `file::symbol` plus the version per inlined snippet.
+- Naming a file ("the entry point is `torch/_dynamo/guards.py`") needs no snippet.
+  Quoting *specific code* does.
 
 ## Diagrams
 
@@ -417,6 +444,7 @@ cloud `main`: after editing it, run `sync.py push` so the learner model is share
 | ASCII-art diagram inside a code fence | Mermaid, fence language `mermaid`, validated with `check-mermaid.mjs` |
 | One diagram per section | One per load-bearing mechanism |
 | Confident claims with no provenance | Every load-bearing claim is `file::symbol` or says `unverified` |
+| Source cited as a bare `path.py:120-145` | 正文 inlines a 3–15 line snippet: a caption comment for provenance, why-comments on the lines that matter; `## 来源` stays the index |
 | Treating DeepWiki prose as a conclusion | It is only a map: every `file::symbol` it names gets opened in the local source, and wiki-only claims are `unverified` |
 | Repeating a note's claim without re-checking | Notes are hypotheses; a version mismatch means re-verify |
 | Hand-editing `INDEX.md` | Run `note.py promote`; INDEX is generated |
@@ -441,6 +469,7 @@ cloud `main`: after editing it, run `sync.py push` so the learner model is share
 - `note.py check` was not run after a promotion, or was run and failed.
 - `<notes>` holds a related topic but `## 和前文的联系` is missing.
 - A claim about internals carries no `file::symbol` and no `unverified` marker.
+- A code citation is a `path.py:120-145` coordinate instead of a commented snippet.
 - The 归档 question is asked more than once for the same topic, or at all in Quick
   mode.
 - A Standard/Deep lesson that never consulted DeepWiki, and never said why not.

@@ -34,6 +34,11 @@ DEFAULT_CHECKER = os.path.expanduser("~/.agents/skills/mermaid-diagrams/scripts/
 FENCE_RE = re.compile(r"```(\w*)\n(.*?)```", re.S)
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 SENTENCE_RE = re.compile(r"[。！？]|[.!?](?:\s|$)")
+CITE_RE = re.compile(r"[\w./-]+\.(?:py|cc|cpp|cxx|c|h|hpp|cu|rs|go|java|kt|ts|js):\d+(?:-\d+)?")
+CAPTION_RE = re.compile(r"^\s*(?:#|//)\s*[\w./-]+\.[A-Za-z]+(?:::\w+)?(?::\d+(?:-\d+)?)?\b")
+COMMENT_RE = re.compile(r"(?:^|\s)(?:#|//)\s*\S")
+SOURCE_LANGS = {"python", "py", "cpp", "c", "cc", "cxx", "h", "hpp", "cu", "cuda",
+                "rust", "rs", "go", "java", "kt", "ts", "js", "javascript"}
 results: list[tuple[bool, str]] = []
 
 
@@ -80,6 +85,37 @@ def drop_sections(text: str, headings: list[str]) -> str:
 def last_line(text: str) -> str:
     lines = [line.strip() for line in text.rstrip().splitlines() if line.strip()]
     return lines[-1] if lines else ""
+
+
+def check_code_citations(text: str, mode: str) -> None:
+    """Code is cited by inlining it, not by pointing at `path.py:120-145`.
+
+    The lesson inlines the lines that carry the claim: the first line of the fence is a
+    caption comment naming the source, and at least one further comment says why those
+    lines matter. A bare coordinate in prose — or a `file::symbol` that never turns into
+    a snippet — sends the reader off to look it up, which is what this rule stops.
+    """
+    snippets = []
+    for lang, body in FENCE_RE.findall(text):
+        if lang.strip().lower() not in SOURCE_LANGS:
+            continue
+        lines = body.splitlines()
+        if lines and CAPTION_RE.match(lines[0]):
+            comments = [line for line in lines[1:] if COMMENT_RE.search(line)]
+            snippets.append((lines[0].strip(), comments))
+
+    if mode != "calibration":
+        # Coordinates usually arrive as inline code, so unwrap the backticks before scanning.
+        coordinates = CITE_RE.findall(re.sub(r"`([^`]*)`", r"\1", drop_sections(strip_code(text), ["## 来源"])))
+        record(not coordinates, "正文 cites code by inlining it, not by `path:line`",
+               f"{sorted(set(coordinates))[:3]}")
+    record(all(comments for _, comments in snippets),
+           "every inlined snippet comments on why, not just on where it came from",
+           f"caption-only: {[cap[:70] for cap, comments in snippets if not comments][:3]}")
+    source = section(text, "## 来源") or ""
+    if mode in ("standard", "deep") and re.search(r"\w+::\w+", source):
+        record(bool(snippets), "an answer whose 来源 names `file::symbol` inlines a snippet",
+               "no captioned source block in 正文")
 
 
 def check_answer(path: str, mode: str, checker: str, expect_deepwiki: bool = False,
@@ -139,6 +175,8 @@ def check_answer(path: str, mode: str, checker: str, expect_deepwiki: bool = Fal
         if source:
             has_provenance = bool(re.search(r"\w+::\w+", source)) or "unverified" in source
             record(has_provenance, "来源 gives `file::symbol` or says `unverified`")
+
+    check_code_citations(text, mode)
 
     # Ceremony budget: the draft gets one 归档 ask per topic, and Quick never asks.
     # The ask is a fixed-form line — 归档 paired with the asking formula — while
