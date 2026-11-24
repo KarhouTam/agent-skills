@@ -9,6 +9,11 @@ so the allowlist's relative-path matching behaves exactly as it does in CI.
 
 The gate is mandatory: a PR is never reviewed, let alone published, without
 good gate output. Gate failures leave the PR pending for the next run.
+
+It also retires stale allowlist entries: a changed test file the official
+allowlist exempts is re-checked with an empty allowlist, and when it lints
+clean while the PR-head allowlist still lists it, the gate reports a
+`TEST_LINTER_ALLOWLIST` finding (a Blocker per the review criteria, II.11).
 """
 
 from __future__ import annotations
@@ -108,20 +113,83 @@ def _gate_findings(output: str) -> list[dict]:
     return findings
 
 
+def _stale_allowlist_entries(
+    root: Path, fetched: list[str], deleted: list[str] = ()
+) -> list[str]:
+    """Changed files whose allowlist entry is now obsolete.
+
+    The normal pass applies the official allowlist, so an exempted file is
+    never checked. Re-running the linter with an empty allowlist exposes the
+    entries that outlived their violations: a file with no error-severity
+    message lints clean on its own and must leave the allowlist. A file the PR
+    deleted is obsolete by the same logic.
+    """
+    allowlist_file = (
+        root / "tools" / "linter" / "adapters" / "test_linter_allowlist.json"
+    )
+    official = set(json.loads(allowlist_file.read_text(encoding="utf-8")))
+    stale = [p for p in deleted if p in official]
+    candidates = [p for p in fetched if p in official]
+    if not candidates:
+        return stale
+    saved = allowlist_file.read_text(encoding="utf-8")
+    try:
+        allowlist_file.write_text("[]\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, "tools/linter/adapters/test_linter.py", *candidates],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    finally:
+        allowlist_file.write_text(saved, encoding="utf-8")
+    if proc.returncode != 0:
+        raise RuntimeError("allowlist re-check failed")
+    failing = {f["file"] for f in _gate_findings(proc.stdout)}
+    return stale + [p for p in candidates if p not in failing]
+
+
+def _allowlist_findings(head_oid: str, stale: list[str]) -> list[dict]:
+    """Stale entries the PR-head allowlist still carries."""
+    content = _fetch_head_file(ALLOWLIST_REL_PATH, head_oid)
+    if content is None:
+        return []  # allowlist deleted at head: every entry is gone with it
+    try:
+        head_entries = set(json.loads(content))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("head allowlist is not valid JSON") from exc
+    return [
+        {
+            "check": "TEST_LINTER_ALLOWLIST",
+            "file": rel,
+            "line_number": 0,
+            "evidence": (
+                f"{rel} leaves a stale entry in {ALLOWLIST_REL_PATH}: the file "
+                "was deleted or now lints clean without it, so this PR must "
+                "remove that entry."
+            ),
+        }
+        for rel in stale
+        if rel in head_entries
+    ]
+
+
 def _run_gate(
     pr_number: int, head_oid: str, patch: str, workspace: Path
 ) -> dict:
     """Materialize the mirror and lint the PR's head test files."""
     raw_changed = _changed_paths(patch)
-    if ALLOWLIST_REL_PATH in raw_changed:
-        return {
-            "ran": True,
-            "skipped": True,
-            "reason": "allowlist_changed",
-            "findings": [],
-        }
+    allowlist_changed = ALLOWLIST_REL_PATH in raw_changed
     changed = [p for p in dict.fromkeys(raw_changed) if _is_test_path(p)]
     if not changed:
+        if allowlist_changed:
+            return {
+                "ran": True,
+                "skipped": True,
+                "reason": "allowlist_changed",
+                "findings": [],
+            }
         return {"ran": True, "skipped": False, "reason": "", "findings": []}
     if not head_oid:
         return {
@@ -153,8 +221,20 @@ def _run_gate(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         fetched.append(rel)
+
+    stale = _stale_allowlist_entries(
+        root, fetched, [p for p in changed if p not in fetched]
+    )
+    findings = _allowlist_findings(head_oid, stale) if stale else []
+    if allowlist_changed:
+        return {
+            "ran": True,
+            "skipped": True,
+            "reason": "allowlist_changed",
+            "findings": findings,
+        }
     if not fetched:
-        return {"ran": True, "skipped": False, "reason": "", "findings": []}
+        return {"ran": True, "skipped": False, "reason": "", "findings": findings}
 
     proc = subprocess.run(
         [sys.executable, "tools/linter/adapters/test_linter.py", *fetched],
@@ -174,7 +254,7 @@ def _run_gate(
         "ran": True,
         "skipped": False,
         "reason": "",
-        "findings": _gate_findings(proc.stdout),
+        "findings": _gate_findings(proc.stdout) + findings,
     }
 
 

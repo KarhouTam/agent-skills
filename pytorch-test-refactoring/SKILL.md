@@ -332,12 +332,15 @@ python orchestrator.py --review-queue --publish
    ADDED diff lines, and the **mandatory TEST_LINTER gate** runs the official
    test linter (vendored into `scripts/linter.py` at a pinned upstream SHA,
    with the official allowlist) over the PR-head version of every changed
-   test file. Both land in
+   test file; it then re-lints those files with an empty allowlist, so an
+   allowlist entry whose file now passes and that the PR failed to remove is
+   reported as a `TEST_LINTER_ALLOWLIST` finding. Everything lands in
    `agent_space/pr_reviews/pr_<n>_prepass.json` (the gate inside the
    `lint_gate` key, the diff cached beside it). A PR whose pre-pass or gate
    reports `ran: false` cannot be reviewed — the gate is mandatory — so it
    stays pending for the next run. A reviewer takes these findings as given
-   (a `TEST_LINTER` error is a Blocker) instead of re-deriving them.
+   (a `TEST_LINTER` error or a stale-allowlist entry is a Blocker) instead of
+   re-deriving them.
 3. **Review** (AI, harness-dependent). Each reviewer applies BOTH parts of
    `agent/skills/review-test-refactoring/SKILL.md` in diff-based mode and
    writes all human-readable content in **English**: one reviewer sub-agent

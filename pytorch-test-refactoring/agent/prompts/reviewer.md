@@ -64,8 +64,8 @@ Review PR #{pr_number} ({pr_url}) using the
 
 ## Pre-pass findings
 
-Two deterministic pre-passes run before you review; both take the PR's added
-lines and its head version of the changed test files:
+Three deterministic pre-passes run before you review; two of them cover the
+PR's added lines, the third its head version of the changed test files:
 
 1. The four machine-decidable criteria of II.12 (bare `print`, bare
    `assertRaises`, `weights_only=False`, residual `@onlyCUDA`) over the added
@@ -74,6 +74,10 @@ lines and its head version of the changed test files:
    pinned SHA) run over the PR's head version of every changed test file, with
    the official allowlist applied. Its `severity: error` messages arrive as
    pre-pass findings with `check: "TEST_LINTER"`.
+3. The **stale-allowlist check**: a changed test file the official allowlist
+   exempts is re-linted with an empty allowlist, and when it now passes while
+   the PR-head allowlist still lists it, a finding tagged
+   `check: "TEST_LINTER_ALLOWLIST"` says this PR must remove that entry.
 
 Read their output, if it exists, from:
 
@@ -84,15 +88,17 @@ It is JSON: {{"ran": true, "findings": [{{"check": "...", "file": "...",
 "skipped": false, "reason": "", "findings": [...same shape...]}}}}.
 
 - If it ran, take every finding as given, assign it a severity from II.11 (a
-  `TEST_LINTER` error on a changed test file is by definition a Blocker and
-  alone forces `changes_requested`), and spend your attention on the judgment
-  criteria the pre-passes cannot decide. Do not re-derive them.
+  `TEST_LINTER` error or a `TEST_LINTER_ALLOWLIST` finding on a changed test
+  file is by definition a Blocker and alone forces `changes_requested`), and
+  spend your attention on the judgment criteria the pre-passes cannot decide.
+  Do not re-derive them.
 - If the file is absent or either key says `"ran": false`, you were never
   supposed to run at all; report `success: false` instead of guessing.
 - If `lint_gate.skipped` is `true` because the PR modifies the linter's
   allowlist, apply II.12's allowlist paragraph yourself: allowlist additions
   are acceptable only when the PR also changes lint rules; everything else is
-  a Major finding.
+  a Major finding. Stale-entry findings are still produced in that case, so
+  do not re-derive them.
 
 ## Output
 

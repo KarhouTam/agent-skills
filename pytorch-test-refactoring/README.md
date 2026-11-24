@@ -443,7 +443,10 @@ python orchestrator.py --review-queue --publish                    # 用户批�
 **流程**：确定性 select（`gh pr view` 分类 open/merged/closed 与 test 文件改动）
 → **确定性 pre-pass + lint gate**：II.12 的四条机械化检查跑在新增行上，同时
 强制运行官方 TEST_LINTER（vendored 进 `scripts/linter.py`，钉住上游 SHA，
-allowlist 生效）于 PR head 版本的改动 test 文件；pre-pass 或 gate `ran:false`
+allowlist 生效）于 PR head 版本的改动 test 文件；随后对其中被 allowlist 豁免的
+文件用空 allowlist 重跑，若文件已能独立通过而 PR 未从
+`tools/linter/adapters/test_linter_allowlist.json` 删掉对应条目，即产出
+`TEST_LINTER_ALLOWLIST` finding（Blocker）；pre-pass 或 gate `ran:false`
 的 PR 本轮不 review、留在待处理列表 → **按 harness 分流 review**：Claude
 Code 与 dsh 每个 open 且有 test 改动的 PR 生成一个 reviewer sub-agent、
 按 4 并发波次执行；Codex 则由 executor（main agent）内联逐个 review（不

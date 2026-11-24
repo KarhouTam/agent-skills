@@ -45,9 +45,13 @@ and do NOT submit anything to GitHub.
    print, bare assertRaises, weights_only=False, residual @onlyCUDA). The
    `lint_gate` key is the mandatory TEST_LINTER gate: the official test
    linter (vendored at a pinned SHA) run over the PR's head version of every
-   changed test file, with the official allowlist applied. Take both sets of
-   findings as given, assign each a severity from II.11 — a `TEST_LINTER`
-   error on a changed test file is by definition a Blocker and alone forces
+   changed test file, with the official allowlist applied, plus the
+   stale-allowlist check: a changed test file the allowlist exempts is
+   re-linted with an empty allowlist, and a finding tagged
+   `TEST_LINTER_ALLOWLIST` means it now passes while the PR-head allowlist
+   still lists it. Take both sets of findings as given, assign each a
+   severity from II.11 — a `TEST_LINTER` error or a `TEST_LINTER_ALLOWLIST`
+   finding on a changed test file is by definition a Blocker and alone forces
    `changes_requested` — and do not re-derive them. If the file is absent or
    either key says "ran": false, skip THIS PR: write
    {{"pr_number": <number>, "success": false, "error": "prepass_or_gate_not_ran"}}
@@ -55,7 +59,8 @@ and do NOT submit anything to GitHub.
    `lint_gate.skipped` is true because the PR modifies the linter's
    allowlist, apply II.12's allowlist paragraph yourself: allowlist additions
    are acceptable only when the PR also changes lint rules; everything else
-   is a Major finding.
+   is a Major finding. Stale-entry findings are still produced in that case,
+   so do not re-derive them.
 
 6. Consolidate before drafting (II.2 Step 4). Flatten every candidate into
    `(file:line, one-line claim)` pairs, then collapse: same root cause → one

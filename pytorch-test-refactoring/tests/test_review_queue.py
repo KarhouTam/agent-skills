@@ -67,6 +67,23 @@ def _bad_content() -> str:
     return "class TestBad:\n    def test_a(self):\n        return torch.cuda.is_available()\n"
 
 
+def _clean_content() -> str:
+    """A test file that satisfies the official linter on its own."""
+    return (
+        "from torch.testing._internal.common_utils import (\n"
+        "    HardwareClassification,\n"
+        "    TestCase,\n"
+        ")\n"
+        "\n"
+        "\n"
+        "class TestClean(TestCase):\n"
+        "    hw_classification = HardwareClassification.GENERIC\n"
+        "\n"
+        "    def test_a(self):\n"
+        "        self.assertEqual(1, 1)\n"
+    )
+
+
 # ── selection & verdict ─────────────────────────────────────────────
 
 
@@ -302,9 +319,63 @@ def test_run_gate_skips_allowlisted_files(tmp_path, monkeypatch):
     # An entry straight out of the vendored allowlist: upstream CI's own skip.
     rel = json.loads(Path(gate.VENDORED_ALLOWLIST).read_text())[0]
     patch = f"diff --git a/{rel} b/{rel}\n"
-    monkeypatch.setattr(gate, "_fetch_head_file", lambda rel_path, ref: "")
+    # The file still violates the linter, so it still owes its entry.
+    monkeypatch.setattr(gate, "_fetch_head_file", lambda rel_path, ref: _bad_content())
     data = gate.run_gate(4, "oid", patch, tmp_path)
     assert data["ran"] is True and data["findings"] == []
+
+
+def test_run_gate_flags_stale_allowlist_entry(tmp_path, monkeypatch):
+    entries = json.loads(Path(gate.VENDORED_ALLOWLIST).read_text())
+    rel = entries[0]
+    patch = f"diff --git a/{rel} b/{rel}\n"
+    head_allowlist = Path(gate.VENDORED_ALLOWLIST).read_text()
+
+    def fake_fetch(rel_path, ref):
+        return head_allowlist if rel_path == gate.ALLOWLIST_REL_PATH else _clean_content()
+
+    monkeypatch.setattr(gate, "_fetch_head_file", fake_fetch)
+    data = gate.run_gate(8, "oid", patch, tmp_path)
+    assert data["ran"] is True and data["skipped"] is False
+    assert len(data["findings"]) == 1
+    f = data["findings"][0]
+    assert f["check"] == "TEST_LINTER_ALLOWLIST"
+    assert f["file"] == rel and f["line_number"] == 0
+    assert "remove" in f["evidence"]
+
+
+def test_run_gate_flags_deleted_allowlisted_file(tmp_path, monkeypatch):
+    entries = json.loads(Path(gate.VENDORED_ALLOWLIST).read_text())
+    rel = entries[0]
+    patch = f"diff --git a/{rel} b/{rel}\n"
+    head_allowlist = Path(gate.VENDORED_ALLOWLIST).read_text()
+
+    def fake_fetch(rel_path, ref):
+        return head_allowlist if rel_path == gate.ALLOWLIST_REL_PATH else None
+
+    monkeypatch.setattr(gate, "_fetch_head_file", fake_fetch)
+    data = gate.run_gate(10, "oid", patch, tmp_path)
+    assert data["ran"] is True
+    assert [f["check"] for f in data["findings"]] == ["TEST_LINTER_ALLOWLIST"]
+    assert data["findings"][0]["file"] == rel
+
+
+def test_run_gate_removed_allowlist_entry_is_clean(tmp_path, monkeypatch):
+    entries = json.loads(Path(gate.VENDORED_ALLOWLIST).read_text())
+    rel = entries[0]
+    patch = (
+        f"diff --git a/{rel} b/{rel}\n"
+        f"diff --git a/{gate.ALLOWLIST_REL_PATH} b/{gate.ALLOWLIST_REL_PATH}\n"
+    )
+    head_allowlist = json.dumps([p for p in entries if p != rel])
+
+    def fake_fetch(rel_path, ref):
+        return head_allowlist if rel_path == gate.ALLOWLIST_REL_PATH else _clean_content()
+
+    monkeypatch.setattr(gate, "_fetch_head_file", fake_fetch)
+    data = gate.run_gate(9, "oid", patch, tmp_path)
+    assert data["ran"] is True and data["skipped"] is True
+    assert data["findings"] == []
 
 
 def test_run_gate_allowlist_change_is_a_skip(tmp_path):

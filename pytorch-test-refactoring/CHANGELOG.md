@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-11-23 — review queue 新增 stale allowlist 检查（Blocker）
+
+refactor 把一个被 `test_linter_allowlist.json` 豁免的 test 文件修好后，必须同时删掉
+对应条目，否则该条目会永久把这个文件从后续 lint 中隐藏。review queue 的
+TEST_LINTER gate 因此多跑一遍：对被官方 allowlist 豁免的改动 test 文件，用空
+allowlist 重新 lint（`scripts/test_linter_gate.py::_stale_allowlist_entries`）；
+文件已能独立通过、而 PR head 的 `tools/linter/adapters/test_linter_allowlist.json`
+仍列着它时，产出 `check: "TEST_LINTER_ALLOWLIST"` 的 pre-pass finding。按 II.11
+该 finding 是 Blocker，reviewer 不再自行推导。gate 因 PR 改动 allowlist 而
+`skipped` 时该检查照常运行（读 PR head 的 allowlist，而非 diff）；PR 删掉条目即视为
+已修好，仍在报错的文件保留条目、不产生 finding。
+
+| 文件 | 变更 |
+| --- | --- |
+| `scripts/test_linter_gate.py` | gate 增加空 allowlist 复检与 `TEST_LINTER_ALLOWLIST` finding |
+| `agent/skills/review-test-refactoring/SKILL.md` | II.12 记录第六个机械化来源；II.11 明确其为 Blocker |
+| `agent/prompts/reviewer.md`、`agent/prompts/reviewer_batch.md` | pre-pass 说明与 Blocker 映射 |
+| `SKILL.md`、`README.md` | review queue 流程补 stale allowlist 检查 |
+| `tests/test_review_queue.py` | 用例：过期条目被标记、条目已删不报、仍需条目不报 |
+
+## 2026-11-13 — 新增独立脚本 `pr_monitor.py`（PR 标签批处理）
+
+不依赖既有状态机与 harness，按行读取 `agent_space/pr_needs_monitor.txt`（每行一个
+GitHub PR URL，空行与 `#` 注释忽略），一次扫描完成：给既无 `in progress` 也无
+`ready for review` 的 PR 打上 `in progress`；把已 `ready for review` 且已无
+`in progress` 的 PR 追加到 `agent_space/pr_ready_for_review.txt` 并从监控文件移除；
+关闭/合并的 PR 直接从监控文件丢弃。以 GitHub 标签为唯一状态源，因此无本地状态、
+可重复执行：不会重复打标签，不会重复追加 ready 条目，也不会把外部评审已移除的
+`in progress` 加回去；两个标签同时存在的 PR 只报告、不动。`--dry-run` 只打印决策，
+不改 GitHub 也不改文件；任一 `gh` 调用失败时退出码为 1。
+
+| 文件 | 变更 |
+| --- | --- |
+| `pr_monitor.py` | 新增批处理脚本（仅 stdlib + `gh` CLI） |
+| `tests/test_pr_monitor.py` | 新增用例：打标签/移动/等待/丢弃、dry-run 零副作用、ready 去重、失败保留 |
+
 ## 2026-11-10 — 新增 dsh（DeepSeek Harness）harness
 
 按既有 harness 插件层（一模块 + 一行注册表）接入 dsh：`--harness dsh` 与

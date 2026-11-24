@@ -764,7 +764,9 @@ Mapping onto the PR verdict:
 
 A TEST_LINTER error (II.12) on a changed test file is a Blocker by
 definition — it blocks CI — so it alone forces `changes_requested`, whatever
-else the review finds or pardons.
+else the review finds or pardons. A `TEST_LINTER_ALLOWLIST` finding is a
+Blocker too: a stale entry hides a migrated file from every later lint run,
+so the PR must delete it before it can land.
 
 Publication note: the review queue NEVER submits a REQUEST_CHANGES review
 event on its own. The verdict above is the severity mapping a maintainer
@@ -803,12 +805,26 @@ add — a changed file must satisfy the linter whole. Never re-report
 violations for a file the official allowlist exempts: the gate already
 skipped it, and upstream CI does not charge it either.
 
+Beside the gate runs the **stale-allowlist check**, the sixth mechanized
+source. An allowlist entry promises that its file still violates the linter;
+once a refactor makes the file lint clean, the entry is a lie that hides the
+file from every later run. So the queue re-lints each changed test file the
+official allowlist exempts with an **empty** allowlist: a file that now
+produces no error while the PR-head
+`tools/linter/adapters/test_linter_allowlist.json` still lists it arrives as
+a pre-pass finding tagged `TEST_LINTER_ALLOWLIST`. That is a Blocker (see
+II.11) — the PR must remove the entry in the same change, exactly as it
+removes the `@onlyCUDA` it cleaned up. A file that still fails the empty
+allowlist keeps its entry legitimately and yields no finding. Never re-derive
+which entries are stale; the check is deterministic.
+
 If the gate reports `skipped: allowlist_changed`, the PR edits
-`test_linter_allowlist.json` itself. Judge its delta manually: additions are
-acceptable only when the PR also changes lint rules — "new allowlist entries
-should only be added when the lint rules change" — and any other addition is
-a Major finding; removals are the migration actually progressing and need no
-finding.
+`test_linter_allowlist.json` itself. The stale-allowlist check still runs
+against the PR-head allowlist, so removals are already verified for you.
+Judge the additions manually: additions are acceptable only when the PR also
+changes lint rules — "new allowlist entries should only be added when the
+lint rules change" — and any other addition is a Major finding; removals are
+the migration actually progressing and need no finding.
 
 They arrive in the prompt as pre-pass findings. Take each as given, assign it a
 severity from II.11, and spend your own attention on the judgment criteria the
