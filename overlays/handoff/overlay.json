@@ -1,0 +1,9 @@
+{
+  "replaceLine": [
+    {
+      "file": "SKILL.md",
+      "find": "Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save to the temporary directory of the user's OS - not the current workspace.",
+      "text": "Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save to the agent playground of the current workspace (probably `.agents/` or `agent_space/`)."
+    }
+  ]
+}
