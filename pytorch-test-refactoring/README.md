@@ -451,7 +451,9 @@ allowlist 生效）于 PR head 版本的改动 test 文件；随后对其中被 
 Code 与 dsh 每个 open 且有 test 改动的 PR 生成一个 reviewer sub-agent、
 按 4 并发波次执行；Codex 则由 executor（main agent）内联逐个 review（不
 spawn 子 agent）。两者都复用 `review-test-refactoring` skill 的
-diff-based 模式，输出全为英文 → **确定性 draft**：每个被 review 的 PR 在待发布文档里一节（body +
+diff-based 模式，且先按 II.2a 把 PR 描述里的前提拿到当前 `main` 上核对
+（陈年 PR 的动机可能早已被上游修掉，此时整个改动都是多余的），再进入逐行评审；
+输出全为英文 → **确定性 draft**：每个被 review 的 PR 在待发布文档里一节（body +
 inline 块，`event:` 一律 COMMENT、语义 verdict 记在 `verdict:` 头），
 orchestrator 输出 `needs_publish` 并就此停止 → **--publish**：重新读取文档
 逐节提交，发表成功的 PR 归档 `review_url`、移出待处理列表、其节从文档中

@@ -9,12 +9,25 @@ and do NOT submit anything to GitHub.
 
 ## For each PR
 
-1. Fetch its metadata and diff:
+1. Fetch its metadata (including the description) and diff:
 
-   gh pr view <number> --repo pytorch/pytorch --json title,author,state,files
+   gh pr view <number> --repo pytorch/pytorch --json title,author,state,files,body,createdAt
    gh pr diff <number> --repo pytorch/pytorch
 
-2. Read the review criteria completely before reviewing:
+2. Check the PR's premise against current `main` (II.2a). A long-idle PR can
+   describe a problem `main` already fixed — the hardcoded CUDA it claims to
+   remove may already be device-agnostic. Take each checkable claim from the
+   `body` and verify it against `main`, never against the diff's merge base:
+
+   gh api "repos/pytorch/pytorch/contents/<path>?ref=main" \
+     -H "Accept: application/vnd.github.raw"
+
+   A claim that no longer holds is one **Major**, `code-quality` finding
+   anchored at the code the PR still touches; when the whole PR rests on it,
+   say in the `summary` that the PR looks obsolete rather than fixable. Do not
+   invent a premise from an empty or template-only description.
+
+3. Read the review criteria completely before reviewing:
    {review_skill_path}
 
    Part I is the decoupling checklist. Part II is the general test-scope
@@ -23,18 +36,18 @@ and do NOT submit anything to GitHub.
    safety, performance, the finding precedence, and the severity-to-verdict
    mapping. Apply both.
 
-3. Review ONLY the changed test files (test/** or torch/testing/**), following
+4. Review ONLY the changed test files (test/** or torch/testing/**), following
    the criteria's diff-based review mode. Verify classification correctness,
    API replacements, instantiation mechanisms, hw_classification tags, imports,
    decorator ordering, and test completeness. Ground every classification
    decision in reference/device_api_catalog.yaml.
 
-4. Stay inside II.3's out-of-scope list. A diff touching only test files cannot
+5. Stay inside II.3's out-of-scope list. A diff touching only test files cannot
    touch the kernel, codegen, autograd, the nn internals, FX/export, the dtype
    promotion tables, tensor subclasses, C++ thread safety, or CI job placement.
    A finding there is a false positive.
 
-5. Read the pre-pass output for this PR from:
+6. Read the pre-pass output for this PR from:
    {workspace}/pr_<number>_prepass.json
    It is JSON:
    {{"ran": true, "findings": [{{"check": "...", "file": "...",
@@ -62,20 +75,20 @@ and do NOT submit anything to GitHub.
    is a Major finding. Stale-entry findings are still produced in that case,
    so do not re-derive them.
 
-6. Consolidate before drafting (II.2 Step 4). Flatten every candidate into
+7. Consolidate before drafting (II.2 Step 4). Flatten every candidate into
    `(file:line, one-line claim)` pairs, then collapse: same root cause → one
    finding; same fix → one finding; same file:line twice → merge unless you can
    name two independent defects. Only then assign each survivor to exactly one
    section, first match in II.10's precedence.
 
-7. Fact-check before writing (II.2 Step 5). Re-read the code at each survivor's
+8. Fact-check before writing (II.2 Step 5). Re-read the code at each survivor's
    anchor. Drop anything you can no longer point at, and reword the rest.
 
-8. Report problems only. No praise, no "looks good", no list of what is
+9. Report problems only. No praise, no "looks good", no list of what is
    correct, no restating the diff. If you found nothing, say so in the `summary`
    and leave `findings` empty.
 
-9. Write your structured result to exactly this file:
+10. Write your structured result to exactly this file:
    {workspace}/pr_<number>_result.json
 
    Use this schema:

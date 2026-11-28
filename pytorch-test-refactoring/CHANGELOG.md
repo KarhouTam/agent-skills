@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-28 — reviewer 先核对 PR 描述的前提是否仍成立
+
+review queue 里的 PR 可能躺了几个月。描述里的动机（"`TestFoo` 里写死了 CUDA，
+所以我把 helper 抽出来"）在写的时候成立，但 `main` 可能早已把那段写死的代码
+改成 device-agnostic——此时整个 PR 是多余的，逐行挑毛病毫无意义。review skill
+因此新增 **II.2a**：reviewer 先读 `body`（`gh pr view --json title,body,createdAt`），
+把其中关于"当前代码仍然写死 / 只跑 CPU / 重复 / 缺失"的可核查论断逐条拿到
+`main` 上验证（`gh api "repos/pytorch/pytorch/contents/<path>?ref=main"` 或
+`git show origin/main:<path>`；PR diff 的 merge base 不能当现状证据）。论断已不
+成立时产出一条 Major、`code-quality` finding，锚在该 PR 仍改动的代码上；整个
+PR 都建立在这个前提上时，`summary` 直接说明它更像"该关掉"而不是"该修"（rebase
+也救不了）。前提只部分过时的按条报，不按文件重复；空描述或模板式描述不臆造前提。
+该 finding 照 II.11 计入 verdict，所以前提过时本身就会让 PR 变成
+`changes_requested`。
+
+| 文件 | 变更 |
+| --- | --- |
+| `agent/skills/review-test-refactoring/SKILL.md` | 新增 II.2a 前提核对（Major，计入 II.11） |
+| `agent/prompts/reviewer.md` | Step 1 取 `body`；新增 Step 2 前提核对，其余步骤顺延 |
+| `agent/prompts/reviewer_batch.md` | 同上（Codex 内联批量模式） |
+| `SKILL.md`、`README.md` | review queue 的 Review 步骤说明补 II.2a |
+
 ## 2026-11-23 — review queue 新增 stale allowlist 检查（Blocker）
 
 refactor 把一个被 `test_linter_allowlist.json` 豁免的 test 文件修好后，必须同时删掉

@@ -59,7 +59,10 @@ This skill supports two review modes. Determine which applies:
 ### For Diff-Based Review (PR, branch, or diff)
 
 1. Identify the changes to review. If the user provides a PR URL, fetch it with
-   `gh`. Otherwise, use `git diff` against the base branch (usually `origin/main`).
+   `gh`; otherwise use `git diff` against the base branch (usually
+   `origin/main`). Read the PR description too and check its premise against
+   the current base first — a stale premise makes the whole change redundant
+   (II.2a).
 
 2. **Read `../../../reference/device_api_catalog.yaml`** (same as above).
 
@@ -461,6 +464,48 @@ Only then assign each survivor to exactly one section (II.10) and write it up.
 **Step 5 — Fact-check.** Re-read the code at each survivor's anchor, plus the
 context the fix would touch. Drop any finding you can no longer point at, and
 rewor the rest.
+
+### II.2a Premise Check (Stale PRs)
+
+The queue reviews PRs that can sit untouched for months, and their description
+states a premise that was true when it was written: *"`TestFoo` hardcodes CUDA,
+so this PR extracts its helpers"*, *"`TestBar` is CPU-only, so this PR
+instantiates it for accelerators"*. `main` keeps moving, so a premise can be
+dead on arrival: the hardcode the description complains about may already be
+`self.device_type`, the helper it extracts may already live in a shared module.
+No amount of per-line correctness makes a redundant diff worth a maintainer's
+time.
+
+1. **Read the description, not only the diff.** `gh pr view <n> --repo
+   pytorch/pytorch --json title,body,createdAt,updatedAt`. Extract every
+   checkable claim about the *current* code — each statement that something is
+   still hardcoded, CPU-only, duplicated, missing, or broken.
+
+2. **Verify each claim against current `main`.** The diff is computed against
+   the PR's merge base, which can be months old and says nothing about today:
+
+   ```bash
+   gh api "repos/pytorch/pytorch/contents/<path>?ref=main" \
+     -H "Accept: application/vnd.github.raw"
+   ```
+
+   or, in a checkout, `git show origin/main:<path>`. For a claim about a class,
+   read that class on `main`; for a claim about a helper, check whether it
+   already exists there.
+
+3. **File a stale premise once.** Anchor it at the code the PR still touches and
+   open one finding: **Major**, category `code-quality`, naming the claim that
+   no longer holds and the `main` code that refutes it. When the whole PR rests
+   on that claim, say so in the `summary` as well: the PR looks obsolete and
+   should be closed rather than fixed, and rebasing will not help. When only
+   part of the premise is stale, file one finding per stale claim — not one per
+   touched file.
+
+4. **Never invent a premise.** An empty or template-only description leaves
+   nothing to check: judge the diff on its merits.
+
+A premise finding is a finding like any other and counts toward the verdict
+(II.11), so a stale premise alone makes the PR `changes_requested`.
 
 ### II.3 Out of Scope
 

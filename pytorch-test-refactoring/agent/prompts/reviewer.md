@@ -14,16 +14,30 @@ Review PR #{pr_number} ({pr_url}) using the
 
 ## Steps
 
-1. Fetch PR metadata and the diff with `gh`:
+1. Fetch PR metadata (including the description) and the diff with `gh`:
 
-   gh pr view {pr_number} --repo pytorch/pytorch --json title,author,state,files
+   gh pr view {pr_number} --repo pytorch/pytorch --json title,author,state,files,body,createdAt
    gh pr diff {pr_number} --repo pytorch/pytorch
 
    If this prompt carries a **local diff file** path instead, read the diff
    from that file and skip the `gh pr diff` call. Everything else is
-   identical, except that `pr_number` may be 0.
+   identical, except that `pr_number` may be 0; still fetch the metadata, the
+   `body` drives Step 2.
 
-2. Read the review criteria completely before reviewing:
+2. Check the PR's premise against current `main` (II.2a). A long-idle PR can
+   describe a problem `main` already fixed — the hardcoded CUDA it claims to
+   remove may already be device-agnostic. Take each checkable claim from the
+   `body` and verify it against `main`, never against the diff's merge base:
+
+   gh api "repos/pytorch/pytorch/contents/<path>?ref=main" \
+     -H "Accept: application/vnd.github.raw"
+
+   A claim that no longer holds is one **Major**, `code-quality` finding
+   anchored at the code the PR still touches; when the whole PR rests on it,
+   say in the `summary` that the PR looks obsolete rather than fixable. Do not
+   invent a premise from an empty or template-only description.
+
+3. Read the review criteria completely before reviewing:
    {review_skill_path}
 
    Part I is the decoupling checklist. Part II is the general test-scope
@@ -32,32 +46,32 @@ Review PR #{pr_number} ({pr_url}) using the
    safety, performance, the finding precedence, and the severity-to-verdict
    mapping. Apply both.
 
-3. Review ONLY the changed test files (`test/**` or `torch/testing/**`).
+4. Review ONLY the changed test files (`test/**` or `torch/testing/**`).
    Focus on the diff, but verify key checks file-wide for each changed test
    file: naming conventions, instantiation mechanisms, `hw_classification`
    tags, and import cleanliness.
 
-4. For every changed test file, check classification correctness
+5. For every changed test file, check classification correctness
    (Category A/B vs C per the device API catalog), API replacement
    correctness, decorator ordering, and completeness (no test lost). Ground
    every classification decision in `reference/device_api_catalog.yaml` —
    never rely on memory.
 
-5. Stay inside II.3's out-of-scope list. A diff touching only test files cannot
+6. Stay inside II.3's out-of-scope list. A diff touching only test files cannot
    touch the kernel, codegen, autograd, the nn internals, FX/export, the dtype
    promotion tables, tensor subclasses, C++ thread safety, or CI job placement.
    A finding there is a false positive.
 
-6. Consolidate before drafting (II.2 Step 4). Flatten every candidate into
+7. Consolidate before drafting (II.2 Step 4). Flatten every candidate into
    `(file:line, one-line claim)` pairs, then collapse: same root cause → one
    finding; same fix → one finding; same `file:line` twice → merge unless you
    can name two independent defects. Only then assign each survivor to exactly
    one section, first match in II.10's precedence.
 
-7. Fact-check before writing (II.2 Step 5). Re-read the code at each survivor's
+8. Fact-check before writing (II.2 Step 5). Re-read the code at each survivor's
    anchor. Drop anything you can no longer point at, and reword the rest.
 
-8. Report problems only. No praise, no "looks good", no list of what is
+9. Report problems only. No praise, no "looks good", no list of what is
    correct, no restating the diff. If you found nothing, say so in the
    `summary` and leave `findings` empty. A clean review is the common case, not
    a failure to find something.

@@ -345,7 +345,9 @@ python orchestrator.py --review-queue --publish
    `agent/skills/review-test-refactoring/SKILL.md` in diff-based mode and
    writes all human-readable content in **English**: one reviewer sub-agent
    per PR (Claude Code and dsh, waves of up to 4) or one inline instruction
-   (Codex).
+   (Codex). It starts with II.2a: the PR description's premise is verified
+   against current `main`, so a stale PR whose problem was already fixed
+   upstream is reported as obsolete instead of reviewed line by line.
    Results: `agent_space/pr_reviews/pr_<n>_result.json` — findings carry a
    one-sentence `inline` text meant to become the GitHub inline comment.
 4. **Draft** (deterministic, the gate for humans): every reviewed PR becomes
